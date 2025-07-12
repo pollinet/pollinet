@@ -101,6 +101,42 @@ To extend transaction lifespan beyond recent blockhash limits, PolliNet relies o
 
 ---
 
+## Nonce Refresh and Confirmation
+
+When a transaction is successfully submitted to Solana, the blockchain automatically advances the nonce account's stored value. This mechanism prevents replay attacks and ensures the nonce is used exactly once.
+
+**Nonce Update Process:**
+
+1. **Submission:**  
+   The gateway node submits the signed transaction to the Solana RPC endpoint.
+
+2. **Nonce Advancement:**  
+   Upon confirmation, the nonce account on-chain updates to a new nonce value automatically.
+
+3. **Confirmation Message:**  
+   The gateway fetches the updated nonce account state and creates a confirmation payload containing:
+   - The Solana transaction signature.
+   - The new nonce value.
+
+4. **Distribution:**  
+   The confirmation is propagated back to the originating device over BLE.
+
+5. **Nonce Replacement:**  
+   The offline device stores the new nonce value locally. It replaces the old nonce so it can prepare the next valid transaction without requiring a full internet connection.
+
+**Rationale:**
+
+This design ensures:
+- The device can remain offline while still producing new transactions.
+- Replay protection remains intact (since each nonce is used only once).
+- Resilience in environments with intermittent or no connectivity.
+
+If a confirmation is delayed or lost, the device can:
+- Fetch the nonce value later when reconnected.
+- Request the updated nonce from another peer acting as a gateway.
+
+---
+
 ## Compression and Fragmentation
 
 **Compression**:
