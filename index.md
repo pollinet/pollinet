@@ -74,10 +74,10 @@ Each transaction is distributed as a binary payload:
   - Compression flag
   - Fragmentation index
 
-**TTL-Based Routing**:
+<!-- **TTL-Based Routing**:
 - Each packet includes a Time-To-Live counter (default = 7 hops).
 - Devices decrement TTL on relay.
-- TTL=0 packets are discarded to prevent loops.
+- TTL=0 packets are discarded to prevent loops. -->
 
 **Reliability**:
 - Duplicate message detection via unique transaction IDs.
