@@ -172,6 +172,43 @@ PolliNet is designed to be secure by default:
 
 ---
 
+## Deduplication and Submission Coordination
+
+When a transaction is propagated across multiple devices, it is possible for more than one gateway to attempt submission. Since each transaction references a specific nonce value, the Solana network guarantees that only the first submission succeeds, automatically advancing the nonce account. Subsequent submissions will fail with a `Transaction nonce invalid: already used` error.
+
+PolliNet provides two mechanisms to coordinate submission and prevent unnecessary duplication:
+
+---
+
+### Option 1: Confirmation Broadcasting (Recommended)
+
+After a gateway successfully submits a transaction, it immediately broadcasts a **Confirmation Message** over BLE to inform peers that the transaction was finalized. This message includes:
+
+- The transaction ID or hash
+- The Solana transaction signature
+- The new nonce value retrieved from the nonce account
+
+**Behavior:**
+
+- Peers that receive this message remove the transaction from their pending queue.
+- Peers replace their cached nonce value with the updated nonce.
+- No additional RPC queries are required by other devices.
+
+This approach allows fully offline peers to stay in sync as long as at least one gateway eventually comes online and rebroadcasts confirmations.
+
+---
+
+### Option 2: Pre-Submission Nonce Check
+
+If a device has internet connectivity but has not yet received a confirmation message, it can query the nonce account state before attempting submission:
+
+1. **Fetch nonce account state:**
+
+   ```rust
+   let nonce_account = rpc_client.get_nonce_account(nonce_pubkey)?;
+   
+---
+
 ## SDK Architecture
 
 **Core Components**:
