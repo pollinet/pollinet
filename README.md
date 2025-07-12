@@ -28,7 +28,7 @@ PolliNet is an open-source SDK and runtime enabling **offline Solana transaction
 
 ## 📚 Documentation
 
-See the [Whitepaper](./WHITEPAPER) for detailed technical architecture.
+See the [Whitepaper](./WHITEPAPER.md) for detailed technical architecture.
 
 ---
 
