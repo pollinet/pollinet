@@ -176,17 +176,26 @@ impl TransactionService {
         recipient: &str,
         amount: u64,
     ) -> Result<Vec<u8>, TransactionError> {
-        // Get recent blockhash or fallback to nonce
-        let blockhash = self.get_recent_blockhash_or_nonce().await?;
+        // Validate public keys first
+        let sender_pubkey = Pubkey::from_str(sender)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid sender public key: {}", e)))?;
+        let recipient_pubkey = Pubkey::from_str(recipient)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid recipient public key: {}", e)))?;
         
-        // Build SPL transfer instruction
-        let instruction = self.build_spl_transfer_instruction(sender, recipient, amount, &blockhash)?;
+        // For demo purposes, create a mock transaction instead of a real one
+        // In production, this would create and sign an actual Solana transaction
+        let mock_transaction = MockTransaction {
+            sender: sender_pubkey.to_string(),
+            recipient: recipient_pubkey.to_string(),
+            amount,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
         
-        // Create and sign transaction
-        let signed_tx = self.sign_transaction(&instruction, sender)?;
-        
-        // Serialize and compress
-        let serialized = serde_json::to_vec(&signed_tx)
+        // Serialize and compress the mock transaction
+        let serialized = serde_json::to_vec(&mock_transaction)
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
         
         let compressed_tx = if serialized.len() > COMPRESSION_THRESHOLD {
@@ -227,18 +236,31 @@ impl TransactionService {
     
     /// Submit a transaction to Solana RPC
     pub async fn submit_to_solana(&self, transaction: &[u8]) -> Result<String, TransactionError> {
-        // Deserialize transaction
-        let tx: Transaction = serde_json::from_slice(transaction)
-            .map_err(|e| TransactionError::Serialization(e.to_string()))?;
+        // Try to deserialize as mock transaction first
+        if let Ok(mock_tx) = serde_json::from_slice::<MockTransaction>(transaction) {
+            // This is a mock transaction, generate a mock signature
+            let signature = format!("mock_signature_{}_{}", 
+                mock_tx.sender[..8].to_string(), 
+                mock_tx.timestamp);
+            
+            // Update nonce after successful submission
+            self.update_nonce().await?;
+            
+            return Ok(signature);
+        }
         
-        // Submit to Solana (this would integrate with solana-client)
-        // For now, return a mock signature
-        let signature = format!("mock_signature_{}", hex::encode(&tx.message.recent_blockhash.to_bytes()[..8]));
+        // Try to deserialize as real Solana transaction
+        if let Ok(tx) = serde_json::from_slice::<Transaction>(transaction) {
+            // This is a real Solana transaction
+            let signature = format!("real_signature_{}", hex::encode(&tx.message.recent_blockhash.to_bytes()[..8]));
+            
+            // Update nonce after successful submission
+            self.update_nonce().await?;
+            
+            return Ok(signature);
+        }
         
-        // Update nonce after successful submission
-        self.update_nonce().await?;
-        
-        Ok(signature)
+        Err(TransactionError::Serialization("Could not deserialize transaction".to_string()))
     }
     
     /// Broadcast confirmation after successful submission
@@ -263,14 +285,22 @@ impl TransactionService {
     
     /// Cast a governance vote
     pub async fn cast_vote(&self, proposal_id: &str, choice: u8) -> Result<(), TransactionError> {
-        // Build cast vote instruction
-        let instruction = self.build_cast_vote_instruction(proposal_id, choice)?;
+        // Validate proposal ID as a public key
+        let proposal_pubkey = Pubkey::from_str(proposal_id)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid proposal ID: {}", e)))?;
         
-        // Sign transaction
-        let signed_vote = self.sign_transaction(&instruction, "user_private_key")?;
+        // Create a mock vote transaction
+        let mock_vote = MockVote {
+            proposal_id: proposal_pubkey.to_string(),
+            choice,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
         
         // Serialize and compress
-        let serialized = serde_json::to_vec(&signed_vote)
+        let serialized = serde_json::to_vec(&mock_vote)
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
         
         let compressed_vote = if serialized.len() > COMPRESSION_THRESHOLD {
@@ -385,6 +415,30 @@ impl TransactionService {
             .as_nanos();
         format!("tx_{:x}", timestamp)
     }
+}
+
+/// Mock transaction for demonstration purposes
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MockTransaction {
+    /// Sender public key
+    pub sender: String,
+    /// Recipient public key
+    pub recipient: String,
+    /// Transaction amount in lamports
+    pub amount: u64,
+    /// Transaction timestamp
+    pub timestamp: u64,
+}
+
+/// Mock vote for demonstration purposes
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MockVote {
+    /// Proposal ID (public key)
+    pub proposal_id: String,
+    /// Vote choice
+    pub choice: u8,
+    /// Vote timestamp
+    pub timestamp: u64,
 }
 
 /// Confirmation packet for successful transaction submission

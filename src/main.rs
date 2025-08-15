@@ -2,7 +2,7 @@
 //! 
 //! Shows how to use the PolliNet SDK for offline Solana transaction propagation
 
-use pollinet::PolliNetSDK;
+use pollinet::{PolliNetSDK, transaction};
 use tracing::{info, error};
 
 #[tokio::main]
@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Example 2: Cast a governance vote
     info!("\n🗳️  Example 2: Casting a governance vote");
-    match sdk.cast_vote("proposal_123", 1).await {
+    match sdk.cast_vote("11111111111111111111111111111112", 1).await {
         Ok(_) => info!("✅ Vote cast successfully"),
         Err(e) => error!("❌ Failed to cast vote: {}", e),
     }
@@ -55,9 +55,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn create_and_relay_transaction(sdk: &PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Create and sign transaction
     info!("   Creating transaction from Alice to Bob for 100 SOL...");
+    
+    // Use proper Solana public keys (these are example keys - in production you'd use real ones)
+    let alice_pubkey = "11111111111111111111111111111112"; // System Program ID as example
+    let bob_pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"; // SPL Token Program ID as example
+    
     let compressed_tx = sdk.create_transaction(
-        "Alice123456789012345678901234567890123456789012345678901234567890",
-        "Bob123456789012345678901234567890123456789012345678901234567890",
+        alice_pubkey,
+        bob_pubkey,
         100_000_000_000, // 100 SOL in lamports
     ).await?;
     
@@ -79,11 +84,22 @@ async fn create_and_relay_transaction(sdk: &PolliNetSDK) -> Result<(), Box<dyn s
 /// Example: Submit transaction to Solana
 async fn submit_transaction_example(sdk: &PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
     // Create a mock transaction for demonstration
-    let mock_transaction = b"mock_solana_transaction_data";
+    let mock_transaction = transaction::MockTransaction {
+        sender: "11111111111111111111111111111112".to_string(),
+        recipient: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+        amount: 50_000_000_000, // 50 SOL
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    };
+    
+    // Serialize the mock transaction
+    let serialized = serde_json::to_vec(&mock_transaction)?;
     
     // Submit to Solana (this would happen when device regains internet)
     info!("   Submitting transaction to Solana RPC...");
-    let signature = sdk.submit_transaction_to_solana(mock_transaction).await?;
+    let signature = sdk.submit_transaction_to_solana(&serialized).await?;
     info!("   Transaction submitted successfully with signature: {}", signature);
     
     // Broadcast confirmation back through BLE mesh
@@ -101,8 +117,8 @@ async fn demonstrate_pollination_flow(sdk: &PolliNetSDK) -> Result<(), Box<dyn s
     // 1. Create transaction (pollen grain)
     info!("   1. 🌱 Creating transaction (pollen grain)...");
     let compressed_tx = sdk.create_transaction(
-        "Farmer123456789012345678901234567890123456789012345678901234567890",
-        "Market123456789012345678901234567890123456789012345678901234567890",
+        "11111111111111111111111111111112", // System Program ID as example
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // SPL Token Program ID as example
         50_000_000_000, // 50 SOL
     ).await?;
     
