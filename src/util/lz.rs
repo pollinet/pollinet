@@ -92,8 +92,9 @@ impl Lz4Compressor {
         compressed.extend_from_slice(&(data.len() as u32).to_le_bytes());
 
         // Compress the actual data
-        let compressed_data = lz4::block::compress(data, None, false)
-            .map_err(|e| Lz4Error::CompressionFailed(e.to_string()))?;
+        let compressed_data =
+            lz4::block::compress(data, Some(lz4::block::CompressionMode::DEFAULT), false)
+                .map_err(|e| Lz4Error::CompressionFailed(e.to_string()))?;
 
         compressed.extend_from_slice(&compressed_data);
 
