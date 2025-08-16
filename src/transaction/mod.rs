@@ -142,27 +142,16 @@ impl TransactionCache {
 /// Core transaction service for PolliNet
 pub struct TransactionService {
     /// LZ4 compressor for transaction payloads
-    compressor: MockCompressor,
+    compressor: crate::util::lz::Lz4Compressor,
 }
 
-/// Mock compressor for development (will be replaced with LZ4)
-struct MockCompressor;
 
-impl MockCompressor {
-    fn new() -> Self {
-        Self
-    }
-    
-    fn compress(&self, data: &[u8]) -> Result<Vec<u8>, TransactionError> {
-        // Mock compression - just return the data as-is for now
-        Ok(data.to_vec())
-    }
-}
 
 impl TransactionService {
     /// Create a new transaction service
     pub async fn new() -> Result<Self, TransactionError> {
-        let compressor = MockCompressor::new();
+        let compressor = crate::util::lz::Lz4Compressor::new()
+            .map_err(|e| TransactionError::Compression(e.to_string()))?;
         
         Ok(Self {
             compressor,
@@ -199,7 +188,8 @@ impl TransactionService {
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
         
         let compressed_tx = if serialized.len() > COMPRESSION_THRESHOLD {
-            self.compressor.compress(&serialized)?
+            // Use compression with size header for proper decompression
+            self.compressor.compress_with_size(&serialized)?
         } else {
             serialized
         };
@@ -236,27 +226,37 @@ impl TransactionService {
     
     /// Submit a transaction to Solana RPC
     pub async fn submit_to_solana(&self, transaction: &[u8]) -> Result<String, TransactionError> {
-        // Try to deserialize as mock transaction first
+        // Check if this is compressed data with LZ4 header
+        if transaction.len() >= 8 && &transaction[..4] == b"LZ4" {
+            // Decompress first
+            let decompressed = self.compressor.decompress_with_size(transaction)?;
+            
+            // Try to deserialize the decompressed data
+            if let Ok(mock_tx) = serde_json::from_slice::<MockTransaction>(&decompressed) {
+                let signature = format!("mock_signature_{}_{}", 
+                    mock_tx.sender[..8].to_string(), 
+                    mock_tx.timestamp);
+                
+                self.update_nonce().await?;
+                return Ok(signature);
+            }
+        }
+        
+        // Try to deserialize as uncompressed mock transaction
         if let Ok(mock_tx) = serde_json::from_slice::<MockTransaction>(transaction) {
-            // This is a mock transaction, generate a mock signature
             let signature = format!("mock_signature_{}_{}", 
                 mock_tx.sender[..8].to_string(), 
                 mock_tx.timestamp);
             
-            // Update nonce after successful submission
             self.update_nonce().await?;
-            
             return Ok(signature);
         }
         
         // Try to deserialize as real Solana transaction
         if let Ok(tx) = serde_json::from_slice::<Transaction>(transaction) {
-            // This is a real Solana transaction
             let signature = format!("real_signature_{}", hex::encode(&tx.message.recent_blockhash.to_bytes()[..8]));
             
-            // Update nonce after successful submission
             self.update_nonce().await?;
-            
             return Ok(signature);
         }
         
@@ -304,7 +304,7 @@ impl TransactionService {
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
         
         let compressed_vote = if serialized.len() > COMPRESSION_THRESHOLD {
-            self.compressor.compress(&serialized)?
+            self.compressor.compress_with_size(&serialized)?
         } else {
             serialized
         };
@@ -466,6 +466,12 @@ pub enum TransactionError {
     
     #[error("Solana instruction error: {0}")]
     SolanaInstruction(String),
+}
+
+impl From<crate::util::lz::Lz4Error> for TransactionError {
+    fn from(err: crate::util::lz::Lz4Error) -> Self {
+        TransactionError::Compression(err.to_string())
+    }
 }
 
 // Re-export for convenience
