@@ -2,7 +2,7 @@
 //!
 //! Provides fast lossless compression for transaction payloads
 
-use std::time::Instant;
+use std::{i32, time::Instant};
 use thiserror::Error;
 
 /// LZ4 compressor for transaction payloads
@@ -23,9 +23,12 @@ impl Lz4Compressor {
         }
 
         // Use real LZ4 compression
-        let compressed =
-            lz4::block::compress(data, Some(lz4::block::CompressionMode::DEFAULT), false)
-                .map_err(|e| Lz4Error::CompressionFailed(e.to_string()))?;
+        let compressed = lz4::block::compress(
+            data,
+            Some(lz4::block::CompressionMode::HIGHCOMPRESSION(i32::MAX)),
+            false,
+        )
+        .map_err(|e| Lz4Error::CompressionFailed(e.to_string()))?;
 
         let compression_time = start_time.elapsed().as_micros();
 
