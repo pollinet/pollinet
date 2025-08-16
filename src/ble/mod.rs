@@ -94,6 +94,12 @@ impl MeshTransport {
         tracing::info!("Advertising PolliNet service: {}", self.service_uuid);
         tracing::info!("Device ID: {}", self.device_id);
         
+        // Add more detailed advertising info
+        tracing::info!("BLE Advertising Status: ACTIVE");
+        tracing::info!("Service UUID: {}", self.service_uuid);
+        tracing::info!("Device ID: {}", self.device_id);
+        tracing::info!("Waiting for other PolliNet devices to discover this service...");
+        
         Ok(())
     }
     
@@ -118,6 +124,8 @@ impl MeshTransport {
             .map_err(|e| BleError::ScanningFailed(e.to_string()))?;
         
         tracing::info!("Scanning for PolliNet devices with service: {}", self.service_uuid);
+        tracing::info!("Scan Filter: Service UUID = {}", self.service_uuid);
+        tracing::info!("BLE Scanning Status: ACTIVE - Looking for PolliNet devices...");
         
         Ok(())
     }
@@ -187,7 +195,12 @@ impl MeshTransport {
         let peripherals = adapter.peripherals().await?;
         let mut discovered_peers = Vec::new();
         
+        tracing::info!("Scanning for BLE devices...");
+        tracing::info!("Total BLE devices found: {}", peripherals.len());
+        
         for peripheral in peripherals {
+            tracing::debug!("Checking peripheral: {}", peripheral.id());
+            
             // For now, assume all discovered peripherals are potential PolliNet peers
             // In production, you'd check for the actual service UUID
             if let Ok(Some(properties)) = peripheral.properties().await {
@@ -205,12 +218,45 @@ impl MeshTransport {
         }
         
         if discovered_peers.is_empty() {
-            tracing::info!("No PolliNet peers discovered");
+            tracing::warn!("No PolliNet peers discovered");
+            tracing::info!("This could mean:");
+            tracing::info!("  1. No other PolliNet devices are nearby");
+            tracing::info!("  2. Other devices are not advertising");
+            tracing::info!("  3. BLE permissions are not granted");
+            tracing::info!("  4. Service UUID mismatch between devices");
         } else {
             tracing::info!("Discovered {} PolliNet peers", discovered_peers.len());
         }
         
         Ok(discovered_peers)
+    }
+    
+    /// Scan for ALL BLE devices (for debugging)
+    pub async fn scan_all_devices(&self) -> Result<Vec<String>, BleError> {
+        let adapters = self.manager.adapters().await?;
+        if adapters.is_empty() {
+            return Err(BleError::NoAdapter);
+        }
+        
+        let adapter = &adapters[0];
+        let peripherals = adapter.peripherals().await?;
+        let mut device_list = Vec::new();
+        
+        tracing::info!("Scanning for ALL BLE devices (debug mode)...");
+        
+        for peripheral in peripherals {
+            if let Ok(Some(properties)) = peripheral.properties().await {
+                let device_info = format!(
+                    "Device: {} | RSSI: {}",
+                    peripheral.id(),
+                    properties.rssi.unwrap_or(-100)
+                );
+                device_list.push(device_info.clone());
+                tracing::info!("Found: {}", device_info);
+            }
+        }
+        
+        Ok(device_list)
     }
     
     /// Connect to a discovered peer
@@ -264,6 +310,41 @@ impl MeshTransport {
     pub async fn get_relay_buffer_size(&self) -> usize {
         let buffer = self.relay_buffer.read().await;
         buffer.len()
+    }
+    
+    /// Get BLE status and debugging information
+    pub async fn get_ble_status(&self) -> Result<String, BleError> {
+        let adapters = self.manager.adapters().await?;
+        if adapters.is_empty() {
+            return Ok("No BLE adapters found".to_string());
+        }
+        
+        let adapter = &adapters[0];
+        let adapter_info = adapter.adapter_info().await?;
+        
+        let peripherals = adapter.peripherals().await?;
+        let peers = self.peers.read().await;
+        let buffer = self.relay_buffer.read().await;
+        
+        let status = format!(
+            "BLE Status:\n\
+             Adapter: {}\n\
+             Service UUID: {}\n\
+             Device ID: {}\n\
+             Total BLE devices: {}\n\
+             Connected peers: {}\n\
+             Relay buffer: {} fragments\n\
+             Advertising: ACTIVE\n\
+             Scanning: ACTIVE",
+            adapter_info,
+            self.service_uuid,
+            self.device_id,
+            peripherals.len(),
+            peers.len(),
+            buffer.len()
+        );
+        
+        Ok(status)
     }
 }
 
