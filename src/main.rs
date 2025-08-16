@@ -20,6 +20,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdk.start_ble_networking().await?;
     info!("📡 BLE networking started");
     
+    // Example 0: Discover and connect to BLE peers
+    info!("\n🔍 Example 0: Discovering BLE peers");
+    match discover_ble_peers(&sdk).await {
+        Ok(_) => info!("✅ BLE peer discovery completed"),
+        Err(e) => error!("❌ Failed to discover BLE peers: {}", e),
+    }
+    
     // Example 1: Create and relay a transaction
     info!("\n📝 Example 1: Creating and relaying a transaction");
     match create_and_relay_transaction(&sdk).await {
@@ -47,6 +54,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Keep the SDK running
     tokio::signal::ctrl_c().await?;
     info!("👋 Shutting down PolliNet SDK...");
+    
+    Ok(())
+}
+
+/// Example: Discover BLE peers
+async fn discover_ble_peers(sdk: &PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
+    info!("   Discovering nearby BLE peers...");
+    
+    // Discover peers
+    let peers = sdk.discover_ble_peers().await?;
+    info!("   Found {} potential peers", peers.len());
+    
+    // Try to connect to the first peer if available
+    if let Some(first_peer) = peers.first() {
+        info!("   Attempting to connect to peer: {}", first_peer.device_id);
+        match sdk.connect_to_ble_peer(&first_peer.device_id).await {
+            Ok(_) => info!("   ✅ Successfully connected to peer: {}", first_peer.device_id),
+            Err(e) => info!("   ⚠️  Could not connect to peer: {} (Error: {})", first_peer.device_id, e),
+        }
+    }
     
     Ok(())
 }
