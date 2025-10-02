@@ -85,6 +85,26 @@ impl PolliNetSDK {
     pub async fn cast_vote(&self, proposal_id: &str, choice: u8) -> Result<(), PolliNetError> {
         Ok(self.transaction_service.cast_vote(proposal_id, choice).await?)
     }
+    
+    /// Discover nearby BLE peers
+    pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
+        Ok(self.ble_transport.discover_peers().await?)
+    }
+    
+    /// Connect to a BLE peer
+    pub async fn connect_to_ble_peer(&self, peer_id: &str) -> Result<(), PolliNetError> {
+        Ok(self.ble_transport.connect_to_peer(peer_id).await?)
+    }
+    
+    /// Get BLE status and debugging information
+    pub async fn get_ble_status(&self) -> Result<String, PolliNetError> {
+        Ok(self.ble_transport.get_ble_status().await?)
+    }
+    
+    /// Scan for ALL BLE devices (for debugging)
+    pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
+        Ok(self.ble_transport.scan_all_devices().await?)
+    }
 }
 
 /// Error types for PolliNet operations

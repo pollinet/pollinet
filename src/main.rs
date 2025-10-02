@@ -20,6 +20,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdk.start_ble_networking().await?;
     info!("📡 BLE networking started");
     
+    // Example 0: Discover and connect to BLE peers
+    info!("\n🔍 Example 0: Discovering BLE peers");
+    match discover_ble_peers(&sdk).await {
+        Ok(_) => info!("✅ BLE peer discovery completed"),
+        Err(e) => error!("❌ Failed to discover BLE peers: {}", e),
+    }
+    
+    // Show BLE status
+    info!("\n📊 BLE Status Check:");
+    match sdk.get_ble_status().await {
+        Ok(status) => info!("{}", status),
+        Err(e) => error!("❌ Failed to get BLE status: {}", e),
+    }
+    
+    // Debug: Scan for ALL BLE devices
+    info!("\n🔍 Debug: Scanning for ALL BLE devices:");
+    match sdk.scan_all_devices().await {
+        Ok(devices) => {
+            if devices.is_empty() {
+                info!("   No BLE devices found at all");
+            } else {
+                info!("   Found {} total BLE devices:", devices.len());
+                for device in devices {
+                    info!("     {}", device);
+                }
+            }
+        },
+        Err(e) => error!("   ❌ Failed to scan all devices: {}", e),
+    }
+    
     // Example 1: Create and relay a transaction
     info!("\n📝 Example 1: Creating and relaying a transaction");
     match create_and_relay_transaction(&sdk).await {
@@ -44,9 +74,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n🎉 PolliNet SDK demonstration completed!");
     info!("💡 The SDK is now running and ready for offline transaction propagation");
     
-    // Keep the SDK running
-    tokio::signal::ctrl_c().await?;
-    info!("👋 Shutting down PolliNet SDK...");
+    // Continuous BLE scanning for debugging
+    info!("\n🔄 Starting continuous BLE scanning (press Ctrl+C to stop)...");
+    continuous_ble_scanning(&sdk).await?;
+    
+    Ok(())
+}
+
+/// Continuous BLE scanning for debugging
+async fn continuous_ble_scanning(sdk: &PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
+    let mut scan_count = 0;
+    
+    loop {
+        scan_count += 1;
+        info!("\n🔄 BLE Scan #{} at {}", scan_count, 
+            chrono::Utc::now().format("%H:%M:%S"));
+        
+        // Scan for PolliNet peers
+        match sdk.discover_ble_peers().await {
+            Ok(peers) => {
+                if peers.is_empty() {
+                    info!("   No PolliNet peers found");
+                } else {
+                    info!("   Found {} PolliNet peers:", peers.len());
+                    for peer in peers {
+                        info!("     - {} (RSSI: {})", peer.device_id, peer.rssi);
+                    }
+                }
+            },
+            Err(e) => error!("   ❌ Scan failed: {}", e),
+        }
+        
+        // Wait before next scan
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    }
+    
+    Ok(())
+}
+
+/// Example: Discover BLE peers
+async fn discover_ble_peers(sdk: &PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
+    info!("   Discovering nearby BLE peers...");
+    
+    // Discover peers
+    let peers = sdk.discover_ble_peers().await?;
+    info!("   Found {} potential peers", peers.len());
+    
+    // Try to connect to the first peer if available
+    if let Some(first_peer) = peers.first() {
+        info!("   Attempting to connect to peer: {}", first_peer.device_id);
+        match sdk.connect_to_ble_peer(&first_peer.device_id).await {
+            Ok(_) => info!("   ✅ Successfully connected to peer: {}", first_peer.device_id),
+            Err(e) => info!("   ⚠️  Could not connect to peer: {} (Error: {})", first_peer.device_id, e),
+        }
+    }
     
     Ok(())
 }
