@@ -1,7 +1,18 @@
 [package]
 name = "pollinet"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+rust-version = "1.70.0"
+authors = ["PolliNet Team"]
+license = "MIT OR Apache-2.0"
+description = "Decentralized Solana transaction propagation over BLE mesh networks"
+keywords = ["solana", "ble", "mesh", "offline", "blockchain"]
+categories = ["network-programming", "cryptography"]
+repository = "https://github.com/pollinet/pollinet"
+documentation = "https://docs.rs/pollinet"
+homepage = "https://pollinet.github.io/pollinet/"
+readme = "README.md"
+
 
 [dependencies]
 base64 = "0.22.1"
@@ -23,3 +34,21 @@ thiserror = "2.0.12"
 tokio = { version = "1.46.1", features = ["full", "signal"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.0"
+tokio-test = "0.4"
+
+[[bench]]
+name = "ble_performance"
+harness = false
+
+[[bench]]
+name = "compression_benchmark"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -200,3 +200,15 @@ impl CompressionStats {
         }
     }
 }
+
+/// Convenience function for compressing data (for tests and benchmarks)
+pub fn compress_data(data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let compressor = Lz4Compressor::new()?;
+    Ok(compressor.compress_with_size(data)?)
+}
+
+/// Convenience function for decompressing data (for tests and benchmarks)
+pub fn decompress_data(compressed: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let compressor = Lz4Compressor::new()?;
+    Ok(compressor.decompress_with_size(compressed)?)
+}

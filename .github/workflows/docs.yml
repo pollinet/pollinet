@@ -1,0 +1,71 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install BLE dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libbluetooth-dev libdbus-1-dev
+    
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build documentation
+      run: |
+        cargo doc --no-deps --document-private-items --all-features
+        echo '<meta http-equiv="refresh" content="0; url=pollinet">' > target/doc/index.html
+    
+    - name: Check documentation examples
+      run: cargo test --doc --all-features
+    
+    - name: Deploy documentation to GitHub Pages
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
+        force_orphan: true
+
+  readme_sync:
+    name: README Sync Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install cargo-readme
+      run: cargo install cargo-readme
+    
+    - name: Check README sync
+      run: |
+        cargo readme > README_generated.md
+        if ! diff -q README.md README_generated.md > /dev/null; then
+          echo "README.md is not in sync with lib.rs documentation"
+          echo "Please run 'cargo readme > README.md' to update"
+          exit 1
+        fi
