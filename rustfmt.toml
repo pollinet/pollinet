@@ -1,0 +1,16 @@
+# Rust formatting configuration for PolliNet
+
+# Basic formatting
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+
+# Imports
+reorder_imports = true
+
+# Misc
+edition = "2021"
+newline_style = "Unix"
+remove_nested_parens = true
+use_field_init_shorthand = true
+use_try_shorthand = true
