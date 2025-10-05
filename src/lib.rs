@@ -58,16 +58,22 @@ impl PolliNetSDK {
         recipient: &str,
         amount: u64,
     ) -> Result<Vec<u8>, PolliNetError> {
-        Ok(self.transaction_service.create_transaction(sender, recipient, amount).await?)
+        Ok(self
+            .transaction_service
+            .create_transaction(sender, recipient, amount)
+            .await?)
     }
-    
+
     /// Fragment a transaction for BLE transmission
     pub fn fragment_transaction(&self, compressed_tx: &[u8]) -> Vec<transaction::Fragment> {
         self.transaction_service.fragment_transaction(compressed_tx)
     }
-    
+
     /// Relay transaction fragments over BLE mesh
-    pub async fn relay_transaction(&self, fragments: Vec<transaction::Fragment>) -> Result<(), PolliNetError> {
+    pub async fn relay_transaction(
+        &self,
+        fragments: Vec<transaction::Fragment>,
+    ) -> Result<(), PolliNetError> {
         Ok(self.ble_transport.relay_fragments(fragments).await?)
     }
     
@@ -132,7 +138,7 @@ pub enum PolliNetError {
 
 
 /// Service UUID for BLE mesh networking
-pub const SERVICE_UUID: &str = "12345678-1234-1234-1234-123456789abc";
+pub const SERVICE_UUID: &str = "7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a7";
 
 /// BLE MTU size for safe packet transmission
 pub const BLE_MTU_SIZE: usize = 480;
