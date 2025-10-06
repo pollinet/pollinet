@@ -101,4 +101,24 @@ impl BleAdapterBridge {
     pub fn is_advertising(&self) -> bool {
         self.adapter.is_advertising()
     }
+    
+    /// Start scanning for nearby BLE devices
+    pub async fn start_scanning(&self) -> Result<(), BleError> {
+        self.adapter.start_scanning().await
+    }
+    
+    /// Stop scanning for BLE devices
+    pub async fn stop_scanning(&self) -> Result<(), BleError> {
+        self.adapter.stop_scanning().await
+    }
+    
+    /// Get list of discovered BLE devices
+    pub async fn get_discovered_devices(&self) -> Result<Vec<crate::ble::adapter::DiscoveredDevice>, BleError> {
+        self.adapter.get_discovered_devices().await
+    }
+    
+    /// Get connected clients count
+    pub fn connected_clients_count(&self) -> usize {
+        self.adapter.connected_clients_count()
+    }
 }

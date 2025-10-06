@@ -29,6 +29,6 @@ async-trait = "0.1"
 [features]
 default = []
 linux = ["bluer"]
-macos = []
+macos = []  # Uses btleplug (already in dependencies, Central role only)
 windows = []
 android = []

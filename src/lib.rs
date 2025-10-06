@@ -103,11 +103,32 @@ impl PolliNetSDK {
         Ok(self.transaction_service.cast_vote(proposal_id, choice).await?)
     }
     
-    /// Discover nearby BLE peers (placeholder - needs implementation in bridge)
+    /// Discover nearby BLE peers
     pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
-        // TODO: Implement peer discovery in the bridge
-        tracing::info!("🔍 Peer discovery not yet implemented in new BLE system");
-        Ok(vec![])
+        tracing::info!("🔍 Starting BLE peer discovery...");
+        
+        // Start scanning
+        self.ble_bridge.start_scanning().await?;
+        
+        // Wait a moment for devices to be discovered
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        
+        // Get discovered devices
+        let discovered = self.ble_bridge.get_discovered_devices().await?;
+        
+        tracing::info!("✅ Found {} BLE peers", discovered.len());
+        
+        // Convert to PeerInfo format
+        let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
+            ble::PeerInfo {
+                device_id: device.address.clone(),
+                capabilities: vec!["CAN_RELAY".to_string()],
+                rssi: device.rssi.unwrap_or(-100),
+                last_seen: device.last_seen,
+            }
+        }).collect();
+        
+        Ok(peers)
     }
     
     /// Connect to a BLE peer (placeholder - needs implementation in bridge)
