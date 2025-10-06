@@ -2,6 +2,29 @@
 //! 
 //! Handles BLE advertising, scanning, and relay functionality for transaction propagation
 
+// Platform-agnostic BLE adapter interface
+pub mod adapter;
+
+// Bridge between new adapter and legacy functionality
+pub mod bridge;
+
+// Platform-specific implementations
+#[cfg(target_os = "linux")]
+pub mod linux;
+
+#[cfg(target_os = "macos")]
+pub mod macos;
+
+#[cfg(target_os = "windows")]
+pub mod windows;
+
+#[cfg(target_os = "android")]
+pub mod android;
+
+// Re-export the main adapter interface
+pub use adapter::{BleAdapter, BleError as AdapterBleError, AdapterInfo, create_ble_adapter, POLLINET_SERVICE_UUID, POLLINET_SERVICE_NAME};
+
+// Legacy BLE mesh transport (keeping for backward compatibility)
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -49,7 +72,7 @@ pub struct PeerInfo {
 
 impl MeshTransport {
     /// Create a new BLE mesh transport
-    pub async fn new() -> Result<Self, BleError> {
+    pub async fn new() -> Result<Self, LegacyBleError> {
         let manager = Manager::new().await?;
         let adapter = None; // Will be initialized when starting
         
@@ -58,7 +81,7 @@ impl MeshTransport {
         
         // Parse service UUID
         let service_uuid = Uuid::parse_str(SERVICE_UUID)
-            .map_err(|e| BleError::InvalidUuid(format!("Invalid service UUID: {}", e)))?;
+            .map_err(|e| LegacyBleError::InvalidUuid(format!("Invalid service UUID: {}", e)))?;
         
         // Generate characteristic UUIDs
         let fragment_characteristic_uuid = Uuid::new_v4();
@@ -77,11 +100,11 @@ impl MeshTransport {
     }
     
     /// Start BLE advertising
-    pub async fn start_advertising(&self) -> Result<(), BleError> {
+    pub async fn start_advertising(&self) -> Result<(), LegacyBleError> {
         // Get the first available adapter
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
-            return Err(BleError::NoAdapter);
+            return Err(LegacyBleError::NoAdapter);
         }
         
         let adapter = &adapters[0];
@@ -104,11 +127,11 @@ impl MeshTransport {
     }
     
     /// Start BLE scanning
-    pub async fn start_scanning(&self) -> Result<(), BleError> {
+    pub async fn start_scanning(&self) -> Result<(), LegacyBleError> {
         // Get the first available adapter
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
-            return Err(BleError::NoAdapter);
+            return Err(LegacyBleError::NoAdapter);
         }
         
         let adapter = &adapters[0];
@@ -121,7 +144,7 @@ impl MeshTransport {
         };
         
         adapter.start_scan(filter).await
-            .map_err(|e| BleError::ScanningFailed(e.to_string()))?;
+            .map_err(|e| LegacyBleError::ScanningFailed(e.to_string()))?;
         
         tracing::info!("Scanning for PolliNet devices with service: {}", self.service_uuid);
         tracing::info!("Scan Filter: Service UUID = {}", self.service_uuid);
@@ -131,7 +154,7 @@ impl MeshTransport {
     }
     
     /// Relay transaction fragments over BLE mesh
-    pub async fn relay_fragments(&self, fragments: Vec<Fragment>) -> Result<(), BleError> {
+    pub async fn relay_fragments(&self, fragments: Vec<Fragment>) -> Result<(), LegacyBleError> {
         // Store fragments in relay buffer
         let mut buffer = self.relay_buffer.write().await;
         buffer.extend(fragments.clone());
@@ -146,7 +169,7 @@ impl MeshTransport {
         // Get the first available adapter
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
-            return Err(BleError::NoAdapter);
+            return Err(LegacyBleError::NoAdapter);
         }
         
         let adapter = &adapters[0];
@@ -172,7 +195,7 @@ impl MeshTransport {
     }
     
     /// Handle incoming fragment
-    pub async fn on_fragment_received(&self, fragment: Fragment) -> Result<(), BleError> {
+    pub async fn on_fragment_received(&self, fragment: Fragment) -> Result<(), LegacyBleError> {
         // Add fragment to reassembly buffer
         // This would integrate with the transaction cache
         tracing::info!("Received fragment {} of {} for transaction {}", 
@@ -182,11 +205,11 @@ impl MeshTransport {
     }
     
     /// Discover nearby peers
-    pub async fn discover_peers(&self) -> Result<Vec<PeerInfo>, BleError> {
+    pub async fn discover_peers(&self) -> Result<Vec<PeerInfo>, LegacyBleError> {
         // Get the first available adapter
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
-            return Err(BleError::NoAdapter);
+            return Err(LegacyBleError::NoAdapter);
         }
         
         let adapter = &adapters[0];
@@ -232,10 +255,10 @@ impl MeshTransport {
     }
     
     /// Scan for ALL BLE devices (for debugging)
-    pub async fn scan_all_devices(&self) -> Result<Vec<String>, BleError> {
+    pub async fn scan_all_devices(&self) -> Result<Vec<String>, LegacyBleError> {
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
-            return Err(BleError::NoAdapter);
+            return Err(LegacyBleError::NoAdapter);
         }
         
         let adapter = &adapters[0];
@@ -260,11 +283,11 @@ impl MeshTransport {
     }
     
     /// Connect to a discovered peer
-    pub async fn connect_to_peer(&self, peer_id: &str) -> Result<(), BleError> {
+    pub async fn connect_to_peer(&self, peer_id: &str) -> Result<(), LegacyBleError> {
         // Get the first available adapter
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
-            return Err(BleError::NoAdapter);
+            return Err(LegacyBleError::NoAdapter);
         }
         
         let adapter = &adapters[0];
@@ -273,12 +296,12 @@ impl MeshTransport {
         let peripherals = adapter.peripherals().await?;
         let peripheral = peripherals.iter()
             .find(|p| p.id().to_string() == peer_id)
-            .ok_or(BleError::PeripheralNotFound)?;
+            .ok_or(LegacyBleError::PeripheralNotFound)?;
         
         // Connect to the peripheral
         tracing::info!("Connecting to peer: {}", peer_id);
         peripheral.connect().await
-            .map_err(|e| BleError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| LegacyBleError::ConnectionFailed(e.to_string()))?;
         
         // Add to connected peers
         let mut peers = self.peers.write().await;
@@ -313,7 +336,7 @@ impl MeshTransport {
     }
     
     /// Get BLE status and debugging information
-    pub async fn get_ble_status(&self) -> Result<String, BleError> {
+    pub async fn get_ble_status(&self) -> Result<String, LegacyBleError> {
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
             return Ok("No BLE adapters found".to_string());
@@ -348,9 +371,9 @@ impl MeshTransport {
     }
 }
 
-/// BLE-specific error types
+/// Legacy BLE-specific error types (deprecated - use adapter::BleError)
 #[derive(Error, Debug)]
-pub enum BleError {
+pub enum LegacyBleError {
     #[error("BLE manager initialization failed: {0}")]
     ManagerInit(String),
     
@@ -382,8 +405,8 @@ pub enum BleError {
     CharacteristicNotFound,
 }
 
-impl From<btleplug::Error> for BleError {
+impl From<btleplug::Error> for LegacyBleError {
     fn from(err: btleplug::Error) -> Self {
-        BleError::ManagerInit(err.to_string())
+        LegacyBleError::ManagerInit(err.to_string())
     }
 }
