@@ -164,11 +164,46 @@ impl PolliNetSDK {
         Ok(status)
     }
     
-    /// Scan for ALL BLE devices (placeholder - needs implementation in bridge)
+    /// Scan for ALL BLE devices
     pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
-        // TODO: Implement device scanning in the bridge
-        tracing::info!("🔍 Device scanning not yet implemented in new BLE system");
-        Ok(vec![])
+        tracing::info!("🔍 Starting BLE device scan...");
+        
+        // Start scanning
+        self.ble_bridge.start_scanning().await?;
+        
+        // Wait a bit for devices to be discovered
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        
+        // Get discovered devices
+        let devices = self.ble_bridge.get_discovered_devices().await?;
+        let device_addresses: Vec<String> = devices.iter().map(|d| d.address.clone()).collect();
+        
+        // Stop scanning
+        self.ble_bridge.stop_scanning().await?;
+        
+        tracing::info!("📱 Discovered {} BLE devices", device_addresses.len());
+        Ok(device_addresses)
+    }
+    
+    /// Start continuous BLE scanning
+    pub async fn start_ble_scanning(&self) -> Result<(), PolliNetError> {
+        self.ble_bridge.start_scanning().await?;
+        tracing::info!("🔍 BLE scanning started - discovering PolliNet devices...");
+        Ok(())
+    }
+    
+    /// Stop BLE scanning
+    pub async fn stop_ble_scanning(&self) -> Result<(), PolliNetError> {
+        self.ble_bridge.stop_scanning().await?;
+        tracing::info!("🛑 BLE scanning stopped");
+        Ok(())
+    }
+    
+    /// Get list of discovered PolliNet devices
+    pub async fn get_discovered_pollinet_devices(&self) -> Result<Vec<ble::adapter::DiscoveredDevice>, PolliNetError> {
+        let devices = self.ble_bridge.get_discovered_devices().await?;
+        tracing::info!("📱 Found {} discovered PolliNet devices", devices.len());
+        Ok(devices)
     }
 }
 

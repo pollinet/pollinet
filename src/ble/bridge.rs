@@ -92,6 +92,13 @@ impl BleAdapterBridge {
         self.fragment_buffer.read().await.len()
     }
     
+    /// Check if currently scanning
+    pub fn is_scanning(&self) -> bool {
+        // Note: This would need to be implemented in the BleAdapter trait
+        // For now, we'll return false as a placeholder
+        false
+    }
+    
     /// Get adapter information
     pub fn get_adapter_info(&self) -> crate::ble::adapter::AdapterInfo {
         self.adapter.get_adapter_info()

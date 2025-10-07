@@ -13,7 +13,9 @@ mod linux_impl {
     use tokio::sync::RwLock;
     use bluer::{
         adv::Advertisement,
+        AdapterEvent,
     };
+    use tokio_stream::StreamExt;
 
     /// Linux BLE adapter implementation
     pub struct LinuxBleAdapter {
@@ -27,10 +29,14 @@ mod linux_impl {
         receive_callback: Arc<Mutex<Option<Box<dyn Fn(Vec<u8>) + Send + 'static>>>>,
         /// Advertising status
         is_advertising: Arc<RwLock<bool>>,
+        /// Scanning status
+        is_scanning: Arc<RwLock<bool>>,
         /// Service UUID
         service_uuid: Uuid,
         /// Advertisement handle
         advertisement_handle: Arc<Mutex<Option<bluer::adv::AdvertisementHandle>>>,
+        /// Discovered devices
+        discovered_devices: Arc<RwLock<HashMap<String, super::super::adapter::DiscoveredDevice>>>,
     }
 
     /// Information about a connected client
@@ -65,10 +71,66 @@ mod linux_impl {
                 clients: Arc::new(RwLock::new(HashMap::new())),
                 receive_callback: Arc::new(Mutex::new(None)),
                 is_advertising: Arc::new(RwLock::new(false)),
+                is_scanning: Arc::new(RwLock::new(false)),
                 service_uuid,
                 advertisement_handle: Arc::new(Mutex::new(None)),
+                discovered_devices: Arc::new(RwLock::new(HashMap::new())),
             })
         }
+
+        /// Get device information and check if it advertises PolliNet service
+        async fn get_device_info(
+            device: &bluer::Device,
+            pollinet_service_uuid: Uuid,
+        ) -> Result<Option<super::super::adapter::DiscoveredDevice>, BleError> {
+            // Get device address
+            let address = device.address();
+            
+            // Get device name (alias for now - name requires different handling)  
+            let device_name = device.alias().await.ok();
+            
+            // Get UUIDs (service data keys are the service UUIDs)
+            let service_data = device.service_data().await.ok().flatten();
+            let mut service_uuids = Vec::new();
+            
+            if let Some(data) = service_data {
+                for uuid in data.keys() {
+                    service_uuids.push(*uuid);
+                }
+            }
+            
+            // Also check UUIDs property
+            if let Ok(uuids) = device.uuids().await {
+                if let Some(uuid_list) = uuids {
+                    service_uuids.extend(uuid_list);
+                }
+            }
+            
+            // Get RSSI
+            let rssi = device.rssi().await.ok().flatten();
+            
+            // Check if this device advertises the PolliNet service
+            let has_pollinet_service = service_uuids.contains(&pollinet_service_uuid);
+            
+            if has_pollinet_service {
+                // Only include device if it explicitly advertises PolliNet service
+                tracing::debug!("✅ Device {} advertises PolliNet service with UUIDs: {:?}", 
+                    address, service_uuids);
+                Ok(Some(super::super::adapter::DiscoveredDevice {
+                    address: address.to_string(),
+                    name: device_name,
+                    service_uuids,
+                    rssi,
+                    last_seen: std::time::Instant::now(),
+                }))
+            } else {
+                // Device doesn't advertise PolliNet service - filter it out
+                tracing::debug!("⚪ Device {} does not advertise PolliNet service (UUIDs: {:?})", 
+                    address, service_uuids);
+                Ok(None)
+            }
+        }
+
 
         /// Start advertising with BlueZ
         async fn start_bluez_advertising(&self) -> Result<(), BleError> {
@@ -192,21 +254,113 @@ mod linux_impl {
         }
 
         async fn start_scanning(&self) -> Result<(), BleError> {
-            // TODO: Implement BLE scanning using BlueZ
-            tracing::info!("🔍 BLE scanning not yet implemented on Linux");
+            tracing::info!("🔍 Starting BLE scanning on Linux");
+
+            // Check if already scanning
+            {
+                let is_scanning = self.is_scanning.read().await;
+                if *is_scanning {
+                    tracing::warn!("⚠️ BLE scanning already active");
+                    return Ok(());
+                }
+            }
+
+            // Start BlueZ discovery
+            self.adapter.set_discoverable(true).await
+                .map_err(|e| BleError::PlatformError(format!("Failed to set discoverable: {}", e)))?;
+
+            // Set scanning status
+            {
+                let mut status = self.is_scanning.write().await;
+                *status = true;
+            }
+
+            // Set up discovery event stream
+            let discovery_events = self.adapter.discover_devices_with_changes().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to create discovery stream: {}", e)))?;
+
+            // Start background task to handle discovery events
+            let devices = Arc::clone(&self.discovered_devices);
+            let service_uuid = self.service_uuid;
+            let adapter_for_task = self.adapter.clone();
+            
+            tokio::spawn(async move {
+                let mut stream = discovery_events;
+                while let Some(device_events) = stream.next().await {
+                    match device_events {
+                        bluer::AdapterEvent::DeviceAdded(device_id) => {
+                            tracing::debug!("📱 Device discovered: {}", device_id);
+                            
+                            // Get device from adapter
+                            if let Ok(device) = adapter_for_task.device(device_id) {
+                                // Get device properties
+                                match tokio::time::timeout(
+                                    tokio::time::Duration::from_secs(2),
+                                    Self::get_device_info(&device, service_uuid)
+                                ).await {
+                                    Ok(Ok(Some(discovered_device))) => {
+                                        tracing::info!("🎯 Found PolliNet device: {} ({})", 
+                                            device_id,
+                                            discovered_device.name.as_deref().unwrap_or("Unknown")
+                                        );
+                                        
+                                        // Add to discovered devices
+                                        let mut devices_guard = devices.write().await;
+                                        devices_guard.insert(device_id.to_string(), discovered_device);
+                                    }
+                                    Ok(Ok(None)) => {
+                                        tracing::debug!("⚪ Device {} does not advertise PolliNet service", device_id);
+                                    }
+                                    Ok(Err(e)) => {
+                                        tracing::debug!("⚠️ Failed to get device info for {}: {}", device_id, e);
+                                    }
+                                    Err(_) => {
+                                        tracing::debug!("⏱️ Timeout getting device info for {}", device_id);
+                                    }
+                                }
+                            }
+                        }
+                        bluer::AdapterEvent::DeviceRemoved(device_id) => {
+                            tracing::debug!("📱 Device removed: {}", device_id);
+                            
+                            // Remove from discovered devices
+                            let mut devices_guard = devices.write().await;
+                            devices_guard.remove(&device_id.to_string());
+                        }
+                        _ => {
+                            // Ignore other events for now
+                        }
+                    }
+                }
+            });
+
+            tracing::info!("✅ Linux BLE scanning started successfully");
             Ok(())
         }
 
         async fn stop_scanning(&self) -> Result<(), BleError> {
-            // TODO: Implement BLE scanning stop
-            tracing::info!("🛑 BLE scanning stop not yet implemented on Linux");
+            tracing::info!("🛑 Stopping BLE scanning on Linux");
+
+            // Stop BlueZ discovery (set discoverable to false)
+            self.adapter.set_discoverable(false).await
+                .map_err(|e| BleError::PlatformError(format!("Failed to stop discovery: {}", e)))?;
+
+            // Update scanning status
+            {
+                let mut status = self.is_scanning.write().await;
+                *status = false;
+            }
+
+            tracing::info!("✅ Linux BLE scanning stopped successfully");
             Ok(())
         }
 
         async fn get_discovered_devices(&self) -> Result<Vec<super::super::adapter::DiscoveredDevice>, BleError> {
-            // TODO: Implement device discovery
-            tracing::info!("📱 Device discovery not yet implemented on Linux");
-            Ok(vec![])
+            let devices_guard = self.discovered_devices.read().await;
+            let devices: Vec<super::super::adapter::DiscoveredDevice> = devices_guard.values().cloned().collect();
+            
+            tracing::debug!("📱 Found {} discovered devices on Linux", devices.len());
+            Ok(devices)
         }
     }
 }
