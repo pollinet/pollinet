@@ -121,4 +121,14 @@ impl BleAdapterBridge {
     pub fn connected_clients_count(&self) -> usize {
         self.adapter.connected_clients_count()
     }
+    
+    /// Connect to a discovered BLE device
+    pub async fn connect_to_device(&self, address: &str) -> Result<(), BleError> {
+        self.adapter.connect_to_device(address).await
+    }
+    
+    /// Write data to a connected device
+    pub async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+        self.adapter.write_to_device(address, data).await
+    }
 }

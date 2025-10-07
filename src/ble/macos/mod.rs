@@ -17,8 +17,9 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::Instant;
 use uuid::Uuid;
-use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::{Adapter, Manager};
+use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType, Characteristic};
+use btleplug::platform::{Adapter, Manager, Peripheral};
+use futures::StreamExt;
 
 /// macOS BLE adapter using btleplug (Central role only)
 pub struct MacOSBleAdapter {
@@ -28,10 +29,14 @@ pub struct MacOSBleAdapter {
     adapter: Arc<Mutex<Option<Adapter>>>,
     /// Discovered devices cache
     discovered_devices: Arc<Mutex<HashMap<String, DiscoveredDevice>>>,
+    /// Connected peripherals
+    connected_peripherals: Arc<Mutex<HashMap<String, Peripheral>>>,
     /// Scanning status
     is_scanning: Arc<Mutex<bool>>,
     /// Service UUID for PolliNet
     service_uuid: Uuid,
+    /// Characteristic UUID for data transmission
+    characteristic_uuid: Uuid,
     /// Receive callback
     receive_callback: Arc<Mutex<Option<Box<dyn Fn(Vec<u8>) + Send + 'static>>>>,
 }
@@ -48,6 +53,10 @@ impl MacOSBleAdapter {
         let service_uuid = Uuid::parse_str(POLLINET_SERVICE_UUID)
             .map_err(|e| BleError::InvalidUuid(format!("Invalid PolliNet service UUID: {}", e)))?;
 
+        // Characteristic UUID for data transmission (same as guide suggested)
+        let characteristic_uuid = Uuid::parse_str("7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a8")
+            .map_err(|e| BleError::InvalidUuid(format!("Invalid characteristic UUID: {}", e)))?;
+
         tracing::info!("✅ macOS BLE adapter initialized");
         tracing::info!("   Mode: Central only (scanning/connecting)");
         tracing::info!("   Can discover: Linux PolliNet devices ✅");
@@ -57,8 +66,10 @@ impl MacOSBleAdapter {
             manager,
             adapter: Arc::new(Mutex::new(None)),
             discovered_devices: Arc::new(Mutex::new(HashMap::new())),
+            connected_peripherals: Arc::new(Mutex::new(HashMap::new())),
             is_scanning: Arc::new(Mutex::new(false)),
             service_uuid,
+            characteristic_uuid,
             receive_callback: Arc::new(Mutex::new(None)),
         })
     }
@@ -141,6 +152,116 @@ impl MacOSBleAdapter {
         
         Ok(())
     }
+
+    /// Connect to a discovered peripheral by address
+    pub async fn connect_to_peripheral(&self, address: &str) -> Result<(), BleError> {
+        tracing::info!("🔗 Connecting to peripheral: {}", address);
+
+        let adapter = self.get_adapter().await?;
+        let peripherals = adapter.peripherals().await
+            .map_err(|e| BleError::PlatformError(format!("Failed to get peripherals: {}", e)))?;
+
+        // Find peripheral by address
+        let peripheral = peripherals.iter()
+            .find(|p| p.id().to_string() == address)
+            .ok_or_else(|| BleError::PeripheralNotFound)?;
+
+        // Connect to peripheral
+        peripheral.connect().await
+            .map_err(|e| BleError::ConnectionFailed(format!("Failed to connect: {}", e)))?;
+
+        tracing::info!("✅ Connected to {}", address);
+
+        // Discover services and characteristics
+        peripheral.discover_services().await
+            .map_err(|e| BleError::PlatformError(format!("Failed to discover services: {}", e)))?;
+
+        tracing::info!("🔍 Discovering services...");
+
+        // Find PolliNet service
+        let services = peripheral.services();
+        let pollinet_service = services.iter()
+            .find(|s| s.uuid == self.service_uuid)
+            .ok_or_else(|| BleError::ServiceNotFound)?;
+
+        tracing::info!("✅ Found PolliNet service");
+
+        // Find data characteristic
+        let characteristic = pollinet_service.characteristics.iter()
+            .find(|c| c.uuid == self.characteristic_uuid)
+            .ok_or_else(|| BleError::CharacteristicNotFound)?;
+
+        tracing::info!("✅ Found data characteristic");
+
+        // Subscribe to notifications
+        peripheral.subscribe(characteristic).await
+            .map_err(|e| BleError::PlatformError(format!("Failed to subscribe: {}", e)))?;
+
+        tracing::info!("📥 Subscribed to notifications");
+
+        // Store connected peripheral
+        {
+            let mut peripherals = self.connected_peripherals.lock().unwrap();
+            peripherals.insert(address.to_string(), peripheral.clone());
+        }
+
+        // Start notification handler
+        self.start_notification_handler(peripheral.clone()).await;
+
+        tracing::info!("🎉 GATT session established with {}", address);
+        Ok(())
+    }
+
+    /// Handle incoming notifications from a peripheral
+    async fn start_notification_handler(&self, peripheral: Peripheral) {
+        let receive_callback = self.receive_callback.clone();
+        let characteristic_uuid = self.characteristic_uuid;
+
+        tokio::spawn(async move {
+            let mut notification_stream = peripheral.notifications().await.unwrap();
+            
+            while let Some(notification) = notification_stream.next().await {
+                if notification.uuid == characteristic_uuid {
+                    tracing::info!("📥 Received {} bytes via GATT", notification.value.len());
+                    
+                    if let Some(ref callback) = *receive_callback.lock().unwrap() {
+                        callback(notification.value);
+                    }
+                }
+            }
+        });
+    }
+
+    /// Write data to a connected peripheral
+    pub async fn write_to_peripheral(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+        // Get peripheral and characteristic without holding lock across await
+        let (peripheral, characteristic) = {
+            let peripherals = self.connected_peripherals.lock().unwrap();
+            let peripheral = peripherals.get(address)
+                .ok_or_else(|| BleError::PeripheralNotFound)?
+                .clone();
+
+            // Find the characteristic
+            let services = peripheral.services();
+            let pollinet_service = services.iter()
+                .find(|s| s.uuid == self.service_uuid)
+                .ok_or_else(|| BleError::ServiceNotFound)?;
+
+            let characteristic = pollinet_service.characteristics.iter()
+                .find(|c| c.uuid == self.characteristic_uuid)
+                .ok_or_else(|| BleError::CharacteristicNotFound)?
+                .clone();
+            
+            (peripheral, characteristic)
+        };
+
+        // Write data
+        peripheral.write(&characteristic, data, WriteType::WithResponse).await
+            .map_err(|e| BleError::TransmissionFailed(format!("Write failed: {}", e)))?;
+
+        tracing::debug!("📤 Wrote {} bytes to {}", data.len(), address);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -179,7 +300,7 @@ impl BleAdapter for MacOSBleAdapter {
     }
 
     fn connected_clients_count(&self) -> usize {
-        0 // Central role doesn't have clients
+        self.connected_peripherals.lock().unwrap().len()
     }
 
     fn get_adapter_info(&self) -> AdapterInfo {
@@ -261,5 +382,13 @@ impl BleAdapter for MacOSBleAdapter {
         }
         
         Ok(devices)
+    }
+    
+    async fn connect_to_device(&self, address: &str) -> Result<(), BleError> {
+        self.connect_to_peripheral(address).await
+    }
+    
+    async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+        self.write_to_peripheral(address, data).await
     }
 }
