@@ -131,11 +131,24 @@ impl PolliNetSDK {
         Ok(peers)
     }
     
-    /// Connect to a BLE peer (placeholder - needs implementation in bridge)
-    pub async fn connect_to_ble_peer(&self, peer_id: &str) -> Result<(), PolliNetError> {
-        // TODO: Implement peer connection in the bridge
-        tracing::info!("🔗 Peer connection not yet implemented in new BLE system for peer: {}", peer_id);
+    /// Connect to a discovered BLE peer and establish GATT session
+    pub async fn connect_to_ble_peer(&self, peer_address: &str) -> Result<(), PolliNetError> {
+        tracing::info!("🔗 Connecting to BLE peer: {}", peer_address);
+        self.ble_bridge.connect_to_device(peer_address).await?;
+        tracing::info!("✅ Connected to peer: {}", peer_address);
         Ok(())
+    }
+    
+    /// Send data to a connected BLE peer
+    pub async fn send_to_peer(&self, peer_address: &str, data: &[u8]) -> Result<(), PolliNetError> {
+        tracing::info!("📤 Sending {} bytes to peer: {}", data.len(), peer_address);
+        self.ble_bridge.write_to_device(peer_address, data).await?;
+        Ok(())
+    }
+    
+    /// Get number of connected peers
+    pub fn get_connected_peer_count(&self) -> usize {
+        self.ble_bridge.connected_clients_count()
     }
     
     /// Get BLE status and debugging information

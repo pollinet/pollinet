@@ -66,6 +66,16 @@ pub trait BleAdapter: Send + Sync {
     
     /// Get list of discovered devices
     async fn get_discovered_devices(&self) -> Result<Vec<DiscoveredDevice>, BleError>;
+    
+    /// Connect to a discovered device (Central role only)
+    async fn connect_to_device(&self, address: &str) -> Result<(), BleError> {
+        Err(BleError::OperationNotSupported("Connection not supported on this platform".to_string()))
+    }
+    
+    /// Write data to a connected device (Central role only)
+    async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+        Err(BleError::OperationNotSupported("Writing to devices not supported on this platform".to_string()))
+    }
 }
 
 /// Information about the BLE adapter

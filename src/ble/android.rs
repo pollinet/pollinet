@@ -55,4 +55,22 @@ impl BleAdapter for AndroidBleAdapter {
             discoverable: false,
         }
     }
+
+    async fn start_scanning(&self) -> Result<(), BleError> {
+        Err(BleError::OperationNotSupported(
+            "Android BLE scanning not yet implemented".to_string()
+        ))
+    }
+
+    async fn stop_scanning(&self) -> Result<(), BleError> {
+        Err(BleError::OperationNotSupported(
+            "Android BLE scanning not yet implemented".to_string()
+        ))
+    }
+
+    async fn get_discovered_devices(&self) -> Result<Vec<super::adapter::DiscoveredDevice>, BleError> {
+        Err(BleError::OperationNotSupported(
+            "Android BLE discovery not yet implemented".to_string()
+        ))
+    }
 }

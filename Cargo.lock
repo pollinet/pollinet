@@ -2804,6 +2804,7 @@ dependencies = [
  "chrono",
  "config",
  "dotenv",
+ "futures",
  "hex",
  "lz4",
  "serde",
