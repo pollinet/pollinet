@@ -2,11 +2,15 @@
 //! 
 //! Shows how to use the PolliNet SDK for offline Solana transaction propagation
 
-use pollinet::{PolliNetSDK, transaction};
+use pollinet::{noncenew, transaction, PolliNetSDK,transaction_new};
 use tracing::{info, error};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    noncenew::nonce().await?;
+   transaction_new::transact().await?;
+
     // Initialize tracing
     tracing_subscriber::fmt::init();
     

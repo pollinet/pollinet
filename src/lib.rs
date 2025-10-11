@@ -7,6 +7,8 @@ pub mod ble;
 pub mod nonce;
 pub mod transaction;
 pub mod util;
+pub mod noncenew;
+pub mod transaction_new;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
