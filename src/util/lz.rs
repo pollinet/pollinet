@@ -115,37 +115,46 @@ impl Lz4Compressor {
 
     /// Decompress data with size header
     pub fn decompress_with_size(&self, compressed_data: &[u8]) -> Result<Vec<u8>, Lz4Error> {
-        if compressed_data.len() < 8 {
+        if compressed_data.len() < 7 {
             return Err(Lz4Error::InvalidData(
                 "Data too short for LZ4 header".to_string(),
             ));
         }
 
-        // Check LZ4 header
-        if &compressed_data[..4] != b"LZ4" {
+        // Check LZ4 header (3 bytes: "LZ4")
+        if &compressed_data[..3] != b"LZ4" {
+            tracing::error!("Invalid LZ4 header. Expected 'LZ4', got: {:02x?}", &compressed_data[..3.min(compressed_data.len())]);
             return Err(Lz4Error::InvalidData("Invalid LZ4 header".to_string()));
         }
 
-        // Extract original size
+        // Extract original size (4 bytes after "LZ4")
         let original_size = u32::from_le_bytes([
+            compressed_data[3],
             compressed_data[4],
             compressed_data[5],
             compressed_data[6],
-            compressed_data[7],
         ]) as usize;
 
-        // Extract compressed data
-        let data = &compressed_data[8..];
+        tracing::info!("LZ4 header valid. Original size: {} bytes", original_size);
+
+        // Extract compressed data (starts at byte 7)
+        let data = &compressed_data[7..];
+
+        tracing::info!("Decompressing {} bytes to {} bytes", data.len(), original_size);
 
         // Decompress
         let decompressed = lz4::block::decompress(data, Some(original_size as i32))
             .map_err(|e| Lz4Error::DecompressionFailed(e.to_string()))?;
 
         if decompressed.len() != original_size {
-            return Err(Lz4Error::InvalidData(
-                "Decompressed size mismatch".to_string(),
-            ));
+            return Err(Lz4Error::InvalidData(format!(
+                "Decompressed size mismatch: expected {}, got {}",
+                original_size,
+                decompressed.len()
+            )));
         }
+
+        tracing::info!("✅ Decompression successful");
 
         Ok(decompressed)
     }
