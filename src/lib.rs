@@ -120,6 +120,31 @@ impl PolliNetSDK {
             .await?)
     }
     
+    /// Create an unsigned governance vote transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned vote transaction
+    /// Voter is used as nonce authority
+    pub async fn cast_unsigned_vote(
+        &self,
+        voter: &str,
+        proposal_id: &str,
+        vote_account: &str,
+        choice: u8,
+        fee_payer: &str,
+        nonce_account: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .cast_unsigned_vote(
+                voter,
+                proposal_id,
+                vote_account,
+                choice,
+                fee_payer,
+                nonce_account,
+            )
+            .await?)
+    }
+    
     /// Add a signature to an unsigned transaction (base64 encoded)
     /// Intelligently adds signature based on signer's role
     /// If signer is nonce authority and sender, signature is added for both roles
@@ -264,11 +289,20 @@ impl PolliNetSDK {
             .await?)
     }
 
-    /// Cast a governance vote (example use case)
-    pub async fn cast_vote(&self, proposal_id: &str, choice: u8) -> Result<(), PolliNetError> {
+    /// Cast a governance vote with durable nonce
+    /// Creates a presigned vote transaction using a nonce account for longer lifetime
+    /// Returns compressed transaction bytes ready for BLE transmission
+    pub async fn cast_vote(
+        &self,
+        voter_keypair: &solana_sdk::signature::Keypair,
+        proposal_id: &str,
+        vote_account: &str,
+        choice: u8,
+        nonce_account: &str,
+    ) -> Result<Vec<u8>, PolliNetError> {
         Ok(self
             .transaction_service
-            .cast_vote(proposal_id, choice)
+            .cast_vote(voter_keypair, proposal_id, vote_account, choice, nonce_account)
             .await?)
     }
 
