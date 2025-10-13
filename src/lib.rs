@@ -94,6 +94,33 @@ impl PolliNetSDK {
             )
             .await?)
     }
+    
+    /// Create and sign a new SPL token transfer transaction with durable nonce
+    /// Creates a presigned SPL token transaction using a nonce account for longer lifetime
+    /// Automatically derives Associated Token Accounts from wallet pubkeys and mint address
+    pub async fn create_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        sender_keypair: &solana_sdk::signature::Keypair,
+        recipient_wallet: &str,
+        mint_address: &str,
+        amount: u64,
+        nonce_account: &str,
+        nonce_authority_keypair: &solana_sdk::signature::Keypair,
+    ) -> Result<Vec<u8>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_spl_transaction(
+                sender_wallet,
+                sender_keypair,
+                recipient_wallet,
+                mint_address,
+                amount,
+                nonce_account,
+                nonce_authority_keypair,
+            )
+            .await?)
+    }
 
     /// Fragment a transaction for BLE transmission
     pub fn fragment_transaction(&self, compressed_tx: &[u8]) -> Vec<transaction::Fragment> {
