@@ -1,5 +1,5 @@
 //! PolliNet SDK - Decentralized Solana transaction propagation over BLE mesh networks
-//! 
+//!
 //! This SDK enables offline Solana transactions to be distributed opportunistically
 //! over Bluetooth Low Energy (BLE) mesh networks, inspired by biological pollination.
 
@@ -9,8 +9,8 @@ pub mod transaction;
 pub mod util;
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use thiserror::Error;
+use tokio::sync::RwLock;
 
 /// Core PolliNet SDK instance
 pub struct PolliNetSDK {
@@ -25,17 +25,17 @@ pub struct PolliNetSDK {
 }
 
 impl PolliNetSDK {
-    /// Initialize a new PolliNet SDK instance
+    /// Initialize a new PolliNet SDK instance without RPC client
     pub async fn new() -> Result<Self, PolliNetError> {
         // Initialize BLE transport
         let ble_transport = Arc::new(ble::MeshTransport::new().await?);
-        
+
         // Initialize transaction service
         let transaction_service = Arc::new(transaction::TransactionService::new().await?);
-        
+
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-        
+
         Ok(Self {
             ble_transport,
             transaction_service,
@@ -43,64 +43,121 @@ impl PolliNetSDK {
             local_cache,
         })
     }
-    
+
+    /// Initialize a new PolliNet SDK instance with RPC client for nonce account fetching
+    pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, PolliNetError> {
+        // Initialize BLE transport
+        let ble_transport = Arc::new(ble::MeshTransport::new().await?);
+
+        // Initialize transaction service with RPC client
+        let transaction_service =
+            Arc::new(transaction::TransactionService::new_with_rpc(rpc_url).await?);
+
+        // Initialize local cache
+        let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
+
+        Ok(Self {
+            ble_transport,
+            transaction_service,
+            nonce_manager: Arc::new(nonce::NonceManager::new().await?),
+            local_cache,
+        })
+    }
+
     /// Start BLE advertising and scanning
     pub async fn start_ble_networking(&self) -> Result<(), PolliNetError> {
         self.ble_transport.start_advertising().await?;
         self.ble_transport.start_scanning().await?;
         Ok(())
     }
-    
-    /// Create and sign a new transaction
+
+    /// Create and sign a new transaction with durable nonce
+    /// Creates a presigned transaction using a nonce account for longer lifetime
     pub async fn create_transaction(
         &self,
         sender: &str,
+        sender_keypair: &solana_sdk::signature::Keypair,
         recipient: &str,
         amount: u64,
+        nonce_account: &str,
+        nonce_authority_keypair: &solana_sdk::signature::Keypair,
     ) -> Result<Vec<u8>, PolliNetError> {
-        Ok(self.transaction_service.create_transaction(sender, recipient, amount).await?)
+        Ok(self
+            .transaction_service
+            .create_transaction(
+                sender,
+                sender_keypair,
+                recipient,
+                amount,
+                nonce_account,
+                nonce_authority_keypair,
+            )
+            .await?)
     }
-    
+
     /// Fragment a transaction for BLE transmission
     pub fn fragment_transaction(&self, compressed_tx: &[u8]) -> Vec<transaction::Fragment> {
         self.transaction_service.fragment_transaction(compressed_tx)
     }
-    
+
+    /// Reassemble fragments back into a complete transaction
+    pub fn reassemble_fragments(
+        &self,
+        fragments: &[transaction::Fragment],
+    ) -> Result<Vec<u8>, PolliNetError> {
+        Ok(self.transaction_service.reassemble_fragments(fragments)?)
+    }
+
     /// Relay transaction fragments over BLE mesh
-    pub async fn relay_transaction(&self, fragments: Vec<transaction::Fragment>) -> Result<(), PolliNetError> {
+    pub async fn relay_transaction(
+        &self,
+        fragments: Vec<transaction::Fragment>,
+    ) -> Result<(), PolliNetError> {
         Ok(self.ble_transport.relay_fragments(fragments).await?)
     }
-    
+
     /// Submit a transaction to Solana when online
-    pub async fn submit_transaction_to_solana(&self, transaction: &[u8]) -> Result<String, PolliNetError> {
-        Ok(self.transaction_service.submit_to_solana(transaction).await?)
+    pub async fn submit_transaction_to_solana(
+        &self,
+        transaction: &[u8],
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .submit_to_solana(transaction)
+            .await?)
     }
-    
+
     /// Broadcast confirmation after successful submission
     pub async fn broadcast_confirmation(&self, signature: &str) -> Result<(), PolliNetError> {
-        Ok(self.transaction_service.broadcast_confirmation(signature).await?)
+        Ok(self
+            .transaction_service
+            .broadcast_confirmation(signature)
+            .await?)
     }
-    
+
     /// Cast a governance vote (example use case)
     pub async fn cast_vote(&self, proposal_id: &str, choice: u8) -> Result<(), PolliNetError> {
-        Ok(self.transaction_service.cast_vote(proposal_id, choice).await?)
+        Ok(self
+            .transaction_service
+            .cast_vote(proposal_id, choice)
+            .await?)
     }
-    
+
     /// Discover nearby BLE peers
     pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
         Ok(self.ble_transport.discover_peers().await?)
     }
-    
+
     /// Connect to a BLE peer
     pub async fn connect_to_ble_peer(&self, peer_id: &str) -> Result<(), PolliNetError> {
         Ok(self.ble_transport.connect_to_peer(peer_id).await?)
     }
-    
+
     /// Get BLE status and debugging information
     pub async fn get_ble_status(&self) -> Result<String, PolliNetError> {
         Ok(self.ble_transport.get_ble_status().await?)
     }
-    
+
     /// Scan for ALL BLE devices (for debugging)
     pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
         Ok(self.ble_transport.scan_all_devices().await?)
@@ -112,24 +169,22 @@ impl PolliNetSDK {
 pub enum PolliNetError {
     #[error("BLE transport error: {0}")]
     BleTransport(#[from] ble::BleError),
-    
+
     #[error("Transaction error: {0}")]
     Transaction(#[from] transaction::TransactionError),
-    
+
     #[error("Nonce management error: {0}")]
     Nonce(#[from] nonce::NonceError),
-    
+
     #[error("Solana RPC error: {0}")]
     SolanaRpc(String),
-    
+
     #[error("Serialization error: {0}")]
     Serialization(String),
-    
+
     #[error("Configuration error: {0}")]
     Configuration(String),
 }
-
-
 
 /// Service UUID for BLE mesh networking
 pub const SERVICE_UUID: &str = "12345678-1234-1234-1234-123456789abc";

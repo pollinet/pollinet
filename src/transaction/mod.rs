@@ -3,8 +3,6 @@
 //! Handles creation, signing, compression, fragmentation, and submission of Solana transactions
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use thiserror::Error;
 use std::str::FromStr;
 use solana_sdk::{
@@ -13,8 +11,8 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     system_instruction,
+    commitment_config::CommitmentConfig,
 };
-use solana_program::system_instruction as solana_system_instruction;
 use spl_token::instruction as spl_instruction;
 use crate::{BLE_MTU_SIZE, COMPRESSION_THRESHOLD};
 
@@ -31,6 +29,8 @@ pub struct Fragment {
     pub data: Vec<u8>,
     /// Fragment type
     pub fragment_type: FragmentType,
+    /// SHA-256 checksum of the complete transaction (before fragmentation)
+    pub checksum: [u8; 32],
 }
 
 /// Fragment type for proper reassembly
@@ -143,6 +143,8 @@ impl TransactionCache {
 pub struct TransactionService {
     /// LZ4 compressor for transaction payloads
     compressor: crate::util::lz::Lz4Compressor,
+    /// RPC client for fetching nonce account data
+    rpc_client: Option<Box<solana_client::rpc_client::RpcClient>>,
 }
 
 
@@ -155,53 +157,176 @@ impl TransactionService {
         
         Ok(Self {
             compressor,
+            rpc_client: None,
         })
     }
     
-    /// Create and sign a new transaction
+    /// Create a new transaction service with RPC client
+    pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, TransactionError> {
+        let compressor = crate::util::lz::Lz4Compressor::new()
+            .map_err(|e| TransactionError::Compression(e.to_string()))?;
+        
+        let rpc_client = Box::new(solana_client::rpc_client::RpcClient::new_with_commitment(
+            rpc_url.to_string(),
+            CommitmentConfig::confirmed(),
+        ));
+        
+        Ok(Self {
+            compressor,
+            rpc_client: Some(rpc_client),
+        })
+    }
+    
+    /// Create and sign a new transaction with durable nonce
+    /// Creates a presigned transaction using a nonce account for longer lifetime
+    /// Sender pays the gas fee
     pub async fn create_transaction(
         &self,
         sender: &str,
+        sender_keypair: &Keypair,
         recipient: &str,
         amount: u64,
+        nonce_account: &str,
+        nonce_authority_keypair: &Keypair,
     ) -> Result<Vec<u8>, TransactionError> {
         // Validate public keys first
         let sender_pubkey = Pubkey::from_str(sender)
             .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid sender public key: {}", e)))?;
         let recipient_pubkey = Pubkey::from_str(recipient)
             .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid recipient public key: {}", e)))?;
+        let nonce_account_pubkey = Pubkey::from_str(nonce_account)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e)))?;
         
-        // For demo purposes, create a mock transaction instead of a real one
-        // In production, this would create and sign an actual Solana transaction
-        let mock_transaction = MockTransaction {
-            sender: sender_pubkey.to_string(),
-            recipient: recipient_pubkey.to_string(),
+        // Verify sender keypair matches sender pubkey
+        if sender_keypair.pubkey() != sender_pubkey {
+            return Err(TransactionError::InvalidPublicKey(
+                "Sender keypair does not match sender public key".to_string()
+            ));
+        }
+        
+        // Fetch nonce account data to get the blockhash
+        tracing::info!("Fetching nonce account data from blockchain...");
+        let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+        
+        tracing::info!("Building transaction instructions...");
+        
+        // Create advance nonce instruction (must be first instruction)
+        let advance_nonce_ix = system_instruction::advance_nonce_account(
+            &nonce_account_pubkey,
+            &nonce_authority_keypair.pubkey()
+        );
+        tracing::info!("✅ Instruction 1: Advance nonce account");
+        tracing::info!("   Nonce account: {}", nonce_account_pubkey);
+        tracing::info!("   Authority: {}", nonce_authority_keypair.pubkey());
+        
+        // Create transfer instruction
+        let transfer_ix = system_instruction::transfer(
+            &sender_pubkey,
+            &recipient_pubkey,
             amount,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        };
+        );
+        tracing::info!("✅ Instruction 2: Transfer {} lamports", amount);
+        tracing::info!("   From: {}", sender_pubkey);
+        tracing::info!("   To: {}", recipient_pubkey);
         
-        // Serialize and compress the mock transaction
-        let serialized = serde_json::to_vec(&mock_transaction)
+        // Create transaction with nonce advance as first instruction
+        let mut transaction = Transaction::new_with_payer(
+            &[advance_nonce_ix, transfer_ix],
+            Some(&sender_pubkey) // Sender pays the fee
+        );
+        tracing::info!("Transaction created with {} instructions", transaction.message.instructions.len());
+        
+        // Use the nonce account's stored blockhash
+        transaction.message.recent_blockhash = nonce_data.blockhash();
+        
+        // Sign with both required signers (nonce authority and sender)
+        transaction.sign(
+            &[nonce_authority_keypair, sender_keypair],
+            nonce_data.blockhash()
+        );
+        
+        // Serialize the signed transaction using bincode 1.x (Solana wire format)
+        let serialized = bincode1::serialize(&transaction)
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
         
+        tracing::info!("Transaction serialized: {} bytes", serialized.len());
+        
+        // Compress the transaction if it exceeds the threshold
         let compressed_tx = if serialized.len() > COMPRESSION_THRESHOLD {
+            tracing::info!("Compressing transaction (threshold: {} bytes)", COMPRESSION_THRESHOLD);
             // Use compression with size header for proper decompression
-            self.compressor.compress_with_size(&serialized)?
+            let compressed = self.compressor.compress_with_size(&serialized)?;
+            tracing::info!("Compressed: {} bytes -> {} bytes", serialized.len(), compressed.len());
+            compressed
         } else {
+            tracing::info!("Transaction below compression threshold, keeping uncompressed");
             serialized
         };
         
+        tracing::info!("Final transaction size: {} bytes", compressed_tx.len());
         Ok(compressed_tx)
     }
     
+    /// Fetch nonce account data from the blockchain
+    async fn fetch_nonce_account_data(
+        &self,
+        nonce_pubkey: &Pubkey,
+    ) -> Result<solana_sdk::nonce::state::Data, TransactionError> {
+        let client = self.rpc_client.as_ref()
+            .ok_or_else(|| TransactionError::RpcClient("RPC client not initialized. Use new_with_rpc()".to_string()))?;
+        
+        // Fetch the account
+        let account = client.get_account(nonce_pubkey)
+            .map_err(|e| TransactionError::RpcClient(format!("Failed to fetch nonce account: {}", e)))?;
+        
+        // Verify account has sufficient data for a nonce account (80 bytes)
+        if account.data.len() < 80 {
+            return Err(TransactionError::InvalidNonceAccount(
+                "Nonce account data is too small, may not be initialized".to_string()
+            ));
+        }
+        
+        tracing::info!("Fetched nonce account data: {} bytes", account.data.len());
+        
+        // Deserialize the nonce account state using bincode
+        let nonce_state: solana_sdk::nonce::state::Versions = bincode1::deserialize(&account.data)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to deserialize nonce account: {}", e)))?;
+        
+        // Extract the nonce data from the state
+        let nonce_data = match nonce_state.state() {
+            solana_sdk::nonce::State::Initialized(data) => {
+                tracing::info!("✅ Nonce account initialized");
+                tracing::info!("Nonce authority: {}", data.authority);
+                tracing::info!("Nonce blockhash: {}", data.blockhash());
+                data.clone()
+            }
+            _ => {
+                return Err(TransactionError::InvalidNonceAccount(
+                    "Nonce account is not initialized".to_string()
+                ));
+            }
+        };
+        
+        Ok(nonce_data)
+    }
+    
     /// Fragment a transaction for BLE transmission
+    /// Each fragment includes a SHA-256 checksum of the complete transaction for verification
     pub fn fragment_transaction(&self, compressed_tx: &[u8]) -> Vec<Fragment> {
+        use sha2::{Sha256, Digest};
+        
         let mut fragments = Vec::new();
         let total_fragments = (compressed_tx.len() + BLE_MTU_SIZE - 1) / BLE_MTU_SIZE;
         let tx_id = self.generate_tx_id();
+        
+        // Calculate SHA-256 checksum of the complete transaction
+        let mut hasher = Sha256::new();
+        hasher.update(compressed_tx);
+        let checksum: [u8; 32] = hasher.finalize().into();
+        
+        tracing::info!("Fragmenting transaction: {} bytes into {} fragments", 
+            compressed_tx.len(), total_fragments);
+        tracing::info!("Transaction checksum: {}", hex::encode(checksum));
         
         for (i, chunk) in compressed_tx.chunks(BLE_MTU_SIZE).enumerate() {
             let fragment_type = if i == 0 {
@@ -218,49 +343,136 @@ impl TransactionService {
                 total: total_fragments,
                 data: chunk.to_vec(),
                 fragment_type,
+                checksum, // Same checksum for all fragments
             });
         }
         
+        tracing::info!("Created {} fragments with checksum verification", fragments.len());
         fragments
     }
     
-    /// Submit a transaction to Solana RPC
-    pub async fn submit_to_solana(&self, transaction: &[u8]) -> Result<String, TransactionError> {
-        // Check if this is compressed data with LZ4 header
-        if transaction.len() >= 8 && &transaction[..4] == b"LZ4" {
-            // Decompress first
-            let decompressed = self.compressor.decompress_with_size(transaction)?;
-            
-            // Try to deserialize the decompressed data
-            if let Ok(mock_tx) = serde_json::from_slice::<MockTransaction>(&decompressed) {
-                let signature = format!("mock_signature_{}_{}", 
-                    mock_tx.sender[..8].to_string(), 
-                    mock_tx.timestamp);
-                
-                self.update_nonce().await?;
-                return Ok(signature);
+    /// Reassemble fragments back into a complete transaction
+    /// Verifies checksum to ensure data integrity
+    pub fn reassemble_fragments(&self, fragments: &[Fragment]) -> Result<Vec<u8>, TransactionError> {
+        use sha2::{Sha256, Digest};
+        
+        if fragments.is_empty() {
+            return Err(TransactionError::Serialization("No fragments to reassemble".to_string()));
+        }
+        
+        tracing::info!("Reassembling {} fragments", fragments.len());
+        
+        // Get expected checksum from first fragment (all fragments should have the same checksum)
+        let expected_checksum = fragments[0].checksum;
+        tracing::info!("Expected checksum: {}", hex::encode(expected_checksum));
+        
+        // Verify all fragments have the same checksum
+        for (i, fragment) in fragments.iter().enumerate() {
+            if fragment.checksum != expected_checksum {
+                return Err(TransactionError::Serialization(
+                    format!("Fragment {} has mismatched checksum. Expected: {}, Got: {}",
+                        i,
+                        hex::encode(expected_checksum),
+                        hex::encode(fragment.checksum)
+                    )
+                ));
             }
         }
+        tracing::info!("✅ All fragments have matching checksum");
         
-        // Try to deserialize as uncompressed mock transaction
-        if let Ok(mock_tx) = serde_json::from_slice::<MockTransaction>(transaction) {
-            let signature = format!("mock_signature_{}_{}", 
-                mock_tx.sender[..8].to_string(), 
-                mock_tx.timestamp);
-            
-            self.update_nonce().await?;
-            return Ok(signature);
+        // Sort fragments by index
+        let mut sorted_fragments = fragments.to_vec();
+        sorted_fragments.sort_by_key(|f| f.index);
+        
+        // Verify we have all fragments
+        let expected_count = sorted_fragments[0].total;
+        if sorted_fragments.len() != expected_count {
+            return Err(TransactionError::Serialization(
+                format!("Missing fragments: expected {}, got {}", expected_count, sorted_fragments.len())
+            ));
         }
         
-        // Try to deserialize as real Solana transaction
-        if let Ok(tx) = serde_json::from_slice::<Transaction>(transaction) {
-            let signature = format!("real_signature_{}", hex::encode(&tx.message.recent_blockhash.to_bytes()[..8]));
-            
-            self.update_nonce().await?;
-            return Ok(signature);
+        tracing::info!("All {} fragments present", expected_count);
+        
+        // Reassemble data
+        let mut reassembled = Vec::new();
+        for (i, fragment) in sorted_fragments.iter().enumerate() {
+            tracing::debug!("Adding fragment {}/{}: {} bytes", i + 1, expected_count, fragment.data.len());
+            reassembled.extend_from_slice(&fragment.data);
         }
         
-        Err(TransactionError::Serialization("Could not deserialize transaction".to_string()))
+        tracing::info!("Reassembled total: {} bytes", reassembled.len());
+        
+        // Verify checksum of reassembled data
+        let mut hasher = Sha256::new();
+        hasher.update(&reassembled);
+        let actual_checksum: [u8; 32] = hasher.finalize().into();
+        
+        if actual_checksum != expected_checksum {
+            return Err(TransactionError::Serialization(
+                format!("Checksum verification failed! Expected: {}, Got: {}",
+                    hex::encode(expected_checksum),
+                    hex::encode(actual_checksum)
+                )
+            ));
+        }
+        
+        tracing::info!("✅ Checksum verification passed");
+        tracing::info!("Reassembled checksum: {}", hex::encode(actual_checksum));
+        
+        Ok(reassembled)
+    }
+    
+    /// Submit a transaction to Solana RPC
+    /// Handles both compressed and uncompressed transactions
+    pub async fn submit_to_solana(&self, transaction: &[u8]) -> Result<String, TransactionError> {
+        let client = self.rpc_client.as_ref()
+            .ok_or_else(|| TransactionError::RpcClient("RPC client not initialized. Use new_with_rpc()".to_string()))?;
+        
+        tracing::info!("Received transaction: {} bytes", transaction.len());
+        
+        // Check first few bytes to detect compression
+        if transaction.len() >= 4 {
+            tracing::info!("First 4 bytes: {:02x?}", &transaction[..4]);
+        }
+        
+        // Decompress if needed - check for "LZ4" header (3 bytes: 0x4c 0x5a 0x34)
+        let decompressed = if transaction.len() >= 8 && transaction.starts_with(b"LZ4") {
+            tracing::info!("✅ Detected LZ4 compression header");
+            tracing::info!("Decompressing transaction ({} bytes)...", transaction.len());
+            // Decompress the transaction
+            let result = self.compressor.decompress_with_size(transaction)?;
+            tracing::info!("Decompressed: {} bytes -> {} bytes", transaction.len(), result.len());
+            result
+        } else {
+            tracing::info!("No LZ4 compression header detected, using raw data");
+            transaction.to_vec()
+        };
+        
+        tracing::info!("Deserializing transaction ({} bytes)...", decompressed.len());
+        tracing::info!("First 16 bytes: {:02x?}", &decompressed[..decompressed.len().min(16)]);
+        
+        // Deserialize the transaction using bincode 1.x (Solana wire format)
+        let tx: Transaction = bincode1::deserialize(&decompressed)
+            .map_err(|e| {
+                tracing::error!("Deserialization failed!");
+                tracing::error!("Data length: {}", decompressed.len());
+                tracing::error!("Error: {}", e);
+                TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e))
+            })?;
+        
+        tracing::info!("✅ Transaction deserialized successfully");
+        tracing::info!("Transaction has {} signatures", tx.signatures.len());
+        tracing::info!("Transaction has {} instructions", tx.message.instructions.len());
+        
+        // Submit to Solana
+        tracing::info!("Submitting transaction to Solana...");
+        let signature = client.send_and_confirm_transaction(&tx)
+            .map_err(|e| TransactionError::RpcClient(format!("Failed to submit transaction: {}", e)))?;
+        
+        tracing::info!("✅ Transaction submitted successfully: {}", signature);
+        
+        Ok(signature.to_string())
     }
     
     /// Broadcast confirmation after successful submission
@@ -333,7 +545,6 @@ impl TransactionService {
         sender: &str,
         recipient: &str,
         amount: u64,
-        blockhash: &solana_sdk::hash::Hash,
     ) -> Result<Instruction, TransactionError> {
         let sender_pubkey = Pubkey::from_str(sender)
             .map_err(|e| TransactionError::InvalidPublicKey(e.to_string()))?;
@@ -466,6 +677,12 @@ pub enum TransactionError {
     
     #[error("Solana instruction error: {0}")]
     SolanaInstruction(String),
+    
+    #[error("RPC client error: {0}")]
+    RpcClient(String),
+    
+    #[error("Invalid nonce account: {0}")]
+    InvalidNonceAccount(String),
 }
 
 impl From<crate::util::lz::Lz4Error> for TransactionError {
