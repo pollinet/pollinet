@@ -71,6 +71,108 @@ impl PolliNetSDK {
         Ok(())
     }
 
+    /// Create an unsigned transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned transaction
+    /// Sender is used as nonce authority
+    pub async fn create_unsigned_transaction(
+        &self,
+        sender: &str,
+        recipient: &str,
+        fee_payer: &str,
+        amount: u64,
+        nonce_account: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_transaction(
+                sender,
+                recipient,
+                fee_payer,
+                amount,
+                nonce_account,
+            )
+            .await?)
+    }
+    
+    /// Create an unsigned SPL token transfer transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned SPL token transaction
+    /// Automatically derives ATAs from wallet pubkeys and mint address
+    /// Sender is used as nonce authority
+    pub async fn create_unsigned_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        recipient_wallet: &str,
+        fee_payer: &str,
+        mint_address: &str,
+        amount: u64,
+        nonce_account: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_spl_transaction(
+                sender_wallet,
+                recipient_wallet,
+                fee_payer,
+                mint_address,
+                amount,
+                nonce_account,
+            )
+            .await?)
+    }
+    
+    /// Add a signature to an unsigned transaction (base64 encoded)
+    /// Intelligently adds signature based on signer's role
+    /// If signer is nonce authority and sender, signature is added for both roles
+    /// Returns base64 encoded updated transaction
+    pub fn add_signature(
+        &self,
+        base64_tx: &str,
+        signer_pubkey: &solana_sdk::pubkey::Pubkey,
+        signature: &solana_sdk::signature::Signature,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .add_signature(base64_tx, signer_pubkey, signature)?)
+    }
+    
+    /// Send and confirm a base64 encoded transaction
+    /// Decodes, deserializes, validates, and submits to Solana
+    pub async fn send_and_confirm_transaction(
+        &self,
+        base64_tx: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .send_and_confirm_transaction(base64_tx)
+            .await?)
+    }
+    
+    /// Process and relay a presigned custom transaction
+    /// Takes a presigned transaction (base64), compresses, fragments, and relays over BLE
+    /// Returns transaction ID for tracking
+    pub async fn process_and_relay_transaction(
+        &self,
+        base64_signed_tx: &str,
+    ) -> Result<String, PolliNetError> {
+        // Process the transaction (compress and fragment)
+        let fragments = self
+            .transaction_service
+            .process_and_relay_transaction(base64_signed_tx)
+            .await?;
+        
+        // Get transaction ID from first fragment
+        let tx_id = fragments.first()
+            .map(|f| f.id.clone())
+            .ok_or_else(|| PolliNetError::Transaction(
+                transaction::TransactionError::Serialization("No fragments created".to_string())
+            ))?;
+        
+        // Relay fragments over BLE mesh
+        self.ble_transport.relay_fragments(fragments).await?;
+        
+        Ok(tx_id)
+    }
+    
     /// Create and sign a new transaction with durable nonce
     /// Creates a presigned transaction using a nonce account for longer lifetime
     pub async fn create_transaction(

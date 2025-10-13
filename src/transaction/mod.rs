@@ -177,6 +177,353 @@ impl TransactionService {
         })
     }
 
+    /// Add a signature to an unsigned transaction (base64 encoded)
+    /// Intelligently adds signature based on signer's role in the transaction
+    /// If signer is nonce authority and also sender, signature is used for both roles
+    pub fn add_signature(
+        &self,
+        base64_tx: &str,
+        signer_pubkey: &Pubkey,
+        signature: &solana_sdk::signature::Signature,
+    ) -> Result<String, TransactionError> {
+        // Decode from base64
+        let unsigned_tx = base64::decode(base64_tx)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to decode base64: {}", e)))?;
+        
+        // Deserialize the unsigned transaction
+        let mut tx: Transaction = bincode1::deserialize(&unsigned_tx)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e)))?;
+        
+        tracing::info!("Adding signature for signer: {}", signer_pubkey);
+        tracing::info!("Current signatures: {}", tx.signatures.len());
+        
+        // Find the signer's position in the transaction
+        let signer_positions: Vec<usize> = tx.message.account_keys
+            .iter()
+            .enumerate()
+            .filter(|(_, key)| *key == signer_pubkey)
+            .map(|(i, _)| i)
+            .collect();
+        
+        if signer_positions.is_empty() {
+            return Err(TransactionError::InvalidPublicKey(
+                format!("Signer {} is not part of this transaction", signer_pubkey)
+            ));
+        }
+        
+        tracing::info!("Signer found at position(s): {:?}", signer_positions);
+        
+        // Check if this is the nonce authority (first instruction should be advance nonce)
+        let is_nonce_authority = if !tx.message.instructions.is_empty() {
+            let first_instruction = &tx.message.instructions[0];
+            // Advance nonce instruction has the authority as the second account
+            if first_instruction.accounts.len() > 1 {
+                let nonce_authority_index = first_instruction.accounts[1] as usize;
+                if nonce_authority_index < tx.message.account_keys.len() {
+                    let nonce_authority = &tx.message.account_keys[nonce_authority_index];
+                    *nonce_authority == *signer_pubkey
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        
+        // Check if this is also the sender (second instruction should be transfer)
+        let is_sender = if tx.message.instructions.len() > 1 {
+            let transfer_instruction = &tx.message.instructions[1];
+            if !transfer_instruction.accounts.is_empty() {
+                let sender_index = transfer_instruction.accounts[0] as usize;
+                if sender_index < tx.message.account_keys.len() {
+                    let sender = &tx.message.account_keys[sender_index];
+                    *sender == *signer_pubkey
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        
+        if is_nonce_authority && is_sender {
+            tracing::info!("✅ Signer is both nonce authority AND sender");
+            tracing::info!("   Adding signature for both roles");
+            
+            // Add signature for all positions where this signer appears
+            for &position in &signer_positions {
+                if position < tx.signatures.len() {
+                    tx.signatures[position] = *signature;
+                    tracing::info!("   Added signature at position {}", position);
+                }
+            }
+        } else if is_nonce_authority {
+            tracing::info!("✅ Signer is nonce authority");
+            // Add signature at nonce authority position
+            if let Some(&position) = signer_positions.first() {
+                if position < tx.signatures.len() {
+                    tx.signatures[position] = *signature;
+                    tracing::info!("   Added signature at position {}", position);
+                }
+            }
+        } else if is_sender {
+            tracing::info!("✅ Signer is sender");
+            // Add signature at sender position
+            if let Some(&position) = signer_positions.first() {
+                if position < tx.signatures.len() {
+                    tx.signatures[position] = *signature;
+                    tracing::info!("   Added signature at position {}", position);
+                }
+            }
+        } else {
+            tracing::info!("✅ Signer is fee payer or other role");
+            // Add signature at first occurrence
+            if let Some(&position) = signer_positions.first() {
+                if position < tx.signatures.len() {
+                    tx.signatures[position] = *signature;
+                    tracing::info!("   Added signature at position {}", position);
+                }
+            }
+        }
+        
+        // Count valid signatures
+        let valid_sigs = tx.signatures.iter()
+            .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
+            .count();
+        tracing::info!("Transaction now has {} valid signature(s)", valid_sigs);
+        
+        // Serialize the updated transaction
+        let serialized = bincode1::serialize(&tx)
+            .map_err(|e| TransactionError::Serialization(e.to_string()))?;
+        
+        // Encode to base64
+        let base64_tx = base64::encode(&serialized);
+        tracing::info!("Encoded updated transaction to base64: {} characters", base64_tx.len());
+        
+        Ok(base64_tx)
+    }
+    
+    /// Send and confirm a transaction from base64 encoded bytes
+    /// Decodes base64, deserializes, and submits to Solana
+    pub async fn send_and_confirm_transaction(&self, base64_tx: &str) -> Result<String, TransactionError> {
+        let client = self.rpc_client.as_ref().ok_or_else(|| {
+            TransactionError::RpcClient(
+                "RPC client not initialized. Use new_with_rpc()".to_string(),
+            )
+        })?;
+        
+        tracing::info!("Decoding base64 transaction...");
+        
+        // Decode from base64
+        let tx_bytes = base64::decode(base64_tx)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to decode base64: {}", e)))?;
+        
+        tracing::info!("Decoded {} bytes from base64", tx_bytes.len());
+        
+        // Deserialize the transaction
+        let tx: Transaction = bincode1::deserialize(&tx_bytes)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e)))?;
+        
+        tracing::info!("✅ Transaction deserialized successfully");
+        tracing::info!("   Signatures: {}", tx.signatures.len());
+        tracing::info!("   Instructions: {}", tx.message.instructions.len());
+        
+        // Verify transaction has signatures
+        let valid_sigs = tx.signatures.iter()
+            .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
+            .count();
+        
+        if valid_sigs == 0 {
+            return Err(TransactionError::Serialization(
+                "Transaction has no valid signatures".to_string()
+            ));
+        }
+        
+        tracing::info!("   Valid signatures: {}/{}", valid_sigs, tx.signatures.len());
+        
+        // Submit to Solana
+        tracing::info!("Submitting transaction to Solana...");
+        let signature = client.send_and_confirm_transaction(&tx)
+            .map_err(|e| TransactionError::RpcClient(format!("Failed to submit transaction: {}", e)))?;
+        
+        tracing::info!("✅ Transaction submitted successfully: {}", signature);
+        
+        Ok(signature.to_string())
+    }
+    
+    /// Create an unsigned SPL token transfer transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned SPL token transaction
+    /// Automatically derives ATAs from wallet pubkeys and mint address
+    pub async fn create_unsigned_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        recipient_wallet: &str,
+        fee_payer: &str,
+        mint_address: &str,
+        amount: u64,
+        nonce_account: &str,
+    ) -> Result<String, TransactionError> {
+        // Validate public keys
+        let sender_pubkey = Pubkey::from_str(sender_wallet)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid sender wallet: {}", e)))?;
+        let recipient_pubkey = Pubkey::from_str(recipient_wallet)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid recipient wallet: {}", e)))?;
+        let fee_payer_pubkey = Pubkey::from_str(fee_payer)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid fee payer: {}", e)))?;
+        let mint_pubkey = Pubkey::from_str(mint_address)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid mint address: {}", e)))?;
+        let nonce_account_pubkey = Pubkey::from_str(nonce_account)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid nonce account: {}", e)))?;
+        
+        // Derive Associated Token Accounts
+        let sender_token_account = spl_associated_token_account::get_associated_token_address(
+            &sender_pubkey,
+            &mint_pubkey,
+        );
+        let recipient_token_account = spl_associated_token_account::get_associated_token_address(
+            &recipient_pubkey,
+            &mint_pubkey,
+        );
+        
+        tracing::info!("Derived Associated Token Accounts:");
+        tracing::info!("  Sender ATA: {}", sender_token_account);
+        tracing::info!("  Recipient ATA: {}", recipient_token_account);
+        tracing::info!("  Mint: {}", mint_pubkey);
+        
+        // Fetch nonce account data to get the blockhash
+        tracing::info!("Fetching nonce account data from blockchain...");
+        let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+        
+        tracing::info!("Building unsigned SPL token transfer instructions...");
+        
+        // Create advance nonce instruction (must be first instruction)
+        // Use sender as nonce authority
+        let advance_nonce_ix = system_instruction::advance_nonce_account(
+            &nonce_account_pubkey,
+            &sender_pubkey  // Sender is the nonce authority
+        );
+        tracing::info!("✅ Instruction 1: Advance nonce account");
+        tracing::info!("   Nonce account: {}", nonce_account_pubkey);
+        tracing::info!("   Authority: {} (sender)", sender_pubkey);
+        
+        // Create SPL token transfer instruction
+        let spl_transfer_ix = spl_instruction::transfer(
+            &spl_token::id(),
+            &sender_token_account,
+            &recipient_token_account,
+            &sender_pubkey,  // Owner of sender token account
+            &[],  // No multisig signers
+            amount,
+        )
+        .map_err(|e| TransactionError::SolanaInstruction(e.to_string()))?;
+        
+        tracing::info!("✅ Instruction 2: SPL Token Transfer {} tokens", amount);
+        tracing::info!("   From token account: {}", sender_token_account);
+        tracing::info!("   To token account: {}", recipient_token_account);
+        tracing::info!("   Owner: {}", sender_pubkey);
+        tracing::info!("   Fee payer: {}", fee_payer_pubkey);
+        
+        // Create transaction with nonce advance as first instruction
+        let mut transaction = Transaction::new_with_payer(
+            &[advance_nonce_ix, spl_transfer_ix],
+            Some(&fee_payer_pubkey) // Fee payer pays the fee
+        );
+        tracing::info!("Unsigned SPL transaction created with {} instructions", transaction.message.instructions.len());
+        
+        // Use the nonce account's stored blockhash
+        transaction.message.recent_blockhash = nonce_data.blockhash();
+        tracing::info!("Transaction blockhash set from nonce account");
+        
+        // Serialize the UNSIGNED transaction using bincode 1.x (Solana wire format)
+        let serialized = bincode1::serialize(&transaction)
+            .map_err(|e| TransactionError::Serialization(e.to_string()))?;
+        
+        tracing::info!("Unsigned SPL transaction serialized: {} bytes (uncompressed)", serialized.len());
+        
+        // Encode to base64
+        let base64_tx = base64::encode(&serialized);
+        tracing::info!("Encoded to base64: {} characters", base64_tx.len());
+        tracing::info!("SPL transaction is ready for signing by sender/owner and fee payer");
+        
+        Ok(base64_tx)
+    }
+    
+    /// Create an unsigned transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned transaction
+    pub async fn create_unsigned_transaction(
+        &self,
+        sender: &str,
+        recipient: &str,
+        fee_payer: &str,
+        amount: u64,
+        nonce_account: &str,
+    ) -> Result<String, TransactionError> {
+        // Validate public keys
+        let sender_pubkey = Pubkey::from_str(sender)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid sender public key: {}", e)))?;
+        let recipient_pubkey = Pubkey::from_str(recipient)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid recipient public key: {}", e)))?;
+        let fee_payer_pubkey = Pubkey::from_str(fee_payer)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid fee payer public key: {}", e)))?;
+        let nonce_account_pubkey = Pubkey::from_str(nonce_account)
+            .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e)))?;
+        
+        // Fetch nonce account data to get the blockhash
+        tracing::info!("Fetching nonce account data from blockchain...");
+        let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+        
+        tracing::info!("Building unsigned transaction instructions...");
+        
+        // Create advance nonce instruction (must be first instruction)
+        // Use sender as nonce authority
+        let advance_nonce_ix = system_instruction::advance_nonce_account(
+            &nonce_account_pubkey,
+            &sender_pubkey  // Sender is the nonce authority
+        );
+        tracing::info!("✅ Instruction 1: Advance nonce account");
+        tracing::info!("   Nonce account: {}", nonce_account_pubkey);
+        tracing::info!("   Authority: {} (sender)", sender_pubkey);
+        
+        // Create transfer instruction
+        let transfer_ix = system_instruction::transfer(
+            &sender_pubkey,
+            &recipient_pubkey,
+            amount,
+        );
+        tracing::info!("✅ Instruction 2: Transfer {} lamports", amount);
+        tracing::info!("   From: {}", sender_pubkey);
+        tracing::info!("   To: {}", recipient_pubkey);
+        tracing::info!("   Fee payer: {}", fee_payer_pubkey);
+        
+        // Create transaction with nonce advance as first instruction
+        let mut transaction = Transaction::new_with_payer(
+            &[advance_nonce_ix, transfer_ix],
+            Some(&fee_payer_pubkey) // Fee payer pays the fee
+        );
+        tracing::info!("Unsigned transaction created with {} instructions", transaction.message.instructions.len());
+        
+        // Use the nonce account's stored blockhash
+        transaction.message.recent_blockhash = nonce_data.blockhash();
+        tracing::info!("Transaction blockhash set from nonce account");
+        
+        // Serialize the UNSIGNED transaction using bincode 1.x (Solana wire format)
+        let serialized = bincode1::serialize(&transaction)
+            .map_err(|e| TransactionError::Serialization(e.to_string()))?;
+        
+        tracing::info!("Unsigned transaction serialized: {} bytes (uncompressed)", serialized.len());
+        
+        // Encode to base64
+        let base64_tx = base64::encode(&serialized);
+        tracing::info!("Encoded to base64: {} characters", base64_tx.len());
+        tracing::info!("Transaction is ready for signing by sender and fee payer");
+        
+        Ok(base64_tx)
+    }
+    
     /// Create and sign a new transaction with durable nonce
     /// Creates a presigned transaction using a nonce account for longer lifetime
     /// Sender pays the gas fee
@@ -326,6 +673,63 @@ impl TransactionService {
         };
 
         Ok(nonce_data)
+    }
+    
+    /// Process and relay a presigned custom transaction
+    /// Takes a presigned transaction (base64), compresses, fragments, and returns fragments for relay
+    /// Returns fragments ready for BLE transmission
+    pub async fn process_and_relay_transaction(
+        &self,
+        base64_signed_tx: &str,
+    ) -> Result<Vec<Fragment>, TransactionError> {
+        tracing::info!("Processing presigned custom transaction for relay");
+        
+        // Decode from base64
+        let tx_bytes = base64::decode(base64_signed_tx)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to decode base64: {}", e)))?;
+        
+        tracing::info!("Decoded transaction: {} bytes", tx_bytes.len());
+        
+        // Validate it's a signed transaction
+        let tx: Transaction = bincode1::deserialize(&tx_bytes)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e)))?;
+        
+        // Verify transaction has signatures
+        let valid_sigs = tx.signatures.iter()
+            .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
+            .count();
+        
+        if valid_sigs == 0 {
+            return Err(TransactionError::Serialization(
+                "Transaction must be signed before processing for relay".to_string()
+            ));
+        }
+        
+        tracing::info!("✅ Transaction validated");
+        tracing::info!("   Valid signatures: {}/{}", valid_sigs, tx.signatures.len());
+        tracing::info!("   Instructions: {}", tx.message.instructions.len());
+        
+        // Compress the transaction if it exceeds the threshold
+        let compressed_tx = if tx_bytes.len() > COMPRESSION_THRESHOLD {
+            tracing::info!("Compressing transaction (threshold: {} bytes)", COMPRESSION_THRESHOLD);
+            let compressed = self.compressor.compress_with_size(&tx_bytes)?;
+            tracing::info!("Compressed: {} bytes -> {} bytes", tx_bytes.len(), compressed.len());
+            compressed
+        } else {
+            tracing::info!("Transaction below compression threshold, keeping uncompressed");
+            tx_bytes
+        };
+        
+        tracing::info!("Final transaction size: {} bytes", compressed_tx.len());
+        
+        // Fragment the transaction
+        let fragments = self.fragment_transaction(&compressed_tx);
+        
+        tracing::info!("✅ Transaction processed and ready for relay");
+        tracing::info!("   Created {} fragments for BLE transmission", fragments.len());
+        tracing::info!("   Each fragment has SHA-256 checksum for integrity verification");
+        
+        Ok(fragments)
     }
     
     /// Fragment a transaction for BLE transmission
