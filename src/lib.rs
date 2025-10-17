@@ -145,6 +145,105 @@ impl PolliNetSDK {
             .await?)
     }
     
+    /// Prepare offline nonce data for creating transactions without internet
+    /// Fetches and caches nonce account data that can be used offline
+    /// 
+    /// Call this while online to prepare for offline transaction creation
+    /// Returns CachedNonceData that can be saved and used offline
+    pub async fn prepare_offline_nonce_data(
+        &self,
+        nonce_account: &str,
+    ) -> Result<transaction::CachedNonceData, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .prepare_offline_nonce_data(nonce_account)
+            .await?)
+    }
+    
+    /// Prepare multiple nonce accounts for offline use
+    /// Smart bundle management: refreshes used nonces (FREE!), creates new ones only when necessary
+    /// 
+    /// COST OPTIMIZATION:
+    /// - Refreshes used/advanced nonces by fetching new blockhash (FREE!)
+    /// - Only creates NEW nonce accounts if total < count (~$0.20 each)
+    /// - Saves money by reusing existing nonce accounts
+    /// 
+    /// If bundle_file exists:
+    ///   - Loads existing bundle
+    ///   - Refreshes used nonces (fetches new blockhash from advanced nonces) - FREE!
+    ///   - Creates additional accounts ONLY if total < count
+    ///   - Returns bundle with 'count' nonces ready to use
+    /// If bundle_file doesn't exist:
+    ///   - Creates new bundle with 'count' nonce accounts
+    /// 
+    /// Example:
+    /// ```rust,no_run
+    /// # use pollinet::PolliNetSDK;
+    /// # use solana_sdk::signature::Keypair;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let sdk = PolliNetSDK::new_with_rpc("https://api.devnet.solana.com").await?;
+    /// let sender_keypair = Keypair::new();
+    /// 
+    /// // First time: Creates 10 new nonce accounts (~$2.00)
+    /// let bundle = sdk.prepare_offline_bundle(10, &sender_keypair, Some("bundle.json")).await?;
+    /// bundle.save_to_file("bundle.json")?;
+    /// 
+    /// // After using 7 nonces: Refreshes 7 used nonces (FREE!), creates 0 new
+    /// let bundle = sdk.prepare_offline_bundle(10, &sender_keypair, Some("bundle.json")).await?;
+    /// // Cost: $0.00! Saved $1.40 by refreshing instead of creating new!
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn prepare_offline_bundle(
+        &self,
+        count: usize,
+        sender_keypair: &solana_sdk::signature::Keypair,
+        bundle_file: Option<&str>,
+    ) -> Result<transaction::OfflineTransactionBundle, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .prepare_offline_bundle(count, sender_keypair, bundle_file)
+            .await?)
+    }
+    
+    /// Create transaction completely offline using cached nonce data
+    /// NO internet connection required - all data comes from cached_nonce
+    /// 
+    /// Returns compressed transaction bytes ready for BLE transmission
+    pub fn create_offline_transaction(
+        &self,
+        sender_keypair: &solana_sdk::signature::Keypair,
+        recipient: &str,
+        amount: u64,
+        nonce_authority_keypair: &solana_sdk::signature::Keypair,
+        cached_nonce: &transaction::CachedNonceData,
+    ) -> Result<Vec<u8>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_offline_transaction(
+                sender_keypair,
+                recipient,
+                amount,
+                nonce_authority_keypair,
+                cached_nonce,
+            )?)
+    }
+    
+    /// Submit offline-created transaction to blockchain
+    /// Optionally verifies nonce is still valid before submission
+    /// 
+    /// Returns transaction signature if successful
+    pub async fn submit_offline_transaction(
+        &self,
+        compressed_tx: &[u8],
+        verify_nonce: bool,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .submit_offline_transaction(compressed_tx, verify_nonce)
+            .await?)
+    }
+    
     /// Add a signature to an unsigned transaction (base64 encoded)
     /// Intelligently adds signature based on signer's role
     /// If signer is nonce authority and sender, signature is added for both roles

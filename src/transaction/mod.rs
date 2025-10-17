@@ -42,6 +42,76 @@ pub enum FragmentType {
     FragmentEnd,
 }
 
+/// Cached nonce account data for offline transaction creation
+/// This data is fetched once while online and used to create transactions offline
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedNonceData {
+    /// Nonce account public key
+    pub nonce_account: String,
+    /// Nonce authority public key
+    pub authority: String,
+    /// Stored blockhash from nonce account (durable)
+    pub blockhash: String,
+    /// Fee per signature (lamports)
+    pub lamports_per_signature: u64,
+    /// Unix timestamp when this data was cached
+    pub cached_at: u64,
+    /// Whether this nonce has been used (for tracking)
+    #[serde(default)]
+    pub used: bool,
+}
+
+/// Bundle of multiple nonce accounts prepared for offline use
+/// Allows creating multiple offline transactions (one per nonce account)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OfflineTransactionBundle {
+    /// Cached nonce data for each nonce account
+    pub nonce_caches: Vec<CachedNonceData>,
+    /// Maximum number of transactions that can be created
+    pub max_transactions: usize,
+    /// Unix timestamp when this bundle was created
+    pub created_at: u64,
+}
+
+/// Transaction packet for BLE transmission
+/// Contains pre-signed transaction and metadata
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BLETransactionPacket {
+    /// Pre-signed, possibly compressed transaction bytes
+    pub transaction_bytes: Vec<u8>,
+    /// Metadata for diagnostics and verification
+    pub metadata: TransactionMetadata,
+    /// SHA-256 checksum for integrity verification
+    pub checksum: [u8; 32],
+}
+
+/// Nonce refresh request sent from online device back to offline device
+/// Used when nonce has been advanced and transaction needs to be rebuilt
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NonceRefreshRequest {
+    /// Nonce account that was advanced
+    pub nonce_account: String,
+    /// New blockhash from advanced nonce
+    pub new_blockhash: String,
+    /// New nonce authority
+    pub new_authority: String,
+    /// Original transaction recipient
+    pub original_recipient: String,
+    /// Original transaction amount
+    pub original_amount: u64,
+    /// Timestamp of refresh request
+    pub timestamp: u64,
+}
+
+/// Success confirmation sent back over BLE
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SuccessConfirmation {
+    /// Transaction signature
+    pub signature: String,
+    /// Timestamp of successful submission
+    pub timestamp: u64,
+}
+
 /// Pending transaction in local cache
 #[derive(Debug, Clone)]
 pub struct PendingTransaction {
@@ -56,7 +126,7 @@ pub struct PendingTransaction {
 }
 
 /// Transaction metadata
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionMetadata {
     /// Sender public key
     pub sender: String,
@@ -68,6 +138,138 @@ pub struct TransactionMetadata {
     pub max_fee: u64,
     /// Expiration timestamp
     pub expires_at: Option<std::time::SystemTime>,
+}
+
+impl OfflineTransactionBundle {
+    /// Create a new empty offline transaction bundle
+    pub fn new() -> Self {
+        Self {
+            nonce_caches: Vec::new(),
+            max_transactions: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        }
+    }
+    
+    /// Add a cached nonce to the bundle
+    pub fn add_nonce(&mut self, mut cached_nonce: CachedNonceData) {
+        cached_nonce.used = false; // Ensure it's marked as unused
+        self.nonce_caches.push(cached_nonce);
+        self.max_transactions = self.nonce_caches.len();
+    }
+    
+    /// Get a nonce cache by index
+    pub fn get_nonce(&self, index: usize) -> Option<&CachedNonceData> {
+        self.nonce_caches.get(index)
+    }
+    
+    /// Get the next available (unused) nonce
+    /// Returns (index, nonce) of the first unused nonce
+    pub fn get_next_available_nonce(&self) -> Option<(usize, &CachedNonceData)> {
+        self.nonce_caches
+            .iter()
+            .enumerate()
+            .find(|(_, nonce)| !nonce.used)
+    }
+    
+    /// Mark a nonce as used by index
+    pub fn mark_used(&mut self, index: usize) -> Result<(), String> {
+        if let Some(nonce) = self.nonce_caches.get_mut(index) {
+            nonce.used = true;
+            Ok(())
+        } else {
+            Err(format!("Invalid nonce index: {}", index))
+        }
+    }
+    
+    /// Mark a nonce as used by nonce account address
+    pub fn mark_used_by_account(&mut self, nonce_account: &str) -> Result<(), String> {
+        if let Some(nonce) = self.nonce_caches
+            .iter_mut()
+            .find(|n| n.nonce_account == nonce_account)
+        {
+            nonce.used = true;
+            Ok(())
+        } else {
+            Err(format!("Nonce account not found: {}", nonce_account))
+        }
+    }
+    
+    /// Get the number of total nonces (used + unused)
+    pub fn total_nonces(&self) -> usize {
+        self.nonce_caches.len()
+    }
+    
+    /// Get the number of available (unused) nonces
+    pub fn available_nonces(&self) -> usize {
+        self.nonce_caches.iter().filter(|n| !n.used).count()
+    }
+    
+    /// Get the number of used nonces
+    pub fn used_nonces(&self) -> usize {
+        self.nonce_caches.iter().filter(|n| n.used).count()
+    }
+    
+    /// Check if the bundle has any available nonces
+    pub fn is_empty(&self) -> bool {
+        self.available_nonces() == 0
+    }
+    
+    /// Get the age of this bundle in hours
+    pub fn age_hours(&self) -> u64 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        (now - self.created_at) / 3600
+    }
+    
+    /// Save bundle to JSON file
+    /// Saves ALL nonces (including used ones) so they can be refreshed later
+    /// 
+    /// Used nonces will be automatically refreshed (fetch new blockhash) when
+    /// prepare_offline_bundle() is called again - this is FREE and saves costs!
+    /// 
+    /// NEVER removes used nonces - they are valuable and will be refreshed!
+    pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+    
+    /// Load bundle from JSON file
+    pub fn load_from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let json = std::fs::read_to_string(path)?;
+        let bundle: Self = serde_json::from_str(&json)?;
+        Ok(bundle)
+    }
+}
+
+impl BLETransactionPacket {
+    /// Create a new BLE transaction packet
+    pub fn new(transaction_bytes: Vec<u8>, metadata: TransactionMetadata) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&transaction_bytes);
+        let checksum: [u8; 32] = hasher.finalize().into();
+        
+        Self {
+            transaction_bytes,
+            metadata,
+            checksum,
+        }
+    }
+    
+    /// Verify the checksum matches the transaction bytes
+    pub fn verify_checksum(&self) -> bool {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&self.transaction_bytes);
+        let computed: [u8; 32] = hasher.finalize().into();
+        computed == self.checksum
+    }
 }
 
 /// Local transaction cache for store-and-forward functionality
@@ -794,6 +996,364 @@ impl TransactionService {
         };
 
         Ok(nonce_data)
+    }
+
+    /// Prepare offline nonce data for creating transactions without internet
+    /// Fetches and caches nonce account data that can be used offline
+    /// 
+    /// This should be called while online to prepare for offline transaction creation
+    pub async fn prepare_offline_nonce_data(
+        &self,
+        nonce_account: &str,
+    ) -> Result<CachedNonceData, TransactionError> {
+        let nonce_pubkey = Pubkey::from_str(nonce_account).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid nonce account: {}", e))
+        })?;
+
+        tracing::info!("Fetching nonce data for offline use: {}", nonce_account);
+        let nonce_data = self.fetch_nonce_account_data(&nonce_pubkey).await?;
+
+        let cached = CachedNonceData {
+            nonce_account: nonce_account.to_string(),
+            authority: nonce_data.authority.to_string(),
+            blockhash: nonce_data.blockhash().to_string(),
+            lamports_per_signature: nonce_data.fee_calculator.lamports_per_signature,
+            cached_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            used: false, // Initialize as unused
+        };
+
+        tracing::info!("✅ Nonce data cached for offline use");
+        tracing::info!("   Authority: {}", cached.authority);
+        tracing::info!("   Blockhash: {}", cached.blockhash);
+        tracing::info!("   Fee: {} lamports", cached.lamports_per_signature);
+
+        Ok(cached)
+    }
+
+    /// Prepare multiple nonce accounts for offline use
+    /// Smart bundle management: refreshes used nonces, creates new ones only when necessary
+    /// 
+    /// If bundle_file exists:
+    ///   - Loads existing bundle
+    ///   - Refreshes used nonces (fetches new blockhash from advanced nonces)
+    ///   - Creates additional nonces ONLY if total < count
+    ///   - Returns bundle with exactly 'count' nonces ready to use
+    /// If bundle_file doesn't exist:
+    ///   - Creates new bundle with 'count' nonce accounts
+    /// 
+    /// This saves money by reusing existing nonce accounts instead of creating new ones!
+    /// 
+    /// Returns an OfflineTransactionBundle ready to use
+    pub async fn prepare_offline_bundle(
+        &self,
+        count: usize,
+        sender_keypair: &Keypair,
+        bundle_file: Option<&str>,
+    ) -> Result<OfflineTransactionBundle, TransactionError> {
+        let client = self.rpc_client.as_ref().ok_or_else(|| {
+            TransactionError::RpcClient(
+                "RPC client not initialized. Use new_with_rpc()".to_string(),
+            )
+        })?;
+
+        tracing::info!("Preparing offline bundle for {} transactions...", count);
+        
+        // Try to load existing bundle
+        let mut bundle = if let Some(file_path) = bundle_file {
+            match OfflineTransactionBundle::load_from_file(file_path) {
+                Ok(existing_bundle) => {
+                    tracing::info!("📂 Found existing bundle: {}", file_path);
+                    tracing::info!("   Total nonces: {}", existing_bundle.total_nonces());
+                    tracing::info!("   Available (unused): {}", existing_bundle.available_nonces());
+                    tracing::info!("   Used: {}", existing_bundle.used_nonces());
+                    existing_bundle
+                }
+                Err(e) => {
+                    tracing::info!("📂 No existing bundle found ({})", e);
+                    tracing::info!("   Creating new bundle...");
+                    OfflineTransactionBundle::new()
+                }
+            }
+        } else {
+            tracing::info!("📂 No bundle file specified, creating new bundle");
+            OfflineTransactionBundle::new()
+        };
+
+        // Refresh used nonces (they've been advanced, fetch new blockhash)
+        let used_count = bundle.used_nonces();
+        if used_count > 0 {
+            tracing::info!("♻️  Refreshing {} used nonce accounts (advanced)...", used_count);
+            
+            let mut refreshed = 0;
+            for nonce in bundle.nonce_caches.iter_mut() {
+                if nonce.used {
+                    tracing::info!("   Refreshing nonce: {}", nonce.nonce_account);
+                    
+                    // Fetch updated nonce data (nonce was advanced)
+                    match self.prepare_offline_nonce_data(&nonce.nonce_account).await {
+                        Ok(fresh_data) => {
+                            // Update with new blockhash (nonce was advanced)
+                            nonce.authority = fresh_data.authority;
+                            nonce.blockhash = fresh_data.blockhash;
+                            nonce.lamports_per_signature = fresh_data.lamports_per_signature;
+                            nonce.cached_at = fresh_data.cached_at;
+                            nonce.used = false; // Mark as available again!
+                            
+                            refreshed += 1;
+                            tracing::info!("     ✅ Refreshed with new blockhash: {}", nonce.blockhash);
+                        }
+                        Err(e) => {
+                            tracing::warn!("     ⚠️  Failed to refresh: {}", e);
+                            tracing::warn!("     Keeping nonce marked as used");
+                        }
+                    }
+                }
+            }
+            
+            if refreshed > 0 {
+                tracing::info!("✅ Refreshed {} nonce accounts (FREE!)", refreshed);
+                tracing::info!("   These nonces can be reused for new transactions");
+            }
+        }
+
+        let total = bundle.total_nonces();
+        let available = bundle.available_nonces();
+        
+        if total >= count {
+            // We have enough nonce accounts (including refreshed ones)!
+            tracing::info!("✅ Sufficient nonce accounts: {} total (need {})", total, count);
+            if available < count {
+                tracing::info!("   {} are currently available", available);
+                tracing::info!("   {} were refreshed and are now available", total - available);
+            }
+            tracing::info!("   No new nonce accounts needed");
+        } else {
+            // Need to create more nonce accounts
+            let needed = count - total;
+            tracing::info!("⚠️  Need {} more nonce accounts (have {}, need {})", needed, total, count);
+            tracing::info!("   Creating {} new nonce accounts...", needed);
+            
+            for i in 0..needed {
+                tracing::info!("Creating nonce account {}/{}...", i + 1, needed);
+                
+                // Create nonce account
+                let nonce_keypair = crate::nonce::create_nonce_account(client, sender_keypair)
+                    .await
+                    .map_err(|e| TransactionError::RpcClient(format!("Failed to create nonce account: {}", e)))?;
+                
+                // Wait for confirmation
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                
+                // Fetch and cache nonce data
+                let cached_nonce = self.prepare_offline_nonce_data(
+                    &nonce_keypair.pubkey().to_string()
+                ).await?;
+                
+                bundle.add_nonce(cached_nonce);
+                tracing::info!("  ✅ Nonce account {}/{} prepared", i + 1, needed);
+            }
+            
+            tracing::info!("✅ Created {} new nonce accounts", needed);
+        }
+
+        tracing::info!("✅ Bundle ready with {} nonce accounts", bundle.total_nonces());
+        tracing::info!("   Available for offline transactions: {}", bundle.available_nonces());
+
+        Ok(bundle)
+    }
+
+    /// Create transaction completely offline using cached nonce data
+    /// NO internet connection required - all data comes from cached_nonce
+    /// 
+    /// This allows true offline transaction creation after preparing nonce data online
+    pub fn create_offline_transaction(
+        &self,
+        sender_keypair: &Keypair,
+        recipient: &str,
+        amount: u64,
+        nonce_authority_keypair: &Keypair,
+        cached_nonce: &CachedNonceData,
+    ) -> Result<Vec<u8>, TransactionError> {
+        // Validate public keys
+        let sender_pubkey = sender_keypair.pubkey();
+        let recipient_pubkey = Pubkey::from_str(recipient).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid recipient: {}", e))
+        })?;
+        let nonce_account_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid nonce account: {}", e))
+        })?;
+        let nonce_blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid blockhash: {}", e))
+        })?;
+
+        // Verify nonce authority matches
+        if nonce_authority_keypair.pubkey().to_string() != cached_nonce.authority {
+            return Err(TransactionError::InvalidPublicKey(format!(
+                "Nonce authority mismatch. Expected: {}, Got: {}",
+                cached_nonce.authority,
+                nonce_authority_keypair.pubkey()
+            )));
+        }
+
+        // Calculate age of cached data
+        let age_seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() - cached_nonce.cached_at;
+        let age_hours = age_seconds / 3600;
+
+        if age_hours > 24 {
+            tracing::warn!("⚠️  Cached nonce data is {} hours old", age_hours);
+            tracing::warn!("   Nonce may have been advanced by another party");
+            tracing::warn!("   Transaction may fail if nonce is no longer valid");
+        }
+
+        tracing::info!("Creating transaction OFFLINE using cached nonce data");
+        tracing::info!("   Nonce account: {}", cached_nonce.nonce_account);
+        tracing::info!("   Nonce blockhash: {}", cached_nonce.blockhash);
+        tracing::info!("   Cached {} hours ago", age_hours);
+        tracing::info!("   NO internet connection required");
+
+        // Create instructions (NO RPC calls needed)
+        let advance_nonce_ix = system_instruction::advance_nonce_account(
+            &nonce_account_pubkey,
+            &nonce_authority_keypair.pubkey(),
+        );
+        tracing::info!("✅ Instruction 1: Advance nonce account (offline)");
+
+        let transfer_ix = system_instruction::transfer(&sender_pubkey, &recipient_pubkey, amount);
+        tracing::info!("✅ Instruction 2: Transfer {} lamports (offline)", amount);
+
+        // Create transaction
+        let mut transaction = Transaction::new_with_payer(
+            &[advance_nonce_ix, transfer_ix],
+            Some(&sender_pubkey),
+        );
+
+        // Use cached blockhash (NOT recent blockhash from network)
+        transaction.message.recent_blockhash = nonce_blockhash;
+
+        // Sign offline
+        transaction.sign(
+            &[nonce_authority_keypair, sender_keypair],
+            nonce_blockhash,
+        );
+
+        tracing::info!("✅ Transaction signed offline");
+
+        // Serialize (still offline)
+        let serialized = bincode1::serialize(&transaction)
+            .map_err(|e| TransactionError::Serialization(e.to_string()))?;
+
+        tracing::info!("Transaction serialized: {} bytes", serialized.len());
+
+        // Compress if needed (still offline)
+        let compressed = if serialized.len() > COMPRESSION_THRESHOLD {
+            tracing::info!("Compressing transaction (threshold: {} bytes)", COMPRESSION_THRESHOLD);
+            let compressed = self.compressor.compress_with_size(&serialized)?;
+            tracing::info!("Compressed: {} bytes -> {} bytes", serialized.len(), compressed.len());
+            compressed
+        } else {
+            tracing::info!("Transaction below compression threshold, keeping uncompressed");
+            serialized
+        };
+
+        tracing::info!("✅ OFFLINE transaction created: {} bytes", compressed.len());
+        tracing::info!("   Ready for BLE transmission and later submission");
+
+        Ok(compressed)
+    }
+
+    /// Submit offline-created transaction to blockchain
+    /// Optionally verifies nonce is still valid before submission
+    /// 
+    /// Returns transaction signature if successful
+    pub async fn submit_offline_transaction(
+        &self,
+        compressed_tx: &[u8],
+        verify_nonce: bool,
+    ) -> Result<String, TransactionError> {
+        tracing::info!("Submitting offline-created transaction");
+
+        // Decompress if needed
+        let decompressed = if compressed_tx.len() >= 8 && compressed_tx.starts_with(b"LZ4") {
+            tracing::info!("✅ Detected LZ4 compression, decompressing...");
+            self.compressor.decompress_with_size(compressed_tx)?
+        } else {
+            tracing::info!("No compression detected, using raw data");
+            compressed_tx.to_vec()
+        };
+
+        // Deserialize transaction
+        let tx: Transaction = bincode1::deserialize(&decompressed).map_err(|e| {
+            TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e))
+        })?;
+
+        tracing::info!("✅ Transaction deserialized");
+        tracing::info!("   Signatures: {}", tx.signatures.len());
+        tracing::info!("   Instructions: {}", tx.message.instructions.len());
+        tracing::info!("   Blockhash: {}", tx.message.recent_blockhash);
+
+        // Optional: Verify nonce account hasn't been advanced
+        if verify_nonce {
+            tracing::info!("Verifying nonce account is still valid...");
+
+            // Extract nonce account from first instruction
+            if let Some(first_ix) = tx.message.instructions.first() {
+                if !first_ix.accounts.is_empty() {
+                    let nonce_account = &tx.message.account_keys[first_ix.accounts[0] as usize];
+
+                    match self.fetch_nonce_account_data(nonce_account).await {
+                        Ok(current_nonce) => {
+                            if current_nonce.blockhash() != tx.message.recent_blockhash {
+                                tracing::error!("❌ Nonce verification FAILED!");
+                                tracing::error!("   Transaction blockhash: {}", tx.message.recent_blockhash);
+                                tracing::error!("   Current nonce blockhash: {}", current_nonce.blockhash());
+                                return Err(TransactionError::InvalidNonceAccount(
+                                    "Nonce has been advanced, transaction is now invalid".to_string()
+                                ));
+                            }
+                            tracing::info!("✅ Nonce verification passed");
+                            tracing::info!("   Nonce is still valid and matches transaction");
+
+                            // todo: resend a message to origin to resend transaction with another detail
+                        }
+                        Err(e) => {
+                            tracing::warn!("⚠️  Could not verify nonce: {}", e);
+                            tracing::warn!("   Proceeding with submission anyway");
+                        }
+                    }
+                }
+            }
+        } else {
+            tracing::info!("Skipping nonce verification (not requested)");
+        }
+
+        // Submit to blockchain
+        let client = self.rpc_client.as_ref().ok_or_else(|| {
+            TransactionError::RpcClient("RPC client not initialized. Use new_with_rpc()".to_string())
+        })?;
+
+        tracing::info!("Submitting transaction to Solana...");
+        let signature = client.send_and_confirm_transaction(&tx).map_err(|e| {
+            let error_msg = e.to_string();
+            if error_msg.contains("Blockhash not found") {
+                tracing::error!("❌ Blockhash not found - nonce was likely advanced");
+                TransactionError::InvalidNonceAccount(
+                    "Nonce has been advanced, transaction invalid".to_string()
+                )
+            } else {
+                TransactionError::RpcClient(format!("Failed to submit transaction: {}", e))
+            }
+        })?;
+
+        tracing::info!("✅ Offline transaction submitted successfully!");
+        tracing::info!("   Signature: {}", signature);
+
+        Ok(signature.to_string())
     }
 
     /// Process and relay a presigned custom transaction
