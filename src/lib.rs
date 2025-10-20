@@ -71,6 +71,232 @@ impl PolliNetSDK {
         Ok(())
     }
 
+    /// Create an unsigned transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned transaction
+    /// Sender is used as nonce authority
+    pub async fn create_unsigned_transaction(
+        &self,
+        sender: &str,
+        recipient: &str,
+        fee_payer: &str,
+        amount: u64,
+        nonce_account: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_transaction(
+                sender,
+                recipient,
+                fee_payer,
+                amount,
+                nonce_account,
+            )
+            .await?)
+    }
+    
+    /// Create an unsigned SPL token transfer transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned SPL token transaction
+    /// Automatically derives ATAs from wallet pubkeys and mint address
+    /// Sender is used as nonce authority
+    pub async fn create_unsigned_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        recipient_wallet: &str,
+        fee_payer: &str,
+        mint_address: &str,
+        amount: u64,
+        nonce_account: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_spl_transaction(
+                sender_wallet,
+                recipient_wallet,
+                fee_payer,
+                mint_address,
+                amount,
+                nonce_account,
+            )
+            .await?)
+    }
+    
+    /// Create an unsigned governance vote transaction with durable nonce
+    /// Returns base64 encoded uncompressed, unsigned vote transaction
+    /// Voter is used as nonce authority
+    pub async fn cast_unsigned_vote(
+        &self,
+        voter: &str,
+        proposal_id: &str,
+        vote_account: &str,
+        choice: u8,
+        fee_payer: &str,
+        nonce_account: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .cast_unsigned_vote(
+                voter,
+                proposal_id,
+                vote_account,
+                choice,
+                fee_payer,
+                nonce_account,
+            )
+            .await?)
+    }
+    
+    /// Prepare offline nonce data for creating transactions without internet
+    /// Fetches and caches nonce account data that can be used offline
+    /// 
+    /// Call this while online to prepare for offline transaction creation
+    /// Returns CachedNonceData that can be saved and used offline
+    pub async fn prepare_offline_nonce_data(
+        &self,
+        nonce_account: &str,
+    ) -> Result<transaction::CachedNonceData, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .prepare_offline_nonce_data(nonce_account)
+            .await?)
+    }
+    
+    /// Prepare multiple nonce accounts for offline use
+    /// Smart bundle management: refreshes used nonces (FREE!), creates new ones only when necessary
+    /// 
+    /// COST OPTIMIZATION:
+    /// - Refreshes used/advanced nonces by fetching new blockhash (FREE!)
+    /// - Only creates NEW nonce accounts if total < count (~$0.20 each)
+    /// - Saves money by reusing existing nonce accounts
+    /// 
+    /// If bundle_file exists:
+    ///   - Loads existing bundle
+    ///   - Refreshes used nonces (fetches new blockhash from advanced nonces) - FREE!
+    ///   - Creates additional accounts ONLY if total < count
+    ///   - Returns bundle with 'count' nonces ready to use
+    /// If bundle_file doesn't exist:
+    ///   - Creates new bundle with 'count' nonce accounts
+    /// 
+    /// Example:
+    /// ```rust,no_run
+    /// # use pollinet::PolliNetSDK;
+    /// # use solana_sdk::signature::Keypair;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let sdk = PolliNetSDK::new_with_rpc("https://api.devnet.solana.com").await?;
+    /// let sender_keypair = Keypair::new();
+    /// 
+    /// // First time: Creates 10 new nonce accounts (~$2.00)
+    /// let bundle = sdk.prepare_offline_bundle(10, &sender_keypair, Some("bundle.json")).await?;
+    /// bundle.save_to_file("bundle.json")?;
+    /// 
+    /// // After using 7 nonces: Refreshes 7 used nonces (FREE!), creates 0 new
+    /// let bundle = sdk.prepare_offline_bundle(10, &sender_keypair, Some("bundle.json")).await?;
+    /// // Cost: $0.00! Saved $1.40 by refreshing instead of creating new!
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn prepare_offline_bundle(
+        &self,
+        count: usize,
+        sender_keypair: &solana_sdk::signature::Keypair,
+        bundle_file: Option<&str>,
+    ) -> Result<transaction::OfflineTransactionBundle, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .prepare_offline_bundle(count, sender_keypair, bundle_file)
+            .await?)
+    }
+    
+    /// Create transaction completely offline using cached nonce data
+    /// NO internet connection required - all data comes from cached_nonce
+    /// 
+    /// Returns compressed transaction bytes ready for BLE transmission
+    pub fn create_offline_transaction(
+        &self,
+        sender_keypair: &solana_sdk::signature::Keypair,
+        recipient: &str,
+        amount: u64,
+        nonce_authority_keypair: &solana_sdk::signature::Keypair,
+        cached_nonce: &transaction::CachedNonceData,
+    ) -> Result<Vec<u8>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_offline_transaction(
+                sender_keypair,
+                recipient,
+                amount,
+                nonce_authority_keypair,
+                cached_nonce,
+            )?)
+    }
+    
+    /// Submit offline-created transaction to blockchain
+    /// Optionally verifies nonce is still valid before submission
+    /// 
+    /// Returns transaction signature if successful
+    pub async fn submit_offline_transaction(
+        &self,
+        compressed_tx: &[u8],
+        verify_nonce: bool,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .submit_offline_transaction(compressed_tx, verify_nonce)
+            .await?)
+    }
+    
+    /// Add a signature to an unsigned transaction (base64 encoded)
+    /// Intelligently adds signature based on signer's role
+    /// If signer is nonce authority and sender, signature is added for both roles
+    /// Returns base64 encoded updated transaction
+    pub fn add_signature(
+        &self,
+        base64_tx: &str,
+        signer_pubkey: &solana_sdk::pubkey::Pubkey,
+        signature: &solana_sdk::signature::Signature,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .add_signature(base64_tx, signer_pubkey, signature)?)
+    }
+    
+    /// Send and confirm a base64 encoded transaction
+    /// Decodes, deserializes, validates, and submits to Solana
+    pub async fn send_and_confirm_transaction(
+        &self,
+        base64_tx: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .send_and_confirm_transaction(base64_tx)
+            .await?)
+    }
+    
+    /// Process and relay a presigned custom transaction
+    /// Takes a presigned transaction (base64), compresses, fragments, and relays over BLE
+    /// Returns transaction ID for tracking
+    pub async fn process_and_relay_transaction(
+        &self,
+        base64_signed_tx: &str,
+    ) -> Result<String, PolliNetError> {
+        // Process the transaction (compress and fragment)
+        let fragments = self
+            .transaction_service
+            .process_and_relay_transaction(base64_signed_tx)
+            .await?;
+        
+        // Get transaction ID from first fragment
+        let tx_id = fragments.first()
+            .map(|f| f.id.clone())
+            .ok_or_else(|| PolliNetError::Transaction(
+                transaction::TransactionError::Serialization("No fragments created".to_string())
+            ))?;
+        
+        // Relay fragments over BLE mesh
+        self.ble_transport.relay_fragments(fragments).await?;
+        
+        Ok(tx_id)
+    }
+    
     /// Create and sign a new transaction with durable nonce
     /// Creates a presigned transaction using a nonce account for longer lifetime
     pub async fn create_transaction(
@@ -88,6 +314,33 @@ impl PolliNetSDK {
                 sender,
                 sender_keypair,
                 recipient,
+                amount,
+                nonce_account,
+                nonce_authority_keypair,
+            )
+            .await?)
+    }
+    
+    /// Create and sign a new SPL token transfer transaction with durable nonce
+    /// Creates a presigned SPL token transaction using a nonce account for longer lifetime
+    /// Automatically derives Associated Token Accounts from wallet pubkeys and mint address
+    pub async fn create_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        sender_keypair: &solana_sdk::signature::Keypair,
+        recipient_wallet: &str,
+        mint_address: &str,
+        amount: u64,
+        nonce_account: &str,
+        nonce_authority_keypair: &solana_sdk::signature::Keypair,
+    ) -> Result<Vec<u8>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_spl_transaction(
+                sender_wallet,
+                sender_keypair,
+                recipient_wallet,
+                mint_address,
                 amount,
                 nonce_account,
                 nonce_authority_keypair,
@@ -135,11 +388,20 @@ impl PolliNetSDK {
             .await?)
     }
 
-    /// Cast a governance vote (example use case)
-    pub async fn cast_vote(&self, proposal_id: &str, choice: u8) -> Result<(), PolliNetError> {
+    /// Cast a governance vote with durable nonce
+    /// Creates a presigned vote transaction using a nonce account for longer lifetime
+    /// Returns compressed transaction bytes ready for BLE transmission
+    pub async fn cast_vote(
+        &self,
+        voter_keypair: &solana_sdk::signature::Keypair,
+        proposal_id: &str,
+        vote_account: &str,
+        choice: u8,
+        nonce_account: &str,
+    ) -> Result<Vec<u8>, PolliNetError> {
         Ok(self
             .transaction_service
-            .cast_vote(proposal_id, choice)
+            .cast_vote(voter_keypair, proposal_id, vote_account, choice, nonce_account)
             .await?)
     }
 
