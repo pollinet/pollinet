@@ -93,6 +93,13 @@ pub struct AdapterInfo {
     pub discoverable: bool,
 }
 
+impl std::fmt::Display for AdapterInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({}) - {} - Powered: {} - Discoverable: {}", 
+               self.name, self.platform, self.address, self.powered, self.discoverable)
+    }
+}
+
 /// Information about a discovered BLE device
 #[derive(Debug, Clone)]
 pub struct DiscoveredDevice {

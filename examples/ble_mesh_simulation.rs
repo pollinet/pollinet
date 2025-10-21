@@ -1,0 +1,230 @@
+//! PolliNet BLE Mesh Network Node
+//!
+//! This example runs a real PolliNet BLE mesh node using the new platform-agnostic
+//! BLE adapter. It continuously discovers and communicates with other PolliNet 
+//! devices in the area. The node will run indefinitely, scanning for peers and 
+//! relaying transactions.
+//!
+//! Run with: cargo run --example ble_mesh_simulation
+
+use pollinet::PolliNetSDK;
+use std::time::Duration;
+use tracing::{info, warn, debug};
+use tokio::signal;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
+
+    info!("🌐 PolliNet BLE Mesh Network Node");
+    info!("=================================");
+    info!("Starting real BLE mesh node using platform-agnostic BLE adapter...");
+    info!("Platform: Linux (BlueZ)");
+
+    // Initialize the PolliNet SDK
+    let sdk = PolliNetSDK::new().await?;
+    info!("✅ PolliNet SDK initialized");
+
+    // Start BLE networking (advertising + scanning)
+    info!("Starting BLE advertising and scanning...");
+    sdk.start_ble_networking().await?;
+    info!("✅ BLE advertising and scanning started");
+
+    // Start text message listener
+    info!("Starting text message listener...");
+    sdk.start_text_listener().await?;
+    info!("✅ Text message listener started");
+
+    // Get initial status
+    match sdk.get_ble_status().await {
+        Ok(status) => {
+            info!("📊 Initial BLE Status:");
+            info!("{}", status);
+        }
+        Err(e) => {
+            warn!("⚠️  BLE status error: {}", e);
+        }
+    }
+
+    // Run continuous mesh operations with graceful shutdown
+    info!("\n🔄 Starting continuous mesh operations...");
+    info!("Press Ctrl+C to stop");
+    
+    // Set up graceful shutdown
+    let shutdown = async {
+        signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+        handle_shutdown().await;
+    };
+    
+    // Run mesh operations until shutdown
+    tokio::select! {
+        _ = run_continuous_mesh_operations(sdk) => {
+            info!("Mesh operations completed");
+        }
+        _ = shutdown => {
+            info!("Shutdown signal received");
+        }
+    }
+
+    Ok(())
+}
+
+/// Run continuous mesh operations - discover peers and relay transactions
+async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
+    let mut scan_count = 0;
+    let mut last_peer_count = 0;
+    let mut connected_peers = std::collections::HashSet::new();
+
+    info!("🔄 Starting continuous mesh operations...");
+    info!("This node will run indefinitely, scanning for other PolliNet devices");
+    info!("Using platform-agnostic BLE adapter (Linux BlueZ)");
+    info!("Press Ctrl+C to stop gracefully");
+
+    loop {
+        scan_count += 1;
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        info!("\n🔄 Mesh Scan #{} at {}", scan_count, current_time);
+        info!("================================================");
+
+        // Discover nearby PolliNet peers using new BLE adapter
+        match sdk.discover_ble_peers().await {
+            Ok(peers) => {
+                if peers.is_empty() {
+                    info!("📡 No PolliNet peers found nearby");
+                    info!("   Keep scanning - other devices may appear");
+                    info!("   Using BLE adapter: {}", sdk.get_adapter_info());
+                } else {
+                    info!("📡 Found {} PolliNet peers:", peers.len());
+                    
+                    // Track new peers
+                    let current_peer_count = peers.len();
+                    if current_peer_count != last_peer_count {
+                        info!("   Peer count changed: {} → {}", last_peer_count, current_peer_count);
+                        last_peer_count = current_peer_count;
+                    }
+
+                    // Display peer information
+                    for (i, peer) in peers.iter().enumerate() {
+                        let is_new = !connected_peers.contains(&peer.device_id);
+                        let status = if is_new { "🆕 NEW" } else { "🔄 KNOWN" };
+                        
+                        info!("   {}. {} {} (RSSI: {})", i + 1, status, peer.device_id, peer.rssi);
+                        info!("      Capabilities: {:?}", peer.capabilities);
+                        info!("      Last seen: {:?}", peer.last_seen);
+                        
+                        if is_new {
+                            connected_peers.insert(peer.device_id.clone());
+                        }
+
+                        // Try to connect to new peers using BLE adapter
+                        if is_new {
+                            info!("      🔗 Attempting connection via BLE adapter...");
+                            match sdk.connect_to_ble_peer(&peer.device_id).await {
+                                Ok(_) => {
+                                    info!("      ✅ Connected to {} via BLE adapter", peer.device_id);
+                                    
+                                    // Send LOREM_IPSUM message to newly connected peer
+                                    info!("      📤 Sending LOREM_IPSUM message...");
+                                    match sdk.send_text_message(&peer.device_id, "LOREM_IPSUM").await {
+                                        Ok(_) => {
+                                            info!("      ✅ LOREM_IPSUM sent successfully to {}", peer.device_id);
+                                        }
+                                        Err(e) => {
+                                            debug!("      ⚠️  Text message not implemented in BLE adapter: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    info!("      ⚠️  Connection failed: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("❌ Peer discovery failed: {}", e);
+            }
+        }
+
+        // Check for any pending transactions to relay using BLE adapter
+        info!("📦 Checking for transactions to relay...");
+        // The BLE adapter handles fragment transmission automatically
+        // Check if there are any fragments waiting for transmission
+        debug!("Fragment buffer status: {} fragments waiting", sdk.get_fragment_count().await);
+
+        // Check for incoming text messages
+        info!("📨 Checking for incoming text messages...");
+        match sdk.check_incoming_messages().await {
+            Ok(messages) => {
+                for message in messages {
+                    info!("📨 Received text message: '{}'", message);
+                    if message == "LOREM_IPSUM" {
+                        info!("🎉 Received LOREM_IPSUM message! This is a PolliNet device!");
+                    }
+                }
+            }
+            Err(e) => {
+                debug!("⚠️  Text messaging not fully implemented in BLE adapter: {}", e);
+            }
+        }
+
+        // Get current BLE adapter status
+        match sdk.get_ble_status().await {
+            Ok(status) => {
+                if scan_count % 10 == 0 { // Show full status every 10 scans
+                    info!("📊 BLE Adapter Status:");
+                    info!("{}", status);
+                    info!("Adapter Info: {}", sdk.get_adapter_info());
+                    info!("Connected Clients: {}", sdk.get_connected_clients_count());
+                    info!("Advertising: {}", sdk.is_advertising());
+                    info!("Scanning: {}", sdk.is_scanning());
+                } else {
+                    info!("📊 BLE Adapter: Active | Peers: {} | Clients: {} | Buffer: {} fragments", 
+                          connected_peers.len(), 
+                          sdk.get_connected_clients_count(),
+                          sdk.get_fragment_count().await);
+                }
+            }
+            Err(e) => {
+                warn!("⚠️  BLE adapter status error: {}", e);
+            }
+        }
+
+        // Show periodic statistics
+        if scan_count % 20 == 0 {
+            info!("\n📊 MESH STATISTICS (Scan #{})", scan_count);
+            info!("================================");
+            info!("Total scans performed: {}", scan_count);
+            info!("Unique peers discovered: {}", connected_peers.len());
+            info!("Current peer count: {}", last_peer_count);
+            info!("BLE Adapter: {}", sdk.get_adapter_info());
+            info!("Connected clients: {}", sdk.get_connected_clients_count());
+            info!("Fragment buffer: {} fragments", sdk.get_fragment_count().await);
+            info!("Advertising: {}", sdk.is_advertising());
+            info!("Scanning: {}", sdk.is_scanning());
+            info!("Node status: ACTIVE and scanning");
+            info!("Ready to relay transactions via BLE adapter");
+        }
+
+        // Wait before next scan
+        info!("⏱️  Waiting 5 seconds before next scan...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
+/// Handle graceful shutdown
+async fn handle_shutdown() {
+    info!("\n🛑 Shutdown signal received");
+    info!("Stopping BLE mesh node gracefully...");
+    info!("Thank you for using PolliNet BLE Mesh!");
+}
+

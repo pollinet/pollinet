@@ -13,7 +13,6 @@ mod linux_impl {
     use tokio::sync::RwLock;
     use bluer::{
         adv::Advertisement,
-        AdapterEvent,
     };
     use tokio_stream::StreamExt;
 
@@ -55,7 +54,7 @@ mod linux_impl {
 
             // Get the default adapter
             let adapter = session.default_adapter().await
-                .map_err(|e| BleError::AdapterNotAvailable)?;
+                .map_err(|_e| BleError::AdapterNotAvailable)?;
 
             // Power on the adapter
             adapter.set_powered(true).await

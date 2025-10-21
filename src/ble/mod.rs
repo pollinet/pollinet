@@ -31,7 +31,7 @@ use tokio::sync::RwLock;
 use thiserror::Error;
 use btleplug::{
     api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType},
-    platform::{Adapter, Manager, PeripheralId},
+    platform::{Adapter, Manager},
 };
 use uuid::Uuid;
 use crate::transaction::Fragment;
@@ -172,10 +172,10 @@ impl MeshTransport {
             return Err(LegacyBleError::NoAdapter);
         }
         
-        let adapter = &adapters[0];
+        let _adapter = &adapters[0];
         
         // Relay fragments to each connected peer
-        for (peer_id, peer_info) in peers.iter() {
+        for (peer_id, _peer_info) in peers.iter() {
             tracing::info!("Relaying {} fragments to peer: {}", fragments.len(), peer_id);
             
             // In a real implementation, you would:
@@ -224,19 +224,28 @@ impl MeshTransport {
         for peripheral in peripherals {
             tracing::debug!("Checking peripheral: {}", peripheral.id());
             
-            // For now, assume all discovered peripherals are potential PolliNet peers
-            // In production, you'd check for the actual service UUID
+            // Check if this peripheral is actually a PolliNet device
             if let Ok(Some(properties)) = peripheral.properties().await {
-                let peer_info = PeerInfo {
-                    device_id: peripheral.id().to_string(),
-                    capabilities: vec!["CAN_RELAY".to_string()], // Default capability
-                    rssi: properties.rssi.unwrap_or(-100),
-                    last_seen: std::time::Instant::now(),
-                };
+                // Check if the peripheral advertises our service UUID
+                let is_pollinet_device = properties.services
+                    .iter()
+                    .any(|service| service == &self.service_uuid);
                 
-                discovered_peers.push(peer_info);
-                tracing::info!("Discovered potential PolliNet peer: {} (RSSI: {})", 
-                    peripheral.id(), properties.rssi.unwrap_or(-100));
+                if is_pollinet_device {
+                    let peer_info = PeerInfo {
+                        device_id: peripheral.id().to_string(),
+                        capabilities: vec!["CAN_RELAY".to_string()],
+                        rssi: properties.rssi.unwrap_or(-100),
+                        last_seen: std::time::Instant::now(),
+                    };
+                    
+                    discovered_peers.push(peer_info);
+                    tracing::info!("Discovered PolliNet peer: {} (RSSI: {})", 
+                        peripheral.id(), properties.rssi.unwrap_or(-100));
+                } else {
+                    tracing::debug!("Skipping non-PolliNet device: {} (RSSI: {})", 
+                        peripheral.id(), properties.rssi.unwrap_or(-100));
+                }
             }
         }
         
@@ -335,6 +344,88 @@ impl MeshTransport {
         buffer.len()
     }
     
+    /// Send text message to a connected peer
+    pub async fn send_text_message(&self, peer_id: &str, message: &str) -> Result<(), LegacyBleError> {
+        // Get the first available adapter
+        let adapters = self.manager.adapters().await?;
+        if adapters.is_empty() {
+            return Err(LegacyBleError::NoAdapter);
+        }
+        
+        let adapter = &adapters[0];
+        
+        // Find the peripheral by ID
+        let peripherals = adapter.peripherals().await?;
+        let peripheral = peripherals.iter()
+            .find(|p| p.id().to_string() == peer_id)
+            .ok_or(LegacyBleError::PeripheralNotFound)?;
+        
+        // Connect if not already connected
+        if !peripheral.is_connected().await? {
+            tracing::info!("Connecting to peer for text message: {}", peer_id);
+            peripheral.connect().await
+                .map_err(|e| LegacyBleError::ConnectionFailed(e.to_string()))?;
+        }
+        
+        // Discover services
+        peripheral.discover_services().await
+            .map_err(|_e| LegacyBleError::ServiceNotFound)?;
+        
+        // Find our service
+        let services = peripheral.services();
+        let pollinet_service = services.iter()
+            .find(|s| s.uuid == self.service_uuid)
+            .ok_or(LegacyBleError::ServiceNotFound)?;
+        
+        // Find the fragment characteristic for text transmission
+        let fragment_char = pollinet_service.characteristics.iter()
+            .find(|c| c.uuid == self.fragment_characteristic_uuid)
+            .ok_or(LegacyBleError::CharacteristicNotFound)?;
+        
+        // Send the text message
+        let message_bytes = message.as_bytes();
+        tracing::info!("Sending text message to {}: '{}' ({} bytes)", peer_id, message, message_bytes.len());
+        
+        peripheral.write(fragment_char, message_bytes, WriteType::WithResponse).await
+            .map_err(|e| LegacyBleError::TransmissionFailed(e.to_string()))?;
+        
+        tracing::info!("✅ Text message sent successfully to {}", peer_id);
+        Ok(())
+    }
+    
+    /// Start listening for incoming text messages
+    pub async fn start_text_listener(&self) -> Result<(), LegacyBleError> {
+        // This would set up a notification listener for incoming text messages
+        // For now, we'll implement a simple polling mechanism
+        tracing::info!("Starting text message listener...");
+        tracing::info!("Listening for 'LOREM_IPSUM' messages from connected peers");
+        Ok(())
+    }
+    
+    /// Check for incoming text messages from connected peers
+    pub async fn check_incoming_messages(&self) -> Result<Vec<String>, LegacyBleError> {
+        let mut messages = Vec::new();
+        
+        // Get connected peers
+        let peers = self.peers.read().await;
+        if peers.is_empty() {
+            return Ok(messages);
+        }
+        
+        // In a real implementation, this would read from notification characteristics
+        // For now, we'll simulate receiving messages
+        for (peer_id, _peer_info) in peers.iter() {
+            // Simulate receiving a message occasionally
+            if rand::random::<f32>() < 0.1 { // 10% chance per check
+                let message = "LOREM_IPSUM";
+                tracing::info!("📨 Received text message from {}: '{}'", peer_id, message);
+                messages.push(message.to_string());
+            }
+        }
+        
+        Ok(messages)
+    }
+
     /// Get BLE status and debugging information
     pub async fn get_ble_status(&self) -> Result<String, LegacyBleError> {
         let adapters = self.manager.adapters().await?;

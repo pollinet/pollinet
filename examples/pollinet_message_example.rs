@@ -10,11 +10,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdk = PolliNetSDK::new().await?;
     sdk.start_ble_networking().await?;
     
+    // Create keypairs for the example
+    let sender_keypair = solana_sdk::signature::Keypair::new();
+    let nonce_authority_keypair = solana_sdk::signature::Keypair::new();
+    
     // Create transaction
     let compressed_tx = sdk.create_transaction(
         "11111111111111111111111111111112",           // Sender
+        &sender_keypair,                              // Sender keypair
         "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // Recipient
         100_000_000_000,                              // Amount (100 SOL)
+        "11111111111111111111111111111113",           // Nonce account
+        &nonce_authority_keypair,                     // Nonce authority keypair
     ).await?;
     
     println!("Created transaction:");
