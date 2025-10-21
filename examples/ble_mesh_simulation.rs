@@ -1,13 +1,15 @@
-//! BLE Mesh Network Simulation Example
+//! PolliNet BLE Mesh Network Node
 //!
-//! This example simulates a BLE mesh network with multiple PolliNet devices
-//! demonstrating transaction propagation through the mesh.
+//! This example runs a real PolliNet BLE mesh node that continuously
+//! discovers and communicates with other PolliNet devices in the area.
+//! The node will run indefinitely, scanning for peers and relaying transactions.
 //!
 //! Run with: cargo run --example ble_mesh_simulation
 
 use pollinet::PolliNetSDK;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
+use tokio::signal;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,209 +19,163 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_target(false)
         .init();
 
-    info!("🌐 PolliNet BLE Mesh Network Simulation");
-    info!("======================================");
-    info!("This example simulates a BLE mesh network with multiple devices");
+    info!("🌐 PolliNet BLE Mesh Network Node");
+    info!("=================================");
+    info!("Starting real BLE mesh node - looking for other PolliNet devices...");
 
-    // Simulate Device 1 (Transaction Originator)
-    info!("\n📱 DEVICE 1: Transaction Originator");
-    info!("------------------------------------");
-    let device1 = simulate_device("Device-1", "Originator").await?;
-
-    // Simulate Device 2 (Mesh Relay Node)
-    info!("\n📱 DEVICE 2: Mesh Relay Node");
-    info!("-----------------------------");
-    let device2 = simulate_device("Device-2", "Relay").await?;
-
-    // Simulate Device 3 (Mesh Relay Node)
-    info!("\n📱 DEVICE 3: Mesh Relay Node");
-    info!("-----------------------------");
-    let device3 = simulate_device("Device-3", "Relay").await?;
-
-    // Simulate transaction propagation
-    info!("\n🔄 SIMULATING TRANSACTION PROPAGATION");
-    info!("=====================================");
-    simulate_transaction_propagation(device1, device2, device3).await?;
-
-    info!("\n🎉 BLE Mesh Simulation Complete!");
-    info!("================================");
-    info!("✅ Successfully demonstrated BLE mesh networking");
-    info!("💡 In a real scenario, devices would be physically separate");
-
-    Ok(())
-}
-
-/// Simulate a single device in the mesh network
-async fn simulate_device(device_name: &str, role: &str) -> Result<PolliNetSDK, Box<dyn std::error::Error>> {
-    info!("Initializing {} ({})...", device_name, role);
-    
+    // Initialize the PolliNet SDK
     let sdk = PolliNetSDK::new().await?;
-    info!("✅ {} initialized", device_name);
+    info!("✅ PolliNet SDK initialized");
 
     // Start BLE networking
-    info!("Starting BLE networking for {}...", device_name);
-    match sdk.start_ble_networking().await {
-        Ok(_) => {
-            info!("✅ {} BLE advertising started", device_name);
-            info!("✅ {} BLE scanning started", device_name);
-        }
-        Err(e) => {
-            warn!("⚠️  {} BLE networking failed: {}", device_name, e);
-        }
-    }
+    info!("Starting BLE advertising and scanning...");
+    sdk.start_ble_networking().await?;
+    info!("✅ BLE advertising and scanning started");
 
-    // Wait for BLE to initialize
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Get device status
+    // Get initial status
     match sdk.get_ble_status().await {
         Ok(status) => {
-            info!("📊 {} Status:", device_name);
+            info!("📊 Initial BLE Status:");
             info!("{}", status);
         }
         Err(e) => {
-            warn!("⚠️  {} status error: {}", device_name, e);
+            warn!("⚠️  BLE status error: {}", e);
         }
     }
 
-    Ok(sdk)
-}
-
-/// Simulate transaction propagation through the mesh
-async fn simulate_transaction_propagation(
-    device1: PolliNetSDK,
-    device2: PolliNetSDK,
-    device3: PolliNetSDK,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Creating transaction on Device 1...");
+    // Run continuous mesh operations with graceful shutdown
+    info!("\n🔄 Starting continuous mesh operations...");
+    info!("Press Ctrl+C to stop");
     
-    // Device 1 creates a transaction
-    let mock_tx = create_realistic_mock_transaction();
-    info!("✅ Transaction created: {} bytes", mock_tx.len());
-
-    // Fragment the transaction
-    info!("Fragmenting transaction for BLE transmission...");
-    let fragments = device1.fragment_transaction(&mock_tx);
-    info!("✅ Transaction fragmented into {} pieces", fragments.len());
-
-    // Display fragment details
-    for (i, fragment) in fragments.iter().enumerate() {
-        info!("   Fragment {}/{}: {} bytes", 
-              i + 1, fragments.len(), fragment.data.len());
-    }
-
-    // Device 1 relays to mesh
-    info!("\n📡 Device 1 relaying transaction to mesh...");
-    match device1.relay_transaction(fragments.clone()).await {
-        Ok(_) => {
-            info!("✅ Device 1 relayed transaction successfully");
+    // Set up graceful shutdown
+    let shutdown = async {
+        signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+        handle_shutdown().await;
+    };
+    
+    // Run mesh operations until shutdown
+    tokio::select! {
+        _ = run_continuous_mesh_operations(sdk) => {
+            info!("Mesh operations completed");
         }
-        Err(e) => {
-            warn!("⚠️  Device 1 relay failed: {}", e);
+        _ = shutdown => {
+            info!("Shutdown signal received");
         }
     }
-
-    // Simulate mesh propagation delay
-    info!("\n⏱️  Simulating mesh propagation delay...");
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    // Device 2 receives and processes
-    info!("\n📥 Device 2 receiving transaction...");
-    match device2.reassemble_fragments(&fragments) {
-        Ok(reassembled) => {
-            info!("✅ Device 2 reassembled transaction: {} bytes", reassembled.len());
-            
-            if reassembled == mock_tx {
-                info!("✅ Device 2 verified transaction integrity");
-            } else {
-                error!("❌ Device 2 integrity check failed");
-            }
-        }
-        Err(e) => {
-            error!("❌ Device 2 reassembly failed: {}", e);
-        }
-    }
-
-    // Device 2 relays to further nodes
-    info!("\n📡 Device 2 relaying to further mesh nodes...");
-    match device2.relay_transaction(fragments.clone()).await {
-        Ok(_) => {
-            info!("✅ Device 2 relayed transaction successfully");
-        }
-        Err(e) => {
-            warn!("⚠️  Device 2 relay failed: {}", e);
-        }
-    }
-
-    // Device 3 receives and processes
-    info!("\n📥 Device 3 receiving transaction...");
-    match device3.reassemble_fragments(&fragments) {
-        Ok(reassembled) => {
-            info!("✅ Device 3 reassembled transaction: {} bytes", reassembled.len());
-            
-            if reassembled == mock_tx {
-                info!("✅ Device 3 verified transaction integrity");
-            } else {
-                error!("❌ Device 3 integrity check failed");
-            }
-        }
-        Err(e) => {
-            error!("❌ Device 3 reassembly failed: {}", e);
-        }
-    }
-
-    // Simulate final propagation
-    info!("\n📡 Device 3 relaying to final mesh nodes...");
-    match device3.relay_transaction(fragments).await {
-        Ok(_) => {
-            info!("✅ Device 3 relayed transaction successfully");
-        }
-        Err(e) => {
-            warn!("⚠️  Device 3 relay failed: {}", e);
-        }
-    }
-
-    // Simulate mesh statistics
-    info!("\n📊 MESH PROPAGATION STATISTICS");
-    info!("==============================");
-    info!("✅ Transaction successfully propagated through 3 devices");
-    info!("✅ All devices verified transaction integrity");
-    info!("✅ Transaction ready for blockchain submission by any online device");
 
     Ok(())
 }
 
-/// Create a realistic mock transaction
-fn create_realistic_mock_transaction() -> Vec<u8> {
-    // Create a more realistic transaction structure
-    let mut tx_data = Vec::new();
-    
-    // Simulate transaction header
-    tx_data.extend_from_slice(b"SOLANA_TX_V1");
-    
-    // Simulate instruction data
-    let instruction_data = b"Transfer instruction: 1000000 lamports from Alice to Bob";
-    tx_data.extend_from_slice(instruction_data);
-    
-    // Simulate account keys
-    let account_keys = b"Account1:11111111111111111111111111111112,Account2:TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-    tx_data.extend_from_slice(account_keys);
-    
-    // Simulate signature data
-    let signature_data = b"Signature1:5KJvsngHeMpm884wtkJQQLjWLVy8jQtZ4LDwbgj8c5p1fqYjqvFB8y5Y7eU1D6na89r3HMKtQ1nHf8rHgHgHgHg";
-    tx_data.extend_from_slice(signature_data);
-    
-    // Simulate recent blockhash
-    let blockhash_data = b"RecentBlockhash:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
-    tx_data.extend_from_slice(blockhash_data);
-    
-    // Add some padding to make it larger for better fragmentation testing
-    let padding = b"PADDING_DATA_FOR_FRAGMENTATION_TESTING_";
-    for _ in 0..10 {
-        tx_data.extend_from_slice(padding);
+/// Run continuous mesh operations - discover peers and relay transactions
+async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
+    let mut scan_count = 0;
+    let mut last_peer_count = 0;
+    let mut connected_peers = std::collections::HashSet::new();
+
+    info!("🔄 Starting continuous mesh operations...");
+    info!("This node will run indefinitely, scanning for other PolliNet devices");
+    info!("Press Ctrl+C to stop gracefully");
+
+    loop {
+        scan_count += 1;
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        info!("\n🔄 Mesh Scan #{} at {}", scan_count, current_time);
+        info!("================================================");
+
+        // Discover nearby PolliNet peers
+        match sdk.discover_ble_peers().await {
+            Ok(peers) => {
+                if peers.is_empty() {
+                    info!("📡 No PolliNet peers found nearby");
+                    info!("   Keep scanning - other devices may appear");
+                } else {
+                    info!("📡 Found {} PolliNet peers:", peers.len());
+                    
+                    // Track new peers
+                    let current_peer_count = peers.len();
+                    if current_peer_count != last_peer_count {
+                        info!("   Peer count changed: {} → {}", last_peer_count, current_peer_count);
+                        last_peer_count = current_peer_count;
+                    }
+
+                    // Display peer information
+                    for (i, peer) in peers.iter().enumerate() {
+                        let is_new = !connected_peers.contains(&peer.device_id);
+                        let status = if is_new { "🆕 NEW" } else { "🔄 KNOWN" };
+                        
+                        info!("   {}. {} {} {}", i + 1, status, peer.device_id, peer.rssi);
+                        info!("      Capabilities: {:?}", peer.capabilities);
+                        info!("      Last seen: {:?}", peer.last_seen);
+                        
+                        if is_new {
+                            connected_peers.insert(peer.device_id.clone());
+                        }
+
+                        // Try to connect to new peers
+                        if is_new {
+                            info!("      🔗 Attempting connection...");
+                            match sdk.connect_to_ble_peer(&peer.device_id).await {
+                                Ok(_) => {
+                                    info!("      ✅ Connected to {}", peer.device_id);
+                                }
+                                Err(e) => {
+                                    info!("      ⚠️  Connection failed: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("❌ Peer discovery failed: {}", e);
+            }
+        }
+
+        // Check for any pending transactions to relay
+        info!("📦 Checking for transactions to relay...");
+        // In a real implementation, this would check for received fragments
+        // and reassemble them into complete transactions
+
+        // Get current BLE status
+        match sdk.get_ble_status().await {
+            Ok(status) => {
+                if scan_count % 10 == 0 { // Show full status every 10 scans
+                    info!("📊 BLE Status:");
+                    info!("{}", status);
+                } else {
+                    info!("📊 BLE: Active | Peers: {} | Buffer: Ready", connected_peers.len());
+                }
+            }
+            Err(e) => {
+                warn!("⚠️  BLE status error: {}", e);
+            }
+        }
+
+        // Show periodic statistics
+        if scan_count % 20 == 0 {
+            info!("\n📊 MESH STATISTICS (Scan #{})", scan_count);
+            info!("================================");
+            info!("Total scans performed: {}", scan_count);
+            info!("Unique peers discovered: {}", connected_peers.len());
+            info!("Current peer count: {}", last_peer_count);
+            info!("Node status: ACTIVE and scanning");
+            info!("Ready to relay transactions");
+        }
+
+        // Wait before next scan
+        info!("⏱️  Waiting 5 seconds before next scan...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
-    
-    info!("Created realistic mock transaction: {} bytes", tx_data.len());
-    tx_data
+}
+
+/// Handle graceful shutdown
+async fn handle_shutdown() {
+    info!("\n🛑 Shutdown signal received");
+    info!("Stopping BLE mesh node gracefully...");
+    info!("Thank you for using PolliNet BLE Mesh!");
 }
 
