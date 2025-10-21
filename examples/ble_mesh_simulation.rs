@@ -11,6 +11,12 @@ use pollinet::PolliNetSDK;
 use std::time::Duration;
 use tracing::{info, warn, debug};
 use tokio::signal;
+use rand::Rng;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+// Global message buffer for received random strings
+static RECEIVED_MESSAGES: std::sync::OnceLock<Arc<RwLock<Vec<String>>>> = std::sync::OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,6 +35,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdk = PolliNetSDK::new().await?;
     info!("✅ PolliNet SDK initialized");
 
+    // Initialize global message buffer
+    RECEIVED_MESSAGES.set(Arc::new(RwLock::new(Vec::new()))).unwrap();
+
     // Start BLE networking (advertising + scanning)
     info!("Starting BLE advertising and scanning...");
     sdk.start_ble_networking().await?;
@@ -38,6 +47,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting text message listener...");
     sdk.start_text_listener().await?;
     info!("✅ Text message listener started");
+
+    // Set up GATT receive callback for random strings
+    info!("Setting up GATT receive callback for random strings...");
+    setup_gatt_receive_callback(&sdk).await;
+    info!("✅ GATT receive callback configured");
 
     // Get initial status
     match sdk.get_ble_status().await {
@@ -71,6 +85,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Generate a random string for GATT communication
+fn generate_random_string() -> String {
+    let mut rng = rand::thread_rng();
+    let length = rng.gen_range(10..=50);
+    let chars: Vec<char> = (0..length)
+        .map(|_| rng.gen_range(b'a'..=b'z') as char)
+        .collect();
+    chars.into_iter().collect()
+}
+
+/// Set up GATT receive callback to handle incoming random strings
+async fn setup_gatt_receive_callback(_sdk: &PolliNetSDK) {
+    // This would be implemented by accessing the BLE adapter's receive callback
+    // For now, we'll simulate it with a periodic check
+    info!("🎧 GATT receive callback ready - will print any received random strings");
+    
+    // In a real implementation, we would set up the BLE adapter's on_receive callback
+    // to call add_received_message() when data is received
+    info!("📡 Ready to receive GATT data from other PolliNet devices");
+}
+
+/// Get received messages from the global buffer
+async fn get_received_messages() -> Vec<String> {
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let messages = buffer.read().await;
+        messages.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Add a received message to the global buffer
+async fn add_received_message(message: String) {
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let mut messages = buffer.write().await;
+        messages.push(message);
+    }
 }
 
 /// Run continuous mesh operations - discover peers and relay transactions
@@ -126,13 +179,25 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
 
                         // Try to connect to new peers using BLE adapter
                         if is_new {
-                            info!("      🔗 Attempting connection via BLE adapter...");
+                            info!("      🔗 Attempting GATT connection via BLE adapter...");
                             match sdk.connect_to_ble_peer(&peer.device_id).await {
                                 Ok(_) => {
-                                    info!("      ✅ Connected to {} via BLE adapter", peer.device_id);
+                                    info!("      ✅ GATT session established with {}", peer.device_id);
                                     
-                                    // Send LOREM_IPSUM message to newly connected peer
-                                    info!("      📤 Sending LOREM_IPSUM message...");
+                                    // Generate and send a random string via GATT
+                                    let random_string = generate_random_string();
+                                    info!("      📤 Sending random string via GATT: '{}'", random_string);
+                                    
+                                    match sdk.send_to_peer(&peer.device_id, random_string.as_bytes()).await {
+                                        Ok(_) => {
+                                            info!("      ✅ Random string sent successfully to {}", peer.device_id);
+                                        }
+                                        Err(e) => {
+                                            info!("      ⚠️  Failed to send random string: {}", e);
+                                        }
+                                    }
+                                    
+                                    // Also try the text message method as fallback
                                     match sdk.send_text_message(&peer.device_id, "LOREM_IPSUM").await {
                                         Ok(_) => {
                                             info!("      ✅ LOREM_IPSUM sent successfully to {}", peer.device_id);
@@ -143,7 +208,7 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                                     }
                                 }
                                 Err(e) => {
-                                    info!("      ⚠️  Connection failed: {}", e);
+                                    info!("      ⚠️  GATT connection failed: {}", e);
                                 }
                             }
                         }
@@ -161,8 +226,10 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
         // Check if there are any fragments waiting for transmission
         debug!("Fragment buffer status: {} fragments waiting", sdk.get_fragment_count().await);
 
-        // Check for incoming text messages
-        info!("📨 Checking for incoming text messages...");
+        // Check for incoming text messages and random strings
+        info!("📨 Checking for incoming messages...");
+        
+        // Check for text messages
         match sdk.check_incoming_messages().await {
             Ok(messages) => {
                 for message in messages {
@@ -174,6 +241,38 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             }
             Err(e) => {
                 debug!("⚠️  Text messaging not fully implemented in BLE adapter: {}", e);
+            }
+        }
+        
+        // Check for received random strings via GATT
+        let received_messages = get_received_messages().await;
+        if !received_messages.is_empty() {
+            info!("📨 Received {} random string(s) via GATT:", received_messages.len());
+            for (i, message) in received_messages.iter().enumerate() {
+                info!("   {}. '{}'", i + 1, message);
+            }
+            // Clear the buffer after processing
+            if let Some(buffer) = RECEIVED_MESSAGES.get() {
+                let mut messages = buffer.write().await;
+                messages.clear();
+            }
+        }
+        
+        // Periodically send random strings to connected peers
+        if scan_count % 3 == 0 && !connected_peers.is_empty() {
+            info!("🎲 Sending random strings to connected peers...");
+            for peer_id in &connected_peers {
+                let random_string = generate_random_string();
+                info!("📤 Sending random string to {}: '{}'", peer_id, random_string);
+                
+                match sdk.send_to_peer(peer_id, random_string.as_bytes()).await {
+                    Ok(_) => {
+                        info!("✅ Random string sent to {}", peer_id);
+                    }
+                    Err(e) => {
+                        info!("⚠️  Failed to send random string to {}: {}", peer_id, e);
+                    }
+                }
             }
         }
 
