@@ -424,6 +424,21 @@ impl PolliNetSDK {
     pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
         Ok(self.ble_transport.scan_all_devices().await?)
     }
+
+    /// Send text message to a connected BLE peer
+    pub async fn send_text_message(&self, peer_id: &str, message: &str) -> Result<(), PolliNetError> {
+        Ok(self.ble_transport.send_text_message(peer_id, message).await?)
+    }
+
+    /// Start listening for incoming text messages
+    pub async fn start_text_listener(&self) -> Result<(), PolliNetError> {
+        Ok(self.ble_transport.start_text_listener().await?)
+    }
+
+    /// Check for incoming text messages from connected peers
+    pub async fn check_incoming_messages(&self) -> Result<Vec<String>, PolliNetError> {
+        Ok(self.ble_transport.check_incoming_messages().await?)
+    }
 }
 
 /// Error types for PolliNet operations

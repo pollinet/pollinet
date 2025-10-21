@@ -32,6 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdk.start_ble_networking().await?;
     info!("✅ BLE advertising and scanning started");
 
+    // Start text message listener
+    info!("Starting text message listener...");
+    sdk.start_text_listener().await?;
+    info!("✅ Text message listener started");
+
     // Get initial status
     match sdk.get_ble_status().await {
         Ok(status) => {
@@ -121,6 +126,17 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                             match sdk.connect_to_ble_peer(&peer.device_id).await {
                                 Ok(_) => {
                                     info!("      ✅ Connected to {}", peer.device_id);
+                                    
+                                    // Send LOREM_IPSUM message to newly connected peer
+                                    info!("      📤 Sending LOREM_IPSUM message...");
+                                    match sdk.send_text_message(&peer.device_id, "LOREM_IPSUM").await {
+                                        Ok(_) => {
+                                            info!("      ✅ LOREM_IPSUM sent successfully to {}", peer.device_id);
+                                        }
+                                        Err(e) => {
+                                            info!("      ⚠️  Failed to send LOREM_IPSUM: {}", e);
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     info!("      ⚠️  Connection failed: {}", e);
@@ -139,6 +155,22 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
         info!("📦 Checking for transactions to relay...");
         // In a real implementation, this would check for received fragments
         // and reassemble them into complete transactions
+
+        // Check for incoming text messages
+        info!("📨 Checking for incoming text messages...");
+        match sdk.check_incoming_messages().await {
+            Ok(messages) => {
+                for message in messages {
+                    info!("📨 Received text message: '{}'", message);
+                    if message == "LOREM_IPSUM" {
+                        info!("🎉 Received LOREM_IPSUM message! This is a PolliNet device!");
+                    }
+                }
+            }
+            Err(e) => {
+                info!("⚠️  Failed to check messages: {}", e);
+            }
+        }
 
         // Get current BLE status
         match sdk.get_ble_status().await {
