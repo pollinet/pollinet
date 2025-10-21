@@ -127,12 +127,12 @@ mod linux_impl {
                 // Device doesn't advertise PolliNet service - filter it out
                 tracing::debug!("⚪ Device {} does not advertise PolliNet service (UUIDs: {:?})", 
                     address, service_uuids);
-                // TEMPORARY: Let's see what devices are actually being discovered
-                if service_uuids.is_empty() {
-                    tracing::info!("📱 Device {} discovered but no service UUIDs available", address);
-                } else {
-                    tracing::info!("📱 Device {} discovered with services: {:?}", address, service_uuids);
-                }
+                // // TEMPORARY: Let's see what devices are actually being discovered
+                // if service_uuids.is_empty() {
+                //     tracing::info!("📱 Device {} discovered but no service UUIDs available", address);
+                // } else {
+                //     tracing::info!("📱 Device {} discovered with services: {:?}", address, service_uuids);
+                // }
                 Ok(None)
             }
         }
@@ -295,7 +295,7 @@ mod linux_impl {
                 while let Some(device_events) = stream.next().await {
                     match device_events {
                         bluer::AdapterEvent::DeviceAdded(device_id) => {
-                            tracing::info!("📱 Device discovered: {}", device_id);
+                            // tracing::info!("📱 Device discovered: {}", device_id);
                             
                             // Get device from adapter
                             if let Ok(device) = adapter_for_task.device(device_id) {

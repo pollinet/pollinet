@@ -29,7 +29,7 @@ futures = "0.3"
 tokio-stream = "0.1"
 
 [features]
-default = []
+default = ["linux"]
 linux = ["bluer"]
 macos = []  # Uses btleplug (already in dependencies, Central role only)
 windows = []
