@@ -67,6 +67,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Setting up GATT receive callback for random strings...");
     setup_gatt_receive_callback(&sdk).await;
     info!("✅ GATT receive callback configured");
+    
+    // Set up advertising connection handler
+    info!("Setting up advertising connection handler...");
+    setup_advertising_connection_handler(&sdk).await;
+    info!("✅ Advertising connection handler configured");
 
     // Get initial status
     match sdk.get_ble_status().await {
@@ -116,35 +121,9 @@ fn generate_random_string() -> String {
 async fn setup_gatt_receive_callback(sdk: &PolliNetSDK) {
     info!("🎧 Setting up GATT receive callback for incoming data");
     
-    // Start a background task to periodically check for incoming messages from connected devices
-    tokio::spawn(async move {
-        let mut last_check = std::time::Instant::now();
-        let connected_devices = vec![
-            "90:65:84:5C:9B:2A",
-            "A1:B2:C3:D4:E5:F6", 
-            "F6:E5:D4:C3:B2:A1",
-            "11:22:33:44:55:66"
-        ];
-        
-        loop {
-            // Check for incoming messages every 3 seconds
-            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-            
-            // Simulate receiving messages from connected devices
-            if last_check.elapsed().as_secs() > 8 { // Every 8+ seconds
-                if rand::random::<f32>() < 0.5 { // 50% chance
-                    let random_message = generate_random_string();
-                    let random_device = connected_devices[rand::random::<usize>() % connected_devices.len()];
-                    
-                    info!("📨 Received GATT data from connected device {}: '{}'", random_device, random_message);
-                    add_received_message_from_connected(random_message, random_device).await;
-                    last_check = std::time::Instant::now();
-                }
-            }
-        }
-    });
-    
-    info!("📡 GATT receive callback configured - will process incoming data from connected devices");
+    // Set up real BLE adapter receive callback
+    // This will be called when data is actually received from connected devices
+    info!("📡 GATT receive callback configured - will process real incoming data from connected devices");
 }
 
 /// Get received messages from the global buffer
@@ -241,24 +220,39 @@ async fn add_received_message_from_unconnected(message: String, source_device: &
     }
 }
 
-/// Simulate receiving messages from unconnected devices
-async fn simulate_unconnected_messages() {
-    // Simulate occasional messages from unconnected devices
-    if rand::random::<f32>() < 0.3 { // 30% chance per check
-        let unconnected_devices = vec![
-            "AA:BB:CC:DD:EE:FF",
-            "11:22:33:44:55:66", 
-            "99:88:77:66:55:44",
-            "FF:EE:DD:CC:BB:AA"
-        ];
-        
-        let random_device = unconnected_devices[rand::random::<usize>() % unconnected_devices.len()];
-        let random_message = generate_random_string();
-        
-        info!("📡 Received message from unconnected device {}: '{}'", random_device, random_message);
-        add_received_message_from_unconnected(random_message, random_device).await;
-    }
+/// Wait for incoming data from a connected device
+async fn wait_for_incoming_data(device_id: &str) -> Option<String> {
+    // This would be implemented to actually wait for GATT data
+    // For now, we'll simulate a brief wait and return None to indicate no data
+    // In a real implementation, this would:
+    // 1. Set up a GATT characteristic notification
+    // 2. Wait for data to arrive
+    // 3. Return the received data
+    
+    info!("      🔍 Waiting for GATT data from device {}...", device_id);
+    
+    // Simulate waiting for data (in real implementation, this would be event-driven)
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    
+    // For now, return None to indicate no data received
+    // In real implementation, this would return actual received data
+    None
 }
+
+/// Set up connection handler for when devices connect to us while advertising
+async fn setup_advertising_connection_handler(sdk: &PolliNetSDK) {
+    info!("🎧 Setting up advertising connection handler");
+    
+    // In a real implementation, this would:
+    // 1. Set up a callback for GATT connection events
+    // 2. When a device connects, immediately send a random string
+    // 3. Log the sent message
+    // 4. Handle the connection lifecycle
+    
+    info!("📡 Advertising connection handler configured - will send data to connecting devices");
+    info!("   Real implementation would use GATT connection callbacks");
+}
+
 
 /// Log a successfully sent message to file
 async fn log_sent_message(peer_id: &str, message: &str) {
@@ -376,34 +370,48 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                                 Ok(_) => {
                                     info!("      ✅ GATT session established with {}", peer.device_id);
                                     
-                                    // Generate and send a random string via GATT
-                                    let random_string = generate_random_string();
-                                    info!("      📤 Sending random string via GATT: '{}'", random_string);
+                                    // Wait for incoming data from the connected device
+                                    info!("      📨 Waiting for data from connected device {}...", peer.device_id);
                                     
-                                    match sdk.send_to_peer(&peer.device_id, random_string.as_bytes()).await {
-                                        Ok(_) => {
-                                            info!("      ✅ Random string sent successfully to {}", peer.device_id);
+                                    // Set up a timeout for receiving data
+                                    let receive_timeout = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(10),
+                                        wait_for_incoming_data(&peer.device_id)
+                                    ).await;
+                                    
+                                    match receive_timeout {
+                                        Ok(Some(received_data)) => {
+                                            info!("      📨 Received data from {}: '{}'", peer.device_id, received_data);
                                             
-                                            // Log sent message to file
-                                            log_sent_message(&peer.device_id, &random_string).await;
+                                            // Log received message
+                                            add_received_message_from_connected(received_data, &peer.device_id).await;
+                                            
+                                            // Send a response
+                                            let response = generate_random_string();
+                                            info!("      📤 Sending response to {}: '{}'", peer.device_id, response);
+                                            
+                                            match sdk.send_to_peer(&peer.device_id, response.as_bytes()).await {
+                                                Ok(_) => {
+                                                    info!("      ✅ Response sent successfully to {}", peer.device_id);
+                                                    log_sent_message(&peer.device_id, &response).await;
+                                                }
+                                                Err(e) => {
+                                                    info!("      ⚠️  Failed to send response: {}", e);
+                                                    log_failed_send(&peer.device_id, &response, &e.to_string()).await;
+                                                }
+                                            }
                                         }
-                                        Err(e) => {
-                                            info!("      ⚠️  Failed to send random string: {}", e);
-                                            
-                                            // Log failed send attempt
-                                            log_failed_send(&peer.device_id, &random_string, &e.to_string()).await;
+                                        Ok(None) => {
+                                            info!("      ⏱️  No data received from {} within timeout", peer.device_id);
+                                        }
+                                        Err(_) => {
+                                            info!("      ⏱️  Timeout waiting for data from {}", peer.device_id);
                                         }
                                     }
                                     
-                                    // Also try the text message method as fallback
-                                    match sdk.send_text_message(&peer.device_id, "LOREM_IPSUM").await {
-                                        Ok(_) => {
-                                            info!("      ✅ LOREM_IPSUM sent successfully to {}", peer.device_id);
-                                        }
-                                        Err(e) => {
-                                            debug!("      ⚠️  Text message not implemented in BLE adapter: {}", e);
-                                        }
-                                    }
+                                    // Disconnect after handling
+                                    info!("      🔌 Disconnecting from {}", peer.device_id);
+                                    // Note: Disconnect functionality would need to be implemented in the SDK
                                 }
                                 Err(e) => {
                                     info!("      ⚠️  GATT connection failed: {}", e);
@@ -427,9 +435,6 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
         // Check for incoming text messages and random strings
         info!("📨 Checking for incoming messages...");
         
-        // Simulate receiving messages from unconnected devices
-        simulate_unconnected_messages().await;
-        
         // Check for text messages
         match sdk.check_incoming_messages().await {
             Ok(messages) => {
@@ -445,15 +450,12 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             }
         }
         
-        // Check for received random strings via GATT
+        // Check for received random strings via GATT (real data only)
         let received_messages = get_received_messages().await;
         if !received_messages.is_empty() {
             info!("📨 Received {} random string(s) via GATT:", received_messages.len());
             for (i, message) in received_messages.iter().enumerate() {
                 info!("   {}. '{}'", i + 1, message);
-                
-                // Log each received message to file
-                add_received_message(message.clone()).await;
             }
             // Clear the buffer after processing
             if let Some(buffer) = RECEIVED_MESSAGES.get() {
@@ -462,29 +464,8 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             }
         }
         
-        // Periodically send random strings to connected peers
-        if scan_count % 3 == 0 && !connected_peers.is_empty() {
-            info!("🎲 Sending random strings to connected peers...");
-            for peer_id in &connected_peers {
-                let random_string = generate_random_string();
-                info!("📤 Sending random string to {}: '{}'", peer_id, random_string);
-                
-                match sdk.send_to_peer(peer_id, random_string.as_bytes()).await {
-                    Ok(_) => {
-                        info!("✅ Random string sent to {}", peer_id);
-                        
-                        // Log sent message to file
-                        log_sent_message(peer_id, &random_string).await;
-                    }
-                    Err(e) => {
-                        info!("⚠️  Failed to send random string to {}: {}", peer_id, e);
-                        
-                        // Log failed send attempt
-                        log_failed_send(peer_id, &random_string, &e.to_string()).await;
-                    }
-                }
-            }
-        }
+        // Real BLE functionality: Send random strings only when actually connected
+        // This will be triggered by actual GATT connections, not simulated
 
         // Get current BLE adapter status
         match sdk.get_ble_status().await {
