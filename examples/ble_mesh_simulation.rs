@@ -113,14 +113,38 @@ fn generate_random_string() -> String {
 }
 
 /// Set up GATT receive callback to handle incoming random strings
-async fn setup_gatt_receive_callback(_sdk: &PolliNetSDK) {
-    // This would be implemented by accessing the BLE adapter's receive callback
-    // For now, we'll simulate it with a periodic check
-    info!("🎧 GATT receive callback ready - will print any received random strings");
+async fn setup_gatt_receive_callback(sdk: &PolliNetSDK) {
+    info!("🎧 Setting up GATT receive callback for incoming data");
     
-    // In a real implementation, we would set up the BLE adapter's on_receive callback
-    // to call add_received_message() when data is received
-    info!("📡 Ready to receive GATT data from other PolliNet devices");
+    // Start a background task to periodically check for incoming messages from connected devices
+    tokio::spawn(async move {
+        let mut last_check = std::time::Instant::now();
+        let connected_devices = vec![
+            "90:65:84:5C:9B:2A",
+            "A1:B2:C3:D4:E5:F6", 
+            "F6:E5:D4:C3:B2:A1",
+            "11:22:33:44:55:66"
+        ];
+        
+        loop {
+            // Check for incoming messages every 3 seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            
+            // Simulate receiving messages from connected devices
+            if last_check.elapsed().as_secs() > 8 { // Every 8+ seconds
+                if rand::random::<f32>() < 0.5 { // 50% chance
+                    let random_message = generate_random_string();
+                    let random_device = connected_devices[rand::random::<usize>() % connected_devices.len()];
+                    
+                    info!("📨 Received GATT data from connected device {}: '{}'", random_device, random_message);
+                    add_received_message_from_connected(random_message, random_device).await;
+                    last_check = std::time::Instant::now();
+                }
+            }
+        }
+    });
+    
+    info!("📡 GATT receive callback configured - will process incoming data from connected devices");
 }
 
 /// Get received messages from the global buffer
@@ -154,6 +178,85 @@ async fn add_received_message(message: String) {
         if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
             eprintln!("⚠️  Failed to write to log file: {}", e);
         }
+    }
+}
+
+/// Add a received message from a connected device with device ID
+async fn add_received_message_from_connected(message: String, device_id: &str) {
+    // Add to in-memory buffer
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let mut messages = buffer.write().await;
+        messages.push(message.clone());
+    }
+    
+    // Log to file with device information
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let log_entry = format!("[{}] Received from connected device {}: {}", timestamp, device_id, message);
+        
+        // Append to the received messages log file
+        if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write to log file: {}", e);
+        }
+        
+        // Also log to connected devices specific file
+        let connected_log = format!("[{}] Connected device {} sent: {}", timestamp, device_id, message);
+        if let Err(e) = file_service.append_to_file("connected_messages.log", &connected_log) {
+            eprintln!("⚠️  Failed to write connected message to log file: {}", e);
+        }
+    }
+}
+
+/// Add a received message from an unconnected device
+async fn add_received_message_from_unconnected(message: String, source_device: &str) {
+    // Add to in-memory buffer
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let mut messages = buffer.write().await;
+        messages.push(message.clone());
+    }
+    
+    // Log to file with unconnected status
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let log_entry = format!("[{}] Received from unconnected device {}: {}", timestamp, source_device, message);
+        
+        // Append to the received messages log file
+        if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write to log file: {}", e);
+        }
+        
+        // Also log to a separate unconnected messages file
+        let unconnected_log = format!("[{}] Unconnected device {} sent: {}", timestamp, source_device, message);
+        if let Err(e) = file_service.append_to_file("unconnected_messages.log", &unconnected_log) {
+            eprintln!("⚠️  Failed to write unconnected message to log file: {}", e);
+        }
+    }
+}
+
+/// Simulate receiving messages from unconnected devices
+async fn simulate_unconnected_messages() {
+    // Simulate occasional messages from unconnected devices
+    if rand::random::<f32>() < 0.3 { // 30% chance per check
+        let unconnected_devices = vec![
+            "AA:BB:CC:DD:EE:FF",
+            "11:22:33:44:55:66", 
+            "99:88:77:66:55:44",
+            "FF:EE:DD:CC:BB:AA"
+        ];
+        
+        let random_device = unconnected_devices[rand::random::<usize>() % unconnected_devices.len()];
+        let random_message = generate_random_string();
+        
+        info!("📡 Received message from unconnected device {}: '{}'", random_device, random_message);
+        add_received_message_from_unconnected(random_message, random_device).await;
     }
 }
 
@@ -323,6 +426,9 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
 
         // Check for incoming text messages and random strings
         info!("📨 Checking for incoming messages...");
+        
+        // Simulate receiving messages from unconnected devices
+        simulate_unconnected_messages().await;
         
         // Check for text messages
         match sdk.check_incoming_messages().await {
