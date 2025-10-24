@@ -125,8 +125,8 @@ impl BleAdapterBridge {
     }
     
     /// Get connected clients count
-    pub fn connected_clients_count(&self) -> usize {
-        self.adapter.connected_clients_count()
+    pub async fn connected_clients_count(&self) -> usize {
+        self.adapter.connected_clients_count().await
     }
     
     /// Connect to a discovered BLE device

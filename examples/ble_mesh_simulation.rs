@@ -15,8 +15,18 @@ use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// Include the simple file service
+mod simple_file_service {
+    include!("../simple_file_service.rs");
+}
+
+use simple_file_service::SimpleFileService;
+
 // Global message buffer for received random strings
 static RECEIVED_MESSAGES: std::sync::OnceLock<Arc<RwLock<Vec<String>>>> = std::sync::OnceLock::new();
+
+// Global file service for logging received messages
+static FILE_SERVICE: std::sync::OnceLock<SimpleFileService> = std::sync::OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,6 +47,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize global message buffer
     RECEIVED_MESSAGES.set(Arc::new(RwLock::new(Vec::new()))).unwrap();
+    
+    // Initialize file service for logging received messages
+    let file_service = SimpleFileService::new(Some("./ble_mesh_logs".to_string()))?;
+    FILE_SERVICE.set(file_service).unwrap();
+    info!("✅ File service initialized for logging received messages");
 
     // Start BLE networking (advertising + scanning)
     info!("Starting BLE advertising and scanning...");
@@ -118,11 +133,85 @@ async fn get_received_messages() -> Vec<String> {
     }
 }
 
-/// Add a received message to the global buffer
+/// Add a received message to the global buffer and log to file
 async fn add_received_message(message: String) {
+    // Add to in-memory buffer
     if let Some(buffer) = RECEIVED_MESSAGES.get() {
         let mut messages = buffer.write().await;
-        messages.push(message);
+        messages.push(message.clone());
+    }
+    
+    // Log to file
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let log_entry = format!("[{}] Received: {}", timestamp, message);
+        
+        // Append to the received messages log file
+        if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write to log file: {}", e);
+        }
+    }
+}
+
+/// Log a successfully sent message to file
+async fn log_sent_message(peer_id: &str, message: &str) {
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let log_entry = format!("[{}] Sent to {}: {}", timestamp, peer_id, message);
+        
+        if let Err(e) = file_service.append_to_file("sent_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write sent message to log file: {}", e);
+        }
+    }
+}
+
+/// Log a failed send attempt to file
+async fn log_failed_send(peer_id: &str, message: &str, error: &str) {
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let log_entry = format!("[{}] Failed to send to {}: {} - Error: {}", timestamp, peer_id, message, error);
+        
+        if let Err(e) = file_service.append_to_file("failed_sends.log", &log_entry) {
+            eprintln!("⚠️  Failed to write failed send to log file: {}", e);
+        }
+    }
+}
+
+/// Create a summary log file with current statistics
+async fn create_summary_log(scan_count: u32, unique_peers: usize, current_peers: usize, adapter_info: &str) {
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let summary = format!(
+            "=== POLLINET BLE MESH SUMMARY (Scan #{}) ===\n\
+            Timestamp: {}\n\
+            Total scans performed: {}\n\
+            Unique peers discovered: {}\n\
+            Current peer count: {}\n\
+            BLE Adapter: {}\n\
+            Node status: ACTIVE and scanning\n\
+            ===========================================\n\n",
+            scan_count, timestamp, scan_count, unique_peers, current_peers, adapter_info
+        );
+        
+        if let Err(e) = file_service.write_file("mesh_summary.log", &summary) {
+            eprintln!("⚠️  Failed to write summary to log file: {}", e);
+        }
     }
 }
 
@@ -191,9 +280,15 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                                     match sdk.send_to_peer(&peer.device_id, random_string.as_bytes()).await {
                                         Ok(_) => {
                                             info!("      ✅ Random string sent successfully to {}", peer.device_id);
+                                            
+                                            // Log sent message to file
+                                            log_sent_message(&peer.device_id, &random_string).await;
                                         }
                                         Err(e) => {
                                             info!("      ⚠️  Failed to send random string: {}", e);
+                                            
+                                            // Log failed send attempt
+                                            log_failed_send(&peer.device_id, &random_string, &e.to_string()).await;
                                         }
                                     }
                                     
@@ -250,6 +345,9 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             info!("📨 Received {} random string(s) via GATT:", received_messages.len());
             for (i, message) in received_messages.iter().enumerate() {
                 info!("   {}. '{}'", i + 1, message);
+                
+                // Log each received message to file
+                add_received_message(message.clone()).await;
             }
             // Clear the buffer after processing
             if let Some(buffer) = RECEIVED_MESSAGES.get() {
@@ -268,9 +366,15 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                 match sdk.send_to_peer(peer_id, random_string.as_bytes()).await {
                     Ok(_) => {
                         info!("✅ Random string sent to {}", peer_id);
+                        
+                        // Log sent message to file
+                        log_sent_message(peer_id, &random_string).await;
                     }
                     Err(e) => {
                         info!("⚠️  Failed to send random string to {}: {}", peer_id, e);
+                        
+                        // Log failed send attempt
+                        log_failed_send(peer_id, &random_string, &e.to_string()).await;
                     }
                 }
             }
@@ -283,13 +387,13 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                     info!("📊 BLE Adapter Status:");
                     info!("{}", status);
                     info!("Adapter Info: {}", sdk.get_adapter_info());
-                    info!("Connected Clients: {}", sdk.get_connected_clients_count());
+                    info!("Connected Clients: {}", sdk.get_connected_clients_count().await);
                     info!("Advertising: {}", sdk.is_advertising());
                     info!("Scanning: {}", sdk.is_scanning());
                 } else {
                     info!("📊 BLE Adapter: Active | Peers: {} | Clients: {} | Buffer: {} fragments", 
                           connected_peers.len(), 
-                          sdk.get_connected_clients_count(),
+                          sdk.get_connected_clients_count().await,
                           sdk.get_fragment_count().await);
                 }
             }
@@ -306,12 +410,15 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             info!("Unique peers discovered: {}", connected_peers.len());
             info!("Current peer count: {}", last_peer_count);
             info!("BLE Adapter: {}", sdk.get_adapter_info());
-            info!("Connected clients: {}", sdk.get_connected_clients_count());
+            info!("Connected clients: {}", sdk.get_connected_clients_count().await);
             info!("Fragment buffer: {} fragments", sdk.get_fragment_count().await);
             info!("Advertising: {}", sdk.is_advertising());
             info!("Scanning: {}", sdk.is_scanning());
             info!("Node status: ACTIVE and scanning");
             info!("Ready to relay transactions via BLE adapter");
+            
+            // Create summary log file
+            create_summary_log(scan_count, connected_peers.len(), last_peer_count, &sdk.get_adapter_info()).await;
         }
 
         // Wait before next scan

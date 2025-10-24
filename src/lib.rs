@@ -458,8 +458,8 @@ impl PolliNetSDK {
     }
     
     /// Get number of connected peers
-    pub fn get_connected_peer_count(&self) -> usize {
-        self.ble_bridge.connected_clients_count()
+    pub async fn get_connected_peer_count(&self) -> usize {
+        self.ble_bridge.connected_clients_count().await
     }
 
     /// Get BLE status and debugging information
@@ -558,8 +558,8 @@ impl PolliNetSDK {
     }
     
     /// Get number of connected BLE clients
-    pub fn get_connected_clients_count(&self) -> usize {
-        self.ble_bridge.connected_clients_count()
+    pub async fn get_connected_clients_count(&self) -> usize {
+        self.ble_bridge.connected_clients_count().await
     }
     
     /// Get number of fragments in the buffer

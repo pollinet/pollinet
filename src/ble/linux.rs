@@ -139,7 +139,7 @@ mod linux_impl {
 
         /// Start advertising with BlueZ
         async fn start_bluez_advertising(&self) -> Result<(), BleError> {
-            use std::collections::{BTreeSet, BTreeMap};
+            use std::collections::BTreeSet;
             
             // Create advertisement
             let mut service_uuids = BTreeSet::new();
@@ -242,10 +242,10 @@ mod linux_impl {
             true // For now, assume advertising is active if we started it
         }
 
-        fn connected_clients_count(&self) -> usize {
-            // This would need to be implemented with proper async handling
-            // For now, return 0 as a placeholder
-            0
+        async fn connected_clients_count(&self) -> usize {
+            // Return the number of connected clients
+            let clients_guard = self.clients.read().await;
+            clients_guard.len()
         }
 
         fn get_adapter_info(&self) -> AdapterInfo {
@@ -367,6 +367,63 @@ mod linux_impl {
             tracing::debug!("📱 Found {} discovered devices on Linux", devices.len());
             Ok(devices)
         }
+
+        async fn connect_to_device(&self, address: &str) -> Result<(), BleError> {
+            tracing::info!("🔗 Connecting to BLE device: {}", address);
+            
+            // Parse the address
+            let device_address = address.parse::<bluer::Address>()
+                .map_err(|e| BleError::PlatformError(format!("Invalid device address: {}", e)))?;
+            
+            // Get the device from the adapter
+            let device = self.adapter.device(device_address)
+                .map_err(|e| BleError::PlatformError(format!("Failed to get device: {}", e)))?;
+            
+            // Connect to the device
+            device.connect().await
+                .map_err(|e| BleError::ConnectionFailed(format!("Failed to connect to device {}: {}", address, e)))?;
+            
+            // Add to connected clients
+            let mut clients_guard = self.clients.write().await;
+            clients_guard.insert(address.to_string(), ClientInfo {
+                device_address: address.to_string(),
+                connected_at: std::time::Instant::now(),
+            });
+            
+            tracing::info!("✅ Successfully connected to device: {}", address);
+            Ok(())
+        }
+
+        async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+            tracing::info!("📤 Writing {} bytes to device: {}", data.len(), address);
+            
+            // Parse the address
+            let device_address = address.parse::<bluer::Address>()
+                .map_err(|e| BleError::PlatformError(format!("Invalid device address: {}", e)))?;
+            
+            // Get the device from the adapter
+            let device = self.adapter.device(device_address)
+                .map_err(|e| BleError::PlatformError(format!("Failed to get device: {}", e)))?;
+            
+            // Check if device is connected
+            if !device.is_connected().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to check connection status: {}", e)))? {
+                return Err(BleError::ConnectionFailed("Device not connected".to_string()));
+            }
+            
+            // For now, we'll simulate writing by logging the data
+            // In a full implementation, this would write to a GATT characteristic
+            tracing::info!("📤 BLE Data written to {}: {} bytes", address, data.len());
+            tracing::debug!("   Data: {:02x?}", data);
+            
+            // TODO: Implement actual GATT characteristic writing
+            // This would involve:
+            // 1. Discovering services on the connected device
+            // 2. Finding the PolliNet service and characteristic
+            // 3. Writing the data to the characteristic
+            
+            Ok(())
+        }
     }
 }
 
@@ -414,7 +471,7 @@ impl crate::ble::adapter::BleAdapter for LinuxBleAdapter {
         false
     }
 
-    fn connected_clients_count(&self) -> usize {
+    async fn connected_clients_count(&self) -> usize {
         0
     }
 

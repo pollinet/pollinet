@@ -42,7 +42,7 @@ impl BleAdapter for WindowsBleAdapter {
         false
     }
 
-    fn connected_clients_count(&self) -> usize {
+    async fn connected_clients_count(&self) -> usize {
         0
     }
 

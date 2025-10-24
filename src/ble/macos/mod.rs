@@ -299,7 +299,7 @@ impl BleAdapter for MacOSBleAdapter {
         false // Central role cannot advertise
     }
 
-    fn connected_clients_count(&self) -> usize {
+    async fn connected_clients_count(&self) -> usize {
         self.connected_peripherals.lock().unwrap().len()
     }
 

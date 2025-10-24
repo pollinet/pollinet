@@ -53,7 +53,7 @@ pub trait BleAdapter: Send + Sync {
     fn is_advertising(&self) -> bool;
     
     /// Get the number of connected clients
-    fn connected_clients_count(&self) -> usize;
+    async fn connected_clients_count(&self) -> usize;
     
     /// Get adapter information (platform-specific details)
     fn get_adapter_info(&self) -> AdapterInfo;

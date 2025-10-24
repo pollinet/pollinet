@@ -1,0 +1,27 @@
+{
+    "peers": [
+        {
+            "id": "90:65:84:5C:9B:2A",
+            "name": "PolliNet-Node-1",
+            "capabilities": ["CAN_RELAY", "CAN_VOTE"],
+            "last_seen": 1698000000,
+            "rssi": -45
+        },
+        {
+            "id": "A1:B2:C3:D4:E5:F6",
+            "name": "PolliNet-Node-2", 
+            "capabilities": ["CAN_RELAY"],
+            "last_seen": 1698000100,
+            "rssi": -52
+        },
+        {
+            "id": "F6:E5:D4:C3:B2:A1",
+            "name": "PolliNet-Node-3",
+            "capabilities": ["CAN_VOTE", "CAN_GOVERN"],
+            "last_seen": 1698000200,
+            "rssi": -38
+        }
+    ],
+    "total_peers": 3,
+    "last_scan": 1698000200
+}
