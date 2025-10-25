@@ -15,6 +15,82 @@ use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// GATT Session Configuration
+const GATT_DATA_RECEIVE_TIMEOUT_SECS: u64 = 30;  // How long to wait for incoming data
+const GATT_SESSION_KEEPALIVE_SECS: u64 = 60;     // How long to keep GATT session alive
+const SCAN_INTERVAL_SECS: u64 = 5;               // How often to perform scans
+
+/// GATT Session Timeout Configuration
+/// 
+/// These timeouts control how long GATT sessions remain active:
+/// 
+/// 1. DATA_RECEIVE_TIMEOUT: How long to wait for incoming data from a connected device
+///    - Default: 30 seconds
+///    - Increase for slower devices or longer data transfers
+///    - Decrease for faster response times
+/// 
+/// 2. SESSION_KEEPALIVE: How long to keep GATT session alive after data exchange
+///    - Default: 60 seconds  
+///    - Increase for persistent connections
+///    - Decrease to free up resources faster
+/// 
+/// 3. SCAN_INTERVAL: How often to perform BLE scans
+///    - Default: 5 seconds
+///    - Increase to save battery
+///    - Decrease for more frequent discovery
+
+/// GATT Session Configuration Structure
+#[derive(Debug, Clone)]
+pub struct GattSessionConfig {
+    pub data_receive_timeout_secs: u64,
+    pub session_keepalive_secs: u64,
+    pub scan_interval_secs: u64,
+    pub max_concurrent_sessions: usize,
+}
+
+impl Default for GattSessionConfig {
+    fn default() -> Self {
+        Self {
+            data_receive_timeout_secs: GATT_DATA_RECEIVE_TIMEOUT_SECS,
+            session_keepalive_secs: GATT_SESSION_KEEPALIVE_SECS,
+            scan_interval_secs: SCAN_INTERVAL_SECS,
+            max_concurrent_sessions: 5,
+        }
+    }
+}
+
+impl GattSessionConfig {
+    /// Create a new configuration with extended timeouts
+    pub fn with_extended_timeouts() -> Self {
+        Self {
+            data_receive_timeout_secs: 120,  // 2 minutes
+            session_keepalive_secs: 300,     // 5 minutes
+            scan_interval_secs: 10,          // 10 seconds
+            max_concurrent_sessions: 10,
+        }
+    }
+    
+    /// Create a configuration optimized for battery life
+    pub fn battery_optimized() -> Self {
+        Self {
+            data_receive_timeout_secs: 15,   // 15 seconds
+            session_keepalive_secs: 30,      // 30 seconds
+            scan_interval_secs: 30,          // 30 seconds
+            max_concurrent_sessions: 3,
+        }
+    }
+    
+    /// Create a configuration for high-performance scenarios
+    pub fn high_performance() -> Self {
+        Self {
+            data_receive_timeout_secs: 60,   // 1 minute
+            session_keepalive_secs: 180,     // 3 minutes
+            scan_interval_secs: 2,           // 2 seconds
+            max_concurrent_sessions: 20,
+        }
+    }
+}
+
 // Include the simple file service
 mod simple_file_service {
     include!("../simple_file_service.rs");
@@ -27,6 +103,9 @@ static RECEIVED_MESSAGES: std::sync::OnceLock<Arc<RwLock<Vec<String>>>> = std::s
 
 // Global file service for logging received messages
 static FILE_SERVICE: std::sync::OnceLock<SimpleFileService> = std::sync::OnceLock::new();
+
+// Global GATT session configuration
+static GATT_CONFIG: std::sync::OnceLock<GattSessionConfig> = std::sync::OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,6 +131,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_service = SimpleFileService::new(Some("./ble_mesh_logs".to_string()))?;
     FILE_SERVICE.set(file_service).unwrap();
     info!("✅ File service initialized for logging received messages");
+    
+    // Initialize GATT session configuration
+    // Choose configuration based on your needs:
+    // - GattSessionConfig::default() - Standard timeouts
+    // - GattSessionConfig::with_extended_timeouts() - Longer timeouts
+    // - GattSessionConfig::battery_optimized() - Shorter timeouts for battery
+    // - GattSessionConfig::high_performance() - Faster scanning
+    let gatt_config = GattSessionConfig::with_extended_timeouts();
+    GATT_CONFIG.set(gatt_config.clone()).unwrap();
+    info!("✅ GATT session configuration initialized:");
+    info!("   📡 Data receive timeout: {} seconds", gatt_config.data_receive_timeout_secs);
+    info!("   🔗 Session keepalive: {} seconds", gatt_config.session_keepalive_secs);
+    info!("   🔍 Scan interval: {} seconds", gatt_config.scan_interval_secs);
+    info!("   👥 Max concurrent sessions: {}", gatt_config.max_concurrent_sessions);
 
     // Start BLE networking (advertising + scanning)
     info!("Starting BLE advertising and scanning...");
@@ -374,8 +467,12 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                                     info!("      📨 Waiting for data from connected device {}...", peer.device_id);
                                     
                                     // Set up a timeout for receiving data
+                                    let timeout_secs = GATT_CONFIG.get()
+                                        .map(|config| config.data_receive_timeout_secs)
+                                        .unwrap_or(GATT_DATA_RECEIVE_TIMEOUT_SECS);
+                                    
                                     let receive_timeout = tokio::time::timeout(
-                                        tokio::time::Duration::from_secs(10),
+                                        tokio::time::Duration::from_secs(timeout_secs),
                                         wait_for_incoming_data(&peer.device_id)
                                     ).await;
                                     
@@ -509,8 +606,12 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
         }
 
         // Wait before next scan
-        info!("⏱️  Waiting 5 seconds before next scan...");
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let scan_interval = GATT_CONFIG.get()
+            .map(|config| config.scan_interval_secs)
+            .unwrap_or(SCAN_INTERVAL_SECS);
+        
+        info!("⏱️  Waiting {} seconds before next scan...", scan_interval);
+        tokio::time::sleep(Duration::from_secs(scan_interval)).await;
     }
 }
 
