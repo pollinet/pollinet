@@ -11,22 +11,17 @@
 use bs58;
 use bincode1;
 use pollinet::PolliNetSDK;
-use pollinet::transaction::{OfflineTransactionBundle, CachedNonceData};
 use pollinet::util::lz::Lz4Compressor;
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use solana_sdk::system_instruction;
 use solana_sdk::transaction::Transaction;
-use std::fs;
-use std::path::Path;
 use tracing::{info, warn, error};
 use tokio::time::{sleep, Duration};
 
 const BUNDLE_FILE: &str = "./offline_bundle.json";
-const RECIPIENT_ADDRESS: &str = "11111111111111111111111111111112"; // System Program
+const RECIPIENT_ADDRESS: &str = "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX"; // System Program
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,49 +46,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ================================================================
     info!("\n📦 STEP 1: Checking offline bundle availability...");
     
-    let bundle = if Path::new(BUNDLE_FILE).exists() {
-        info!("📁 Offline bundle file found: {}", BUNDLE_FILE);
-        
-        // Load existing bundle
-        let bundle_data = fs::read_to_string(BUNDLE_FILE)
-            .map_err(|e| format!("Failed to read bundle file: {}", e))?;
-        
-        let bundle: OfflineTransactionBundle = serde_json::from_str(&bundle_data)
-            .map_err(|e| format!("Failed to parse bundle file: {}", e))?;
-        
-        info!("✅ Loaded existing bundle with {} nonce accounts", bundle.nonce_caches.len());
-        bundle
-    } else {
-        info!("📁 No offline bundle found, creating new one...");
-        
-        // Create new bundle online
-        let rpc_url = "https://api.devnet.solana.com";
-        let rpc_client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
-        
-        info!("🌐 Connecting to Solana RPC: {}", rpc_url);
-        
-        // Create bundle with multiple nonce accounts
-        let bundle = create_offline_bundle(&rpc_client, &sender_keypair, 5).await?;
-        
-        // Save bundle to file
-        let bundle_json = serde_json::to_string_pretty(&bundle)
-            .map_err(|e| format!("Failed to serialize bundle: {}", e))?;
-        
-        fs::write(BUNDLE_FILE, bundle_json)
-            .map_err(|e| format!("Failed to write bundle file: {}", e))?;
-        
-        info!("💾 Bundle saved to: {}", BUNDLE_FILE);
-        bundle
-    };
+    // Use SDK method to prepare or load bundle
+    let rpc_url = "https://api.devnet.solana.com";
+    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    
+    info!("🌐 Connecting to Solana RPC: {}", rpc_url);
+    
+    // Prepare bundle (will load existing or create new one)
+    let mut bundle = sdk.prepare_offline_bundle(5, &sender_keypair, Some(BUNDLE_FILE)).await?;
+    
+    info!("✅ Bundle ready with {} nonce accounts", bundle.available_nonces());
 
     // ================================================================
     // STEP 2: Fetch unused bundle and create compressed presigned transaction
     // ================================================================
     info!("\n🔧 STEP 2: Creating compressed presigned transaction...");
     
-    // Get next available nonce
-    let nonce_info = bundle.nonce_caches.iter()
-        .find(|n| !n.used)
+    // Get next available nonce using SDK method
+    let (index, nonce_info) = bundle.get_next_available_nonce()
         .ok_or("No available nonces in bundle")?;
     
     info!("📋 Using nonce account: {}", nonce_info.nonce_account);
@@ -193,17 +163,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     info!("✅ Transaction fragments sent successfully!");
                                     info!("   Sent {} bytes to peer: {}", compressed_data.len(), target_peer.device_id);
                                     
-                                    // Mark nonce as used and save updated bundle
-                                    let mut updated_bundle = bundle.clone();
-                                    if let Some(nonce) = updated_bundle.nonce_caches.iter_mut()
-                                        .find(|n| n.nonce_account == nonce_info.nonce_account) {
-                                        nonce.used = true;
-                                    }
+                                    // Mark nonce as used using SDK method
+                                    bundle.mark_used(index)
+                                        .map_err(|e| format!("Failed to mark nonce as used: {}", e))?;
                                     
-                                    let updated_json = serde_json::to_string_pretty(&updated_bundle)
-                                        .map_err(|e| format!("Failed to serialize updated bundle: {}", e))?;
-                                    
-                                    fs::write(BUNDLE_FILE, updated_json)
+                                    // Save updated bundle using SDK method
+                                    bundle.save_to_file(BUNDLE_FILE)
                                         .map_err(|e| format!("Failed to save updated bundle: {}", e))?;
                                     
                                     info!("💾 Updated bundle saved (nonce marked as used)");
@@ -246,74 +211,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Create an offline bundle with multiple nonce accounts
-async fn create_offline_bundle(
-    rpc_client: &RpcClient,
-    sender_keypair: &Keypair,
-    num_nonces: usize,
-) -> Result<OfflineTransactionBundle, Box<dyn std::error::Error>> {
-    info!("🔨 Creating offline bundle with {} nonce accounts...", num_nonces);
-    
-    let mut nonce_caches = Vec::new();
-    
-    for i in 0..num_nonces {
-        info!("   Creating nonce account {}/{}...", i + 1, num_nonces);
-        
-        // Create nonce account keypair
-        let nonce_keypair = Keypair::new();
-        let nonce_account = nonce_keypair.pubkey();
-        
-        // Create nonce account instruction
-        let create_nonce_account_ix = system_instruction::create_account(
-            &sender_keypair.pubkey(),
-            &nonce_account,
-            rpc_client.get_minimum_balance_for_rent_exemption(80)?,
-            80,
-            &solana_sdk::system_program::id(),
-        );
-        
-        let initialize_nonce_account_ix = system_instruction::authorize_nonce_account(
-            &nonce_account,
-            &sender_keypair.pubkey(),
-            &sender_keypair.pubkey(),
-        );
-        
-        let mut transaction = Transaction::new_with_payer(
-            &[create_nonce_account_ix, initialize_nonce_account_ix],
-            Some(&sender_keypair.pubkey()),
-        );
-        
-        let recent_blockhash = rpc_client.get_latest_blockhash()?;
-        transaction.sign(&[sender_keypair, &nonce_keypair], recent_blockhash);
-        
-        // Submit transaction
-        let signature = rpc_client.send_and_confirm_transaction(&transaction)?;
-        info!("   ✅ Nonce account {} created: {}", i + 1, signature);
-        
-        // Get current blockhash for nonce
-        let current_blockhash = rpc_client.get_latest_blockhash()?;
-        
-        nonce_caches.push(CachedNonceData {
-            nonce_account: nonce_account.to_string(),
-            authority: sender_keypair.pubkey().to_string(),
-            blockhash: current_blockhash.to_string(),
-            lamports_per_signature: 5000, // Default fee
-            cached_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            used: false,
-        });
-    }
-    
-    info!("✅ Bundle created with {} nonce accounts", nonce_caches.len());
-    
-    Ok(OfflineTransactionBundle {
-        nonce_caches,
-        max_transactions: num_nonces,
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    })
-}
