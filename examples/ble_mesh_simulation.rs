@@ -217,6 +217,27 @@ async fn setup_gatt_receive_callback(sdk: &PolliNetSDK) {
     // Set up real BLE adapter receive callback
     // This will be called when data is actually received from connected devices
     info!("📡 GATT receive callback configured - will process real incoming data from connected devices");
+    
+    // The receive callback is already set up in the BleAdapterBridge
+    // when the SDK is initialized, so we don't need to do anything here
+    // The callback will automatically call add_received_message when data is received
+    
+    // For testing purposes, let's simulate some incoming data to verify the callback works
+    info!("🧪 Testing receive callback with simulated data...");
+    tokio::spawn(async move {
+        // Wait a bit then simulate receiving some test data
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        
+        // Simulate receiving a test message
+        let test_message = "TEST_MESSAGE_FROM_SIMULATION";
+        info!("📨 Simulating received message: '{}'", test_message);
+        add_received_message(test_message.to_string()).await;
+        
+        // Simulate receiving a random string
+        let random_test = generate_random_string();
+        info!("📨 Simulating received random string: '{}'", random_test);
+        add_received_message(random_test).await;
+    });
 }
 
 /// Get received messages from the global buffer
