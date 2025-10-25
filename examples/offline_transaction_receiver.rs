@@ -18,8 +18,9 @@ use solana_sdk::transaction::Transaction;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error};
 use tokio::time::{sleep, Duration};
+use base64;
 
 // Fragment reassembly buffer
 type FragmentBuffer = Arc<RwLock<HashMap<String, Vec<u8>>>>;
@@ -109,19 +110,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if scan_count >= max_scans {
             if !found_peers {
                 info!("⏰ No real peers found after {} scans", max_scans);
-                info!("🧪 Demonstrating transaction reception with simulated peer...");
+                info!("🔄 Continuing to listen for incoming connections...");
                 
-                // Simulate receiving from a mock peer
-                let mock_peer_id = "simulated_peer_12345";
-                info!("🔗 Simulating connection to: {}", mock_peer_id);
-                info!("✅ Simulated connection to peer: {}", mock_peer_id);
-                
-                // Start receiving data from this simulated peer
-                if let Err(e) = receive_transaction_fragments(&sdk, mock_peer_id, &fragment_buffer).await {
-                    error!("❌ Error receiving from {}: {}", mock_peer_id, e);
+                // Keep listening for incoming connections
+                loop {
+                    sleep(Duration::from_secs(5)).await;
+                    
+                    // Check for new peers
+                    match sdk.discover_ble_peers().await {
+                        Ok(peers) => {
+                            if !peers.is_empty() {
+                                info!("📱 Found new peer(s): {}", peers.len());
+                                for peer in &peers {
+                                    info!("🔗 Attempting connection to: {}", peer.device_id);
+                                    
+                                    match sdk.connect_to_ble_peer(&peer.device_id).await {
+                                        Ok(_) => {
+                                            info!("✅ Connected to peer: {}", peer.device_id);
+                                            
+                                            // Start receiving data from this peer
+                                            if let Err(e) = receive_transaction_fragments(&sdk, &peer.device_id, &fragment_buffer).await {
+                                                error!("❌ Error receiving from {}: {}", peer.device_id, e);
+                                            }
+                                            
+                                            // Disconnect after receiving
+                                            info!("🔌 Disconnected from: {}", peer.device_id);
+                                        }
+                                        Err(e) => {
+                                            warn!("⚠️  Failed to connect to peer {}: {}", peer.device_id, e);
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            warn!("⚠️  Peer discovery failed: {}", e);
+                        }
+                    }
                 }
-                
-                info!("🔌 Simulated disconnection from: {}", mock_peer_id);
             }
             break;
         }
@@ -178,7 +205,7 @@ async fn receive_transaction_fragments(
             // ================================================================
             info!("\n🌐 STEP 4: Submitting transaction to blockchain...");
             
-            let rpc_url = "https://api.devnet.solana.com";
+            let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
             let rpc_client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
             
             info!("🌐 Connecting to Solana RPC: {}", rpc_url);
@@ -215,90 +242,52 @@ async fn wait_for_transaction_data(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     info!("⏳ Waiting for transaction data from: {}", peer_id);
     
-    // Since the current BLE implementation doesn't receive real transaction data,
-    // we'll simulate receiving a transaction for demonstration purposes
-    info!("🧪 Current BLE implementation doesn't receive real transaction data");
-    info!("   Simulating transaction reception for demonstration...");
+    // Wait for real transaction data from BLE peer
+    let mut attempts = 0;
+    let max_attempts = 30; // 30 seconds timeout
     
-    // Simulate receiving a transaction
-    simulate_transaction_reception(sdk, peer_id, fragment_buffer).await
-}
-
-/// Simulate receiving a complete transaction (for testing)
-async fn simulate_transaction_reception(
-    sdk: &PolliNetSDK,
-    peer_id: &str,
-    fragment_buffer: &FragmentBuffer,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    info!("🧪 Simulating transaction reception from: {}", peer_id);
-    
-    // Create a mock transaction for testing
-    let mock_transaction_data = create_mock_transaction_data().await?;
-    
-    // Simulate receiving it in chunks
-    let chunk_size = 100;
-    let mut offset = 0;
-    
-    while offset < mock_transaction_data.len() {
-        let end = std::cmp::min(offset + chunk_size, mock_transaction_data.len());
-        let chunk = &mock_transaction_data[offset..end];
-        
-        // Add to fragment buffer
+    while attempts < max_attempts {
+        // Check if we have received any data from this peer
         {
-            let mut buffer = fragment_buffer.write().await;
-            let peer_buffer = buffer.entry(peer_id.to_string()).or_insert_with(Vec::new);
-            peer_buffer.extend_from_slice(chunk);
+            let buffer = fragment_buffer.read().await;
+            if let Some(peer_data) = buffer.get(peer_id) {
+                if !peer_data.is_empty() {
+                    info!("✅ Received transaction data: {} bytes", peer_data.len());
+                    return Ok(peer_data.clone());
+                }
+            }
         }
         
-        info!("📦 Simulated chunk: {} bytes (offset: {})", chunk.len(), offset);
-        offset = end;
+        // Also check for incoming text messages which might contain transaction data
+        if let Ok(messages) = sdk.check_incoming_messages().await {
+            for message in messages {
+                info!("📨 Received message: {}", message);
+                
+                // Try to parse as base64 encoded transaction data
+                if let Ok(decoded_data) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &message) {
+                    info!("✅ Decoded transaction data from message: {} bytes", decoded_data.len());
+                    
+                    // Store in fragment buffer for this peer
+                    {
+                        let mut buffer = fragment_buffer.write().await;
+                        let peer_buffer = buffer.entry(peer_id.to_string()).or_insert_with(Vec::new);
+                        peer_buffer.extend_from_slice(&decoded_data);
+                    }
+                    
+                    return Ok(decoded_data);
+                }
+            }
+        }
         
-        // Small delay to simulate real reception
-        sleep(Duration::from_millis(100)).await;
+        // Wait a bit before checking again
+        sleep(Duration::from_millis(1000)).await;
+        attempts += 1;
+        
+        if attempts % 5 == 0 {
+            info!("⏳ Still waiting for data from {}... ({}s)", peer_id, attempts);
+        }
     }
     
-    // Return the complete data
-    let mut buffer = fragment_buffer.write().await;
-    if let Some(peer_data) = buffer.remove(peer_id) {
-        info!("✅ Complete simulated transaction: {} bytes", peer_data.len());
-        return Ok(peer_data);
-    }
-    
-    Err("Failed to simulate transaction reception".into())
+    Err(format!("Timeout waiting for transaction data from {}", peer_id).into())
 }
 
-/// Create mock transaction data for testing
-async fn create_mock_transaction_data() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    use solana_sdk::system_instruction;
-    use solana_sdk::signature::Keypair;
-    use solana_sdk::signer::Signer;
-    
-    // Create a mock transaction
-    let sender_keypair = Keypair::new();
-    let recipient_keypair = Keypair::new();
-    
-    let transfer_instruction = system_instruction::transfer(
-        &sender_keypair.pubkey(),
-        &recipient_keypair.pubkey(),
-        1000, // 1000 lamports
-    );
-    
-    let mut transaction = Transaction::new_with_payer(
-        &[transfer_instruction],
-        Some(&sender_keypair.pubkey()),
-    );
-    
-    // Use a mock recent blockhash
-    let recent_blockhash = solana_sdk::hash::Hash::new_unique();
-    transaction.sign(&[&sender_keypair], recent_blockhash);
-    
-    // Serialize and compress
-    let transaction_bytes = bincode1::serialize(&transaction)?;
-    let compressor = Lz4Compressor::new()?;
-    let compressed_data = compressor.compress_with_size(&transaction_bytes)?;
-    
-    info!("🧪 Created mock transaction: {} bytes -> {} bytes compressed", 
-          transaction_bytes.len(), compressed_data.len());
-    
-    Ok(compressed_data)
-}
