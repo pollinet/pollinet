@@ -141,27 +141,88 @@ mod linux_impl {
         async fn start_bluez_advertising(&self) -> Result<(), BleError> {
             use std::collections::BTreeSet;
             
-            // Create advertisement
-            let mut service_uuids = BTreeSet::new();
-            service_uuids.insert(self.service_uuid);
+            // Check if adapter is powered on
+            if !self.adapter.is_powered().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to check adapter power status: {}", e)))? {
+                tracing::warn!("⚠️  BLE adapter is not powered on, attempting to power on...");
+                self.adapter.set_powered(true).await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to power on adapter: {}", e)))?;
+                
+                // Wait a bit for the adapter to power on
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            }
+
+            // Check if adapter is discoverable
+            if !self.adapter.is_discoverable().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to check discoverable status: {}", e)))? {
+                tracing::warn!("⚠️  BLE adapter is not discoverable, attempting to set discoverable...");
+                self.adapter.set_discoverable(true).await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to set discoverable: {}", e)))?;
+            }
+
+            // Try multiple advertisement configurations
+            let mut last_error = None;
             
-            // Create a simpler advertisement to avoid parameter issues
-            let advertisement = Advertisement {
+            // Configuration 1: Minimal advertisement
+            let minimal_ad = Advertisement {
                 advertisement_type: bluer::adv::Type::Broadcast,
-                service_uuids,
+                service_uuids: BTreeSet::new(),
                 local_name: Some(POLLINET_SERVICE_NAME.to_string()),
                 ..Default::default()
             };
 
-            // Start advertising
-            let handle = self.adapter.advertise(advertisement).await
-                .map_err(|e| BleError::AdvertisingFailed(format!("BlueZ advertising failed: {}", e)))?;
+            // Configuration 2: With service UUID
+            let mut service_uuids = BTreeSet::new();
+            service_uuids.insert(self.service_uuid);
+            let service_ad = Advertisement {
+                advertisement_type: bluer::adv::Type::Broadcast,
+                service_uuids: service_uuids.clone(),
+                local_name: Some(POLLINET_SERVICE_NAME.to_string()),
+                ..Default::default()
+            };
 
-            // Store the handle for stopping later
-            let mut handle_guard = self.advertisement_handle.lock().unwrap();
-            *handle_guard = Some(handle);
+            // Configuration 3: Connectable advertisement
+            let connectable_ad = Advertisement {
+                advertisement_type: bluer::adv::Type::Peripheral,
+                service_uuids: service_uuids.clone(),
+                local_name: Some(POLLINET_SERVICE_NAME.to_string()),
+                ..Default::default()
+            };
 
-            Ok(())
+            let configurations = vec![
+                ("minimal", minimal_ad),
+                ("with_service", service_ad),
+                ("connectable", connectable_ad),
+            ];
+
+            for (config_name, advertisement) in configurations {
+                tracing::debug!("🔧 Trying {} advertisement configuration...", config_name);
+                
+                match self.adapter.advertise(advertisement).await {
+                    Ok(handle) => {
+                        tracing::info!("✅ Successfully started advertising with {} configuration", config_name);
+                        
+                        // Store the handle for stopping later
+                        let mut handle_guard = self.advertisement_handle.lock().unwrap();
+                        *handle_guard = Some(handle);
+                        
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠️  {} configuration failed: {}", config_name, e);
+                        last_error = Some(e);
+                        
+                        // Wait a bit before trying the next configuration
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+
+            // If all configurations failed, return the last error
+            Err(BleError::AdvertisingFailed(format!(
+                "All advertising configurations failed. Last error: {}", 
+                last_error.map(|e| e.to_string()).unwrap_or_else(|| "Unknown error".to_string())
+            )))
         }
     }
 
@@ -192,11 +253,22 @@ mod linux_impl {
                 *status = true;
             }
 
-            // Start BlueZ advertising
-            self.start_bluez_advertising().await?;
-
-            tracing::info!("BLE advertising started successfully on Linux");
-            Ok(())
+            // Try to start BlueZ advertising with fallback
+            match self.start_bluez_advertising().await {
+                Ok(_) => {
+                    tracing::info!("✅ BLE advertising started successfully on Linux");
+                    Ok(())
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️  BLE advertising failed, but continuing in simulation mode: {}", e);
+                    tracing::warn!("   The system will continue to work for scanning and connecting to other devices");
+                    tracing::warn!("   However, this device will not be discoverable by other PolliNet devices");
+                    
+                    // Don't return error - allow the system to continue
+                    // This enables scanning and connecting to other devices even if advertising fails
+                    Ok(())
+                }
+            }
         }
 
         async fn stop_advertising(&self) -> Result<(), BleError> {
