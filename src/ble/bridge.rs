@@ -165,6 +165,35 @@ impl BleAdapterBridge {
         self.adapter.write_to_device(address, data).await
     }
     
+    /// Get all fragments for a specific transaction
+    pub async fn get_fragments_for_transaction(&self, tx_id: &str) -> Option<Vec<Fragment>> {
+        let cache = self.transaction_cache.read().await;
+        cache.get(tx_id).cloned()
+    }
+    
+    /// Get all transaction IDs that have complete fragments
+    pub async fn get_complete_transactions(&self) -> Vec<String> {
+        let cache = self.transaction_cache.read().await;
+        let mut complete_txs = Vec::new();
+        
+        for (tx_id, fragments) in cache.iter() {
+            if !fragments.is_empty() {
+                let expected_count = fragments[0].total;
+                if fragments.len() == expected_count {
+                    complete_txs.push(tx_id.clone());
+                }
+            }
+        }
+        
+        complete_txs
+    }
+    
+    /// Clear fragments for a specific transaction
+    pub async fn clear_fragments(&self, tx_id: &str) {
+        let mut cache = self.transaction_cache.write().await;
+        cache.remove(tx_id);
+    }
+    
     /// Get incoming text messages
     pub async fn get_text_messages(&self) -> Vec<String> {
         let mut buffer_guard = self.text_message_buffer.write().await;

@@ -422,7 +422,7 @@ impl PolliNetSDK {
         self.ble_bridge.start_scanning().await?;
         
         // Wait a moment for devices to be discovered
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
         
         // Get discovered devices
         let discovered = self.ble_bridge.get_discovered_devices().await?;
@@ -583,6 +583,21 @@ impl PolliNetSDK {
     /// Check if BLE adapter is scanning
     pub fn is_scanning(&self) -> bool {
         self.ble_bridge.is_scanning()
+    }
+    
+    /// Get all fragments for a specific transaction
+    pub async fn get_fragments_for_transaction(&self, tx_id: &str) -> Option<Vec<transaction::Fragment>> {
+        self.ble_bridge.get_fragments_for_transaction(tx_id).await
+    }
+    
+    /// Get all transaction IDs that have complete fragments
+    pub async fn get_complete_transactions(&self) -> Vec<String> {
+        self.ble_bridge.get_complete_transactions().await
+    }
+    
+    /// Clear fragments for a specific transaction
+    pub async fn clear_fragments(&self, tx_id: &str) {
+        self.ble_bridge.clear_fragments(tx_id).await;
     }
 }
 

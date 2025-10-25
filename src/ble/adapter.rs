@@ -76,6 +76,11 @@ pub trait BleAdapter: Send + Sync {
     async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
         Err(BleError::OperationNotSupported("Writing to devices not supported on this platform".to_string()))
     }
+    
+    /// Read data from a connected device (Central role only)
+    async fn read_from_device(&self, address: &str) -> Result<Vec<u8>, BleError> {
+        Err(BleError::OperationNotSupported("Reading from devices not supported on this platform".to_string()))
+    }
 }
 
 /// Information about the BLE adapter

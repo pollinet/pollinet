@@ -13,6 +13,9 @@ mod linux_impl {
     use tokio::sync::RwLock;
     use bluer::{
         adv::Advertisement,
+        gatt::remote::{
+            Characteristic, Service,
+        },
     };
     use tokio_stream::StreamExt;
 
@@ -43,6 +46,33 @@ mod linux_impl {
     struct ClientInfo {
         device_address: String,
         connected_at: std::time::Instant,
+        /// Discovered GATT services
+        services: HashMap<Uuid, GattService>,
+    }
+
+    /// GATT service information
+    #[derive(Debug, Clone)]
+    struct GattService {
+        uuid: Uuid,
+        characteristics: HashMap<Uuid, GattCharacteristic>,
+    }
+
+    /// GATT characteristic information
+    #[derive(Debug, Clone)]
+    struct GattCharacteristic {
+        uuid: Uuid,
+        properties: CharacteristicProperties,
+        value: Option<Vec<u8>>,
+    }
+
+    /// Characteristic properties
+    #[derive(Debug, Clone)]
+    struct CharacteristicProperties {
+        read: bool,
+        write: bool,
+        write_without_response: bool,
+        notify: bool,
+        indicate: bool,
     }
 
     impl LinuxBleAdapter {
@@ -75,6 +105,234 @@ mod linux_impl {
                 advertisement_handle: Arc::new(Mutex::new(None)),
                 discovered_devices: Arc::new(RwLock::new(HashMap::new())),
             })
+        }
+
+        /// Discover GATT services for a connected device
+        async fn discover_gatt_services(
+            device: &bluer::Device,
+        ) -> Result<HashMap<Uuid, GattService>, BleError> {
+            tracing::info!("🔍 Discovering GATT services for device: {}", device.address());
+            
+            let mut services = HashMap::new();
+            
+            // Get all services from the device
+            let device_services = device.services().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to get services: {}", e)))?;
+            
+            for service in device_services {
+                let service_uuid = service.uuid().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get service UUID: {}", e)))?;
+                
+                tracing::info!("📋 Found service: {}", service_uuid);
+                
+                // Discover characteristics for this service
+                let characteristics = Self::discover_characteristics(&service).await?;
+                
+                let gatt_service = GattService {
+                    uuid: service_uuid,
+                    characteristics,
+                };
+                
+                services.insert(service_uuid, gatt_service);
+            }
+            
+            tracing::info!("✅ Discovered {} GATT services", services.len());
+            Ok(services)
+        }
+
+        /// Set up GATT data reception for a connected device
+        async fn setup_gatt_data_reception(
+            device: &bluer::Device,
+            _services: &HashMap<Uuid, GattService>,
+            receive_callback: Arc<Mutex<Option<Box<dyn Fn(Vec<u8>) + Send + 'static>>>>,
+        ) -> Result<(), BleError> {
+            tracing::info!("📡 Setting up GATT data reception...");
+            
+            // Get all services from the device
+            let device_services = device.services().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to get services: {}", e)))?;
+            
+            for service in device_services {
+                let _service_uuid = service.uuid().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get service UUID: {}", e)))?;
+                
+                // Get characteristics for this service
+                let characteristics = service.characteristics().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get characteristics: {}", e)))?;
+                
+                for characteristic in characteristics {
+                    let char_uuid = characteristic.uuid().await
+                        .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+                    
+                    let properties = characteristic.flags().await
+                        .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic properties: {}", e)))?;
+                    
+                    // Check if this characteristic supports notifications or indications
+                    if properties.notify || properties.indicate {
+                        tracing::info!("🔔 Setting up notification for characteristic: {} (notify: {}, indicate: {})", 
+                            char_uuid, properties.notify, properties.indicate);
+                        
+                        // Set up notification/indication subscription
+                        if let Err(e) = Self::subscribe_to_characteristic(&characteristic, receive_callback.clone()).await {
+                            tracing::warn!("⚠️  Failed to subscribe to characteristic {}: {}", char_uuid, e);
+                        } else {
+                            tracing::info!("✅ Successfully subscribed to characteristic: {}", char_uuid);
+                        }
+                    }
+                }
+            }
+            
+            tracing::info!("✅ GATT data reception setup completed");
+            Ok(())
+        }
+
+        /// Subscribe to a characteristic for notifications/indications
+        async fn subscribe_to_characteristic(
+            characteristic: &Characteristic,
+            receive_callback: Arc<Mutex<Option<Box<dyn Fn(Vec<u8>) + Send + 'static>>>>,
+        ) -> Result<(), BleError> {
+            let char_uuid = characteristic.uuid().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+            
+            // Start notifications
+            characteristic.notify().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to start notifications for characteristic {}: {}", char_uuid, e)))?;
+            
+            // Set up a background task to handle incoming notifications
+            let characteristic_clone = characteristic.clone();
+            let callback_clone = receive_callback.clone();
+            
+            tokio::spawn(async move {
+                tracing::info!("🎧 Listening for notifications on characteristic: {}", char_uuid);
+                
+                // Create a stream for notifications
+                if let Ok(notifications) = characteristic_clone.notify().await {
+                    use tokio_stream::StreamExt;
+                    
+                    let mut notifications = Box::pin(notifications);
+                    while let Some(data) = notifications.next().await {
+                        tracing::info!("📨 Received GATT notification: {} bytes", data.len());
+                        tracing::debug!("   Data: {:02x?}", data);
+                        
+                        // Call the receive callback if it's set
+                        if let Ok(callback_guard) = callback_clone.lock() {
+                            if let Some(callback) = callback_guard.as_ref() {
+                                callback(data);
+                            }
+                        }
+                    }
+                } else {
+                    tracing::warn!("⚠️  Failed to create notification stream for characteristic: {}", char_uuid);
+                }
+            });
+            
+            Ok(())
+        }
+
+        /// Discover characteristics for a GATT service
+        async fn discover_characteristics(
+            service: &Service,
+        ) -> Result<HashMap<Uuid, GattCharacteristic>, BleError> {
+            let mut characteristics = HashMap::new();
+            
+            // Get all characteristics from the service
+            let service_characteristics = service.characteristics().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to get characteristics: {}", e)))?;
+            
+            for characteristic in service_characteristics {
+                let char_uuid = characteristic.uuid().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+                
+                // Get characteristic properties
+                let properties = characteristic.flags().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic properties: {}", e)))?;
+                
+                let char_properties = CharacteristicProperties {
+                    read: properties.read,
+                    write: properties.write,
+                    write_without_response: properties.write_without_response,
+                    notify: properties.notify,
+                    indicate: properties.indicate,
+                };
+                
+                tracing::info!("  📝 Characteristic: {} (R:{} W:{} WNR:{} N:{} I:{})", 
+                    char_uuid,
+                    char_properties.read,
+                    char_properties.write,
+                    char_properties.write_without_response,
+                    char_properties.notify,
+                    char_properties.indicate
+                );
+                
+                // Try to read the current value if readable
+                let mut value = None;
+                if char_properties.read {
+                    match characteristic.read().await {
+                        Ok(read_value) => {
+                            tracing::debug!("    📖 Read value: {:02x?}", read_value);
+                            value = Some(read_value);
+                        }
+                        Err(e) => {
+                            tracing::debug!("    ⚠️  Failed to read characteristic value: {}", e);
+                        }
+                    }
+                }
+                
+                let gatt_characteristic = GattCharacteristic {
+                    uuid: char_uuid,
+                    properties: char_properties,
+                    value,
+                };
+                
+                characteristics.insert(char_uuid, gatt_characteristic);
+            }
+            
+            tracing::info!("  ✅ Discovered {} characteristics", characteristics.len());
+            Ok(characteristics)
+        }
+
+        /// Find a writable characteristic for data transmission
+        async fn find_writable_characteristic(
+            device: &bluer::Device,
+            service_uuid: Option<Uuid>,
+        ) -> Result<(Service, Characteristic), BleError> {
+            tracing::info!("🔍 Looking for writable characteristic...");
+            
+            let services = device.services().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to get services: {}", e)))?;
+            
+            for service in services {
+                let current_service_uuid = service.uuid().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get service UUID: {}", e)))?;
+                
+                // If a specific service UUID is provided, only check that service
+                if let Some(target_uuid) = service_uuid {
+                    if current_service_uuid != target_uuid {
+                        continue;
+                    }
+                }
+                
+                tracing::debug!("🔍 Checking service: {}", current_service_uuid);
+                
+                let characteristics = service.characteristics().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get characteristics: {}", e)))?;
+                
+                for characteristic in characteristics {
+                    let char_uuid = characteristic.uuid().await
+                        .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+                    
+                    let properties = characteristic.flags().await
+                        .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic properties: {}", e)))?;
+                    
+                    // Check if this characteristic supports writing
+                    if properties.write || properties.write_without_response {
+                        tracing::info!("✅ Found writable characteristic: {} in service: {}", char_uuid, current_service_uuid);
+                        return Ok((service, characteristic));
+                    }
+                }
+            }
+            
+            Err(BleError::CharacteristicNotFound)
         }
 
         /// Get device information and check if it advertises PolliNet service
@@ -163,17 +421,17 @@ mod linux_impl {
             // Try multiple advertisement configurations
             let mut last_error = None;
             
-            // Configuration 1: Minimal advertisement
+            // Configuration 1: Minimal advertisement with service UUID
+            let mut service_uuids = BTreeSet::new();
+            service_uuids.insert(self.service_uuid);
             let minimal_ad = Advertisement {
                 advertisement_type: bluer::adv::Type::Broadcast,
-                service_uuids: BTreeSet::new(),
+                service_uuids: service_uuids.clone(),
                 local_name: Some(POLLINET_SERVICE_NAME.to_string()),
                 ..Default::default()
             };
 
-            // Configuration 2: With service UUID
-            let mut service_uuids = BTreeSet::new();
-            service_uuids.insert(self.service_uuid);
+            // Configuration 2: With service UUID (same as minimal now)
             let service_ad = Advertisement {
                 advertisement_type: bluer::adv::Type::Broadcast,
                 service_uuids: service_uuids.clone(),
@@ -455,14 +713,42 @@ mod linux_impl {
             device.connect().await
                 .map_err(|e| BleError::ConnectionFailed(format!("Failed to connect to device {}: {}", address, e)))?;
             
-            // Add to connected clients
+            tracing::info!("✅ Connected to device: {}", address);
+            
+            // Discover GATT services after connection
+            tracing::info!("🔍 Discovering GATT services...");
+            let services = match Self::discover_gatt_services(&device).await {
+                Ok(services) => {
+                    tracing::info!("✅ Successfully discovered {} GATT services", services.len());
+                    services
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️  Failed to discover GATT services: {}", e);
+                    tracing::warn!("   Continuing with connection but write operations may not work");
+                    HashMap::new()
+                }
+            };
+            
+            // Set up GATT data reception if we have services
+            if !services.is_empty() {
+                tracing::info!("📡 Setting up GATT data reception...");
+                if let Err(e) = Self::setup_gatt_data_reception(&device, &services, self.receive_callback.clone()).await {
+                    tracing::warn!("⚠️  Failed to set up GATT data reception: {}", e);
+                    tracing::warn!("   Connection will continue but data reception may not work");
+                } else {
+                    tracing::info!("✅ GATT data reception set up successfully");
+                }
+            }
+            
+            // Add to connected clients with GATT service information
             let mut clients_guard = self.clients.write().await;
             clients_guard.insert(address.to_string(), ClientInfo {
                 device_address: address.to_string(),
                 connected_at: std::time::Instant::now(),
+                services,
             });
             
-            tracing::info!("✅ Successfully connected to device: {}", address);
+            tracing::info!("✅ Successfully connected to device: {} with GATT services and data reception", address);
             Ok(())
         }
 
@@ -483,23 +769,161 @@ mod linux_impl {
                 return Err(BleError::ConnectionFailed("Device not connected".to_string()));
             }
             
-            // For now, we'll implement a simplified version that logs the data
-            // A full GATT implementation would require:
-            // 1. Service discovery
-            // 2. Characteristic enumeration
-            // 3. Proper write operations
+            // Check if we have cached GATT services for this device
+            let client_info = {
+                let clients_guard = self.clients.read().await;
+                clients_guard.get(address).cloned()
+            };
             
-            tracing::info!("📤 BLE Data written to {}: {} bytes", address, data.len());
-            tracing::debug!("   Data: {:02x?}", data);
+            if let Some(client_info) = client_info {
+                // Try to find a writable characteristic from cached services
+                if let Some((service_uuid, characteristic_uuid)) = find_cached_writable_characteristic(&client_info) {
+                    tracing::info!("📝 Using cached characteristic: {} in service: {}", characteristic_uuid, service_uuid);
+                    
+                    // Find the actual characteristic object
+                    match Self::find_writable_characteristic(&device, Some(service_uuid)).await {
+                        Ok((_service, characteristic)) => {
+                            return write_to_characteristic(&characteristic, data).await;
+                        }
+                        Err(e) => {
+                            tracing::warn!("⚠️  Failed to find cached characteristic: {}", e);
+                        }
+                    }
+                }
+            }
             
-            // Simulate successful write with a small delay
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            
-            tracing::info!("✅ Successfully wrote {} bytes to device {}", data.len(), address);
-            
-            Ok(())
+            // Fallback: discover services and find any writable characteristic
+            tracing::info!("🔍 Discovering services to find writable characteristic...");
+            match Self::find_writable_characteristic(&device, None).await {
+                Ok((_service, characteristic)) => {
+                    write_to_characteristic(&characteristic, data).await
+                }
+                Err(e) => {
+                    tracing::error!("❌ No writable characteristic found: {}", e);
+                    Err(BleError::CharacteristicNotFound)
+                }
+            }
         }
+
+        /// Read data from a connected device using GATT
+        async fn read_from_device(&self, address: &str) -> Result<Vec<u8>, BleError> {
+            tracing::info!("📖 Reading from BLE device: {}", address);
+            
+            // Parse the address
+            let device_address = address.parse::<bluer::Address>()
+                .map_err(|e| BleError::PlatformError(format!("Invalid device address: {}", e)))?;
+            
+            // Get the device from the adapter
+            let device = self.adapter.device(device_address)
+                .map_err(|e| BleError::PlatformError(format!("Failed to get device: {}", e)))?;
+            
+            // Check if device is connected
+            if !device.is_connected().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to check connection status: {}", e)))? {
+                return Err(BleError::ConnectionFailed("Device not connected".to_string()));
+            }
+            
+            // Find a readable characteristic
+            let services = device.services().await
+                .map_err(|e| BleError::PlatformError(format!("Failed to get services: {}", e)))?;
+            
+            for service in services {
+                let characteristics = service.characteristics().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get characteristics: {}", e)))?;
+                
+                for characteristic in characteristics {
+                    let properties = characteristic.flags().await
+                        .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic properties: {}", e)))?;
+                    
+                    if properties.read {
+                        return read_from_characteristic(&characteristic).await;
+                    }
+                }
+            }
+            
+            Err(BleError::CharacteristicNotFound)
+        }
+
     }
+
+    /// Find a writable characteristic from cached GATT services
+    fn find_cached_writable_characteristic(
+        client_info: &ClientInfo,
+    ) -> Option<(Uuid, Uuid)> {
+        for (service_uuid, service) in &client_info.services {
+            for (char_uuid, characteristic) in &service.characteristics {
+                if characteristic.properties.write || characteristic.properties.write_without_response {
+                    return Some((*service_uuid, *char_uuid));
+                }
+            }
+        }
+        None
+    }
+
+    /// Write data to a specific GATT characteristic
+    async fn write_to_characteristic(
+        characteristic: &Characteristic,
+        data: &[u8],
+    ) -> Result<(), BleError> {
+        let char_uuid = characteristic.uuid().await
+            .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+        
+        let properties = characteristic.flags().await
+            .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic properties: {}", e)))?;
+        
+        tracing::info!("📝 Writing to characteristic: {}", char_uuid);
+        tracing::debug!("   Properties - Write: {}, WriteWithoutResponse: {}", 
+            properties.write, properties.write_without_response);
+        
+        // Choose write type based on characteristic properties
+        let write_with_response = if properties.write_without_response {
+            false
+        } else if properties.write {
+            true
+        } else {
+            return Err(BleError::CharacteristicNotFound);
+        };
+        
+        // Perform the write operation
+        if write_with_response {
+            characteristic.write(data).await
+                .map_err(|e| BleError::TransmissionFailed(format!("Failed to write to characteristic {}: {}", char_uuid, e)))?;
+        } else {
+            // For write without response, we'll use the regular write method
+            // as write_without_response might not be available in this version of bluer
+            characteristic.write(data).await
+                .map_err(|e| BleError::TransmissionFailed(format!("Failed to write to characteristic {}: {}", char_uuid, e)))?;
+        }
+        
+        tracing::info!("✅ Successfully wrote {} bytes to characteristic: {}", data.len(), char_uuid);
+        Ok(())
+    }
+
+    /// Read data from a specific GATT characteristic
+    async fn read_from_characteristic(
+        characteristic: &Characteristic,
+    ) -> Result<Vec<u8>, BleError> {
+        let char_uuid = characteristic.uuid().await
+            .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+        
+        let properties = characteristic.flags().await
+            .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic properties: {}", e)))?;
+        
+        if !properties.read {
+            return Err(BleError::CharacteristicNotFound);
+        }
+        
+        tracing::info!("📖 Reading from characteristic: {}", char_uuid);
+        
+        // Perform the read operation
+        let data = characteristic.read().await
+            .map_err(|e| BleError::TransmissionFailed(format!("Failed to read from characteristic {}: {}", char_uuid, e)))?;
+        
+        tracing::info!("✅ Successfully read {} bytes from characteristic: {}", data.len(), char_uuid);
+        tracing::debug!("   Data: {:02x?}", data);
+        Ok(data)
+    }
+
 }
 
 #[cfg(feature = "linux")]
@@ -573,6 +997,12 @@ impl crate::ble::adapter::BleAdapter for LinuxBleAdapter {
     }
 
     async fn get_discovered_devices(&self) -> Result<Vec<crate::ble::adapter::DiscoveredDevice>, crate::ble::adapter::BleError> {
+        Err(crate::ble::adapter::BleError::OperationNotSupported(
+            "Linux BLE adapter not available - compile with 'linux' feature".to_string()
+        ))
+    }
+
+    async fn read_from_device(&self, _address: &str) -> Result<Vec<u8>, crate::ble::adapter::BleError> {
         Err(crate::ble::adapter::BleError::OperationNotSupported(
             "Linux BLE adapter not available - compile with 'linux' feature".to_string()
         ))
