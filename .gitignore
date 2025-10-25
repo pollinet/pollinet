@@ -10,6 +10,8 @@
 /*.swp
 *.iml
 
+offline_bundle.json
+
 # Mac OS
 .DS_Store
 

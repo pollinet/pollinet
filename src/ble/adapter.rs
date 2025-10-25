@@ -167,10 +167,15 @@ pub enum BleError {
 
 /// Factory function to create a platform-specific BLE adapter
 pub async fn create_ble_adapter() -> Result<Box<dyn BleAdapter>, BleError> {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "linux"))]
     {
         use crate::ble::linux::LinuxBleAdapter;
         Ok(Box::new(LinuxBleAdapter::new().await?))
+    }
+    
+    #[cfg(all(target_os = "linux", not(feature = "linux")))]
+    {
+        Err(BleError::OperationNotSupported("Linux BLE adapter not available - compile with 'linux' feature".to_string()))
     }
     
     #[cfg(target_os = "macos")]

@@ -13,6 +13,8 @@ pub struct BleAdapterBridge {
     fragment_buffer: Arc<RwLock<Vec<Fragment>>>,
     /// Transaction cache for reassembly
     transaction_cache: Arc<RwLock<std::collections::HashMap<String, Vec<Fragment>>>>,
+    /// Text message buffer for incoming messages
+    text_message_buffer: Arc<RwLock<Vec<String>>>,
 }
 
 impl BleAdapterBridge {
@@ -22,6 +24,7 @@ impl BleAdapterBridge {
             adapter,
             fragment_buffer: Arc::new(RwLock::new(Vec::new())),
             transaction_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            text_message_buffer: Arc::new(RwLock::new(Vec::new())),
         };
         
         // Set up receive callback to handle incoming fragments
@@ -30,12 +33,14 @@ impl BleAdapterBridge {
         Ok(bridge)
     }
     
-    /// Set up the receive callback to process incoming transaction fragments
+    /// Set up the receive callback to process incoming transaction fragments and text messages
     async fn setup_receive_callback(&self) -> Result<(), BleError> {
         let buffer = Arc::clone(&self.fragment_buffer);
         let cache = Arc::clone(&self.transaction_cache);
+        let text_buffer = Arc::clone(&self.text_message_buffer);
         
         self.adapter.on_receive(Box::new(move |data| {
+            // Try to parse as fragment first
             if let Ok(fragment) = serde_json::from_slice::<Fragment>(&data) {
                 let fragment_id = fragment.id.clone();
                 let fragment_index = fragment.index;
@@ -64,7 +69,18 @@ impl BleAdapterBridge {
                     }
                 });
             } else {
-                tracing::warn!("⚠️ Failed to deserialize fragment data");
+                // Try to parse as text message
+                if let Ok(text_message) = String::from_utf8(data) {
+                    tracing::info!("📝 Received text message: {}", text_message);
+                    
+                    let text_buffer_clone = Arc::clone(&text_buffer);
+                    tokio::spawn(async move {
+                        let mut buffer_guard = text_buffer_clone.write().await;
+                        buffer_guard.push(text_message);
+                    });
+                } else {
+                    tracing::warn!("⚠️ Failed to deserialize data as fragment or text message");
+                }
             }
         }));
         
@@ -137,5 +153,24 @@ impl BleAdapterBridge {
     /// Write data to a connected device
     pub async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
         self.adapter.write_to_device(address, data).await
+    }
+    
+    /// Get incoming text messages
+    pub async fn get_text_messages(&self) -> Vec<String> {
+        let mut buffer_guard = self.text_message_buffer.write().await;
+        let messages = buffer_guard.clone();
+        buffer_guard.clear();
+        messages
+    }
+    
+    /// Check if there are any pending text messages
+    pub async fn has_text_messages(&self) -> bool {
+        !self.text_message_buffer.read().await.is_empty()
+    }
+    
+    /// Send a text message to connected devices
+    pub async fn send_text_message(&self, message: &str) -> Result<(), BleError> {
+        let data = message.as_bytes();
+        self.adapter.send_packet(data).await
     }
 }

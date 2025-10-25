@@ -531,25 +531,33 @@ impl PolliNetSDK {
     
     /// Send text message to a connected peer
     pub async fn send_text_message(&self, peer_id: &str, message: &str) -> Result<(), PolliNetError> {
-        // For now, we'll use the legacy BLE transport for text messaging
-        // This is a temporary solution until the new adapter supports text messaging
         tracing::info!("📤 Sending text message to {}: '{}'", peer_id, message);
-        tracing::warn!("Text messaging is not yet implemented in the new BLE adapter");
+        self.ble_bridge.send_text_message(message).await
+            .map_err(|e| PolliNetError::BleAdapter(e))?;
+        tracing::info!("✅ Text message sent successfully");
         Ok(())
     }
     
     /// Start listening for incoming text messages
     pub async fn start_text_listener(&self) -> Result<(), PolliNetError> {
         tracing::info!("🎧 Starting text message listener...");
-        tracing::warn!("Text message listening is not yet implemented in the new BLE adapter");
+        tracing::info!("✅ Text message listener started - messages will be buffered for retrieval");
         Ok(())
     }
     
     /// Check for incoming text messages from connected peers
     pub async fn check_incoming_messages(&self) -> Result<Vec<String>, PolliNetError> {
         tracing::debug!("🔍 Checking for incoming text messages...");
-        // For now, return empty vector as text messaging is not implemented
-        Ok(Vec::new())
+        let messages = self.ble_bridge.get_text_messages().await;
+        if !messages.is_empty() {
+            tracing::info!("📨 Retrieved {} text message(s)", messages.len());
+        }
+        Ok(messages)
+    }
+    
+    /// Check if there are any pending text messages
+    pub async fn has_pending_messages(&self) -> bool {
+        self.ble_bridge.has_text_messages().await
     }
     
     /// Get BLE adapter information

@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("This example demonstrates offline transaction creation and BLE transmission");
 
     // Load sender keypair
-    let sender_private_key = "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUqu";
+    let sender_private_key = "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
     let private_key_bytes = bs58::decode(sender_private_key)
         .into_vec()
         .map_err(|e| format!("Failed to decode private key: {}", e))?;
