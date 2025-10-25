@@ -422,7 +422,7 @@ impl PolliNetSDK {
         self.ble_bridge.start_scanning().await?;
         
         // Wait a moment for devices to be discovered
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         
         // Get discovered devices
         let discovered = self.ble_bridge.get_discovered_devices().await?;
