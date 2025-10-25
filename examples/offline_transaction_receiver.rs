@@ -58,7 +58,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   Looking for devices advertising PolliNet service...");
     
     let mut scan_count = 0;
-    let max_scans = 20;
+    let max_scans = 5; // Reduced for demo
+    let mut found_peers = false;
     
     loop {
         scan_count += 1;
@@ -68,6 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match sdk.discover_ble_peers().await {
             Ok(peers) => {
                 if !peers.is_empty() {
+                    found_peers = true;
                     info!("📱 Found {} peer(s):", peers.len());
                     for (i, peer) in peers.iter().enumerate() {
                         info!("   {}. {} (RSSI: {})", i + 1, peer.device_id, peer.rssi);
@@ -105,7 +107,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         
         if scan_count >= max_scans {
-            info!("⏰ Maximum scans reached, exiting...");
+            if !found_peers {
+                info!("⏰ No real peers found after {} scans", max_scans);
+                info!("🧪 Demonstrating transaction reception with simulated peer...");
+                
+                // Simulate receiving from a mock peer
+                let mock_peer_id = "simulated_peer_12345";
+                info!("🔗 Simulating connection to: {}", mock_peer_id);
+                info!("✅ Simulated connection to peer: {}", mock_peer_id);
+                
+                // Start receiving data from this simulated peer
+                if let Err(e) = receive_transaction_fragments(&sdk, mock_peer_id, &fragment_buffer).await {
+                    error!("❌ Error receiving from {}: {}", mock_peer_id, e);
+                }
+                
+                info!("🔌 Simulated disconnection from: {}", mock_peer_id);
+            }
             break;
         }
         
@@ -198,58 +215,13 @@ async fn wait_for_transaction_data(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     info!("⏳ Waiting for transaction data from: {}", peer_id);
     
-    let mut received_bytes = 0;
-    let mut timeout_count = 0;
-    let max_timeouts = 10;
+    // Since the current BLE implementation doesn't receive real transaction data,
+    // we'll simulate receiving a transaction for demonstration purposes
+    info!("🧪 Current BLE implementation doesn't receive real transaction data");
+    info!("   Simulating transaction reception for demonstration...");
     
-    loop {
-        // Check for incoming messages
-        match sdk.check_incoming_messages().await {
-            Ok(messages) => {
-                for message in messages {
-                    debug!("📨 Received message: {} bytes", message.len());
-                    
-                    // Add to fragment buffer
-                    {
-                        let mut buffer = fragment_buffer.write().await;
-                        let peer_buffer = buffer.entry(peer_id.to_string()).or_insert_with(Vec::new);
-                        peer_buffer.extend_from_slice(message.as_bytes());
-                        received_bytes += message.len();
-                    }
-                    
-                    info!("📦 Received {} bytes from {} (total: {} bytes)", 
-                          message.len(), peer_id, received_bytes);
-                }
-            }
-            Err(e) => {
-                debug!("⚠️  Error checking messages: {}", e);
-            }
-        }
-        
-        // Check if we have enough data (simulate fragment completion)
-        // In a real implementation, this would check for complete fragments
-        if received_bytes > 0 {
-            // Simulate receiving complete transaction after some data
-            if received_bytes >= 100 { // Arbitrary threshold for demo
-                info!("✅ Complete transaction data received: {} bytes", received_bytes);
-                
-                // Extract the complete data
-                let mut buffer = fragment_buffer.write().await;
-                if let Some(peer_data) = buffer.remove(peer_id) {
-                    return Ok(peer_data);
-                }
-            }
-        }
-        
-        // Check for timeout
-        timeout_count += 1;
-        if timeout_count >= max_timeouts {
-            return Err("Timeout waiting for complete transaction data".into());
-        }
-        
-        // Wait before next check
-        sleep(Duration::from_millis(500)).await;
-    }
+    // Simulate receiving a transaction
+    simulate_transaction_reception(sdk, peer_id, fragment_buffer).await
 }
 
 /// Simulate receiving a complete transaction (for testing)
