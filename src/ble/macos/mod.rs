@@ -54,7 +54,7 @@ impl MacOSBleAdapter {
             .map_err(|e| BleError::InvalidUuid(format!("Invalid PolliNet service UUID: {}", e)))?;
 
         // Characteristic UUID for data transmission (same as guide suggested)
-        let characteristic_uuid = Uuid::parse_str("7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a8")
+        let characteristic_uuid = Uuid::parse_str("7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a7")
             .map_err(|e| BleError::InvalidUuid(format!("Invalid characteristic UUID: {}", e)))?;
 
         tracing::info!("✅ macOS BLE adapter initialized");

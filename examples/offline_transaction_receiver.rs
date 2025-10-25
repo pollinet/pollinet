@@ -178,7 +178,7 @@ async fn receive_transaction_fragments(
             // ================================================================
             info!("\n🌐 STEP 4: Submitting transaction to blockchain...");
             
-            let rpc_url = "https://api.devnet.solana.com";
+            let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
             let rpc_client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
             
             info!("🌐 Connecting to Solana RPC: {}", rpc_url);
