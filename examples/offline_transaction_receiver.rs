@@ -49,31 +49,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🎧 Text message listener started");
     
     // ================================================================
-    // STEP 2: Wait for incoming connections as BLE Peripheral
+    // STEP 2: Discover and connect to sender (bidirectional connection)
     // ================================================================
-    info!("\n📡 STEP 2: Waiting for incoming BLE connections...");
-    info!("   Receiver is advertising and waiting for sender to connect");
-    info!("   Sender will discover this device, connect, and send transaction");
+    info!("\n📡 STEP 2: Discovering and connecting to sender...");
+    info!("   Receiver will actively discover the sender device");
+    info!("   This enables bidirectional BLE communication");
     
-    // Wait for transaction data to be received via GATT
-    // The sender will:
-    // 1. Discover this advertising device
-    // 2. Connect via GATT
-    // 3. Send fragments via GATT writes or notifications
-    // 4. Fragments are automatically collected in the SDK's fragment cache
+    let mut connection_attempts = 0;
+    let max_attempts = 20;
+    let mut sender_connected = false;
+    
+    while connection_attempts < max_attempts && !sender_connected {
+        connection_attempts += 1;
+        info!("\n🔍 Discovery attempt #{}/{}", connection_attempts, max_attempts);
+        
+        // Discover peers
+        match sdk.discover_ble_peers().await {
+            Ok(peers) => {
+                if !peers.is_empty() {
+                    info!("📱 Found {} peer(s):", peers.len());
+                    for (i, peer) in peers.iter().enumerate() {
+                        info!("   {}. {} (RSSI: {})", i + 1, peer.device_id, peer.rssi);
+                    }
+                    
+                    // Connect to the first peer (the sender)
+                    for peer in &peers {
+                        info!("🔗 Attempting connection to: {}", peer.device_id);
+                        
+                        match sdk.connect_to_ble_peer(&peer.device_id).await {
+                            Ok(_) => {
+                                info!("✅ Connected to sender: {}", peer.device_id);
+                                sender_connected = true;
+                                break;
+                            }
+                            Err(e) => {
+                                error!("❌ Failed to connect to peer {}: {}", peer.device_id, e);
+                            }
+                        }
+                    }
+                } else {
+                    info!("🔍 No peers found, continuing scan...");
+                }
+            }
+            Err(e) => {
+                error!("❌ Peer discovery failed: {}", e);
+            }
+        }
+        
+        if !sender_connected {
+            sleep(Duration::from_secs(3)).await;
+        }
+    }
+    
+    if !sender_connected {
+        error!("❌ Failed to connect to sender after {} attempts", max_attempts);
+        return Err("Could not establish connection to sender".into());
+    }
+    
+    // ================================================================
+    // STEP 3: Wait for transaction fragments
+    // ================================================================
+    info!("\n⏳ STEP 3: Waiting for transaction fragments...");
     
     loop {
-        info!("\n⏳ Waiting for transaction fragments...");
-        
         // Check for complete transactions
-        match wait_for_transaction_data(&sdk, "incoming", &fragment_buffer).await {
+        match wait_for_transaction_data(&sdk, "sender", &fragment_buffer).await {
             Ok(transaction_data) => {
                 info!("✅ Received complete transaction: {} bytes", transaction_data.len());
                 
                 // ================================================================
-                // STEP 3: Submit compressed transaction using PolliNet SDK
+                // STEP 4: Submit compressed transaction using PolliNet SDK
                 // ================================================================
-                info!("\n🌐 STEP 3: Submitting transaction to blockchain using PolliNet SDK...");
+                info!("\n🌐 STEP 4: Submitting transaction to blockchain using PolliNet SDK...");
                 
                 // Use PolliNet SDK to submit the compressed transaction
                 match sdk.submit_offline_transaction(&transaction_data, true).await {

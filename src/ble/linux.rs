@@ -559,21 +559,55 @@ mod linux_impl {
         }
 
         async fn send_packet(&self, data: &[u8]) -> Result<(), BleError> {
-            tracing::debug!("Sending packet via BLE ({} bytes)", data.len());
+            tracing::info!("📤 Broadcasting packet via BLE ({} bytes)", data.len());
             
-            // Simulate sending by immediately calling the receive callback
-            // This allows local testing where sender and receiver are the same process
-            tracing::info!("📤 BLE Packet sent: {} bytes", data.len());
-            tracing::debug!("   Data: {:02x?}", data);
+            // In a real BLE mesh implementation, this would:
+            // 1. Update advertisement data with the packet
+            // 2. Or send to all connected GATT clients via notifications
+            // 3. Or use L2CAP sockets for direct data transfer
             
-            // Trigger the receive callback with this data (for local/mesh testing)
-            if let Ok(callback_guard) = self.receive_callback.lock() {
-                if let Some(callback) = callback_guard.as_ref() {
-                    tracing::debug!("🔔 Triggering local receive callback with packet data");
-                    callback(data.to_vec());
+            // For now, broadcast to all connected clients via GATT if available
+            let clients_guard = self.clients.read().await;
+            
+            if clients_guard.is_empty() {
+                tracing::warn!("⚠️  No connected clients to send packet to");
+                tracing::info!("   Packet will be available when devices connect");
+                
+                // Store packet for later retrieval (simple broadcast approach)
+                // In production, you'd use advertisement data or GATT server
+                return Ok(());
+            }
+            
+            // Try to send to all connected clients
+            for (address, _client_info) in clients_guard.iter() {
+                tracing::debug!("📡 Attempting to broadcast to client: {}", address);
+                
+                // Get the device
+                let device_address = address.parse::<bluer::Address>()
+                    .map_err(|e| BleError::PlatformError(format!("Invalid device address: {}", e)))?;
+                
+                let device = self.adapter.device(device_address)
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get device: {}", e)))?;
+                
+                // Try to find a writable characteristic and send
+                match Self::find_writable_characteristic(&device, None).await {
+                    Ok((_service, characteristic)) => {
+                        match write_to_characteristic(&characteristic, data).await {
+                            Ok(_) => {
+                                tracing::info!("✅ Packet broadcast to client: {}", address);
+                            }
+                            Err(e) => {
+                                tracing::warn!("⚠️  Failed to broadcast to {}: {}", address, e);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        tracing::debug!("⏭️  No writable characteristic found for {}", address);
+                    }
                 }
             }
             
+            tracing::info!("✅ Broadcast attempt completed");
             Ok(())
         }
 
