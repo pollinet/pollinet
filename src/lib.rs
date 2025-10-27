@@ -22,6 +22,8 @@ pub struct PolliNetSDK {
     nonce_manager: Arc<nonce::NonceManager>,
     /// Local transaction cache
     local_cache: Arc<RwLock<transaction::TransactionCache>>,
+    /// Currently connected peer address (for central mode)
+    connected_peer: Arc<RwLock<Option<String>>>,
 }
 
 impl PolliNetSDK {
@@ -44,6 +46,7 @@ impl PolliNetSDK {
             transaction_service,
             nonce_manager: Arc::new(nonce::NonceManager::new().await?),
             local_cache,
+            connected_peer: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -68,6 +71,7 @@ impl PolliNetSDK {
             transaction_service,
             nonce_manager: Arc::new(nonce::NonceManager::new().await?),
             local_cache,
+            connected_peer: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -375,7 +379,28 @@ impl PolliNetSDK {
         &self,
         fragments: Vec<transaction::Fragment>,
     ) -> Result<(), PolliNetError> {
-        Ok(self.ble_bridge.send_fragments(fragments).await?)
+        // Check if we have a connected peer (central mode)
+        let connected_peer = self.connected_peer.read().await;
+        
+        if let Some(peer_address) = connected_peer.as_ref() {
+            // Send to the connected peer using write_to_device (central mode)
+            tracing::info!("📤 Sending {} fragments to connected peer: {}", fragments.len(), peer_address);
+            for fragment in fragments {
+                let data = serde_json::to_vec(&fragment)
+                    .map_err(|e| PolliNetError::Serialization(e.to_string()))?;
+                
+                self.ble_bridge.write_to_device(peer_address, &data).await?;
+                
+                // Small delay between fragments to avoid overwhelming the connection
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+            tracing::info!("✅ All fragments sent successfully to peer: {}", peer_address);
+            Ok(())
+        } else {
+            // No connected peer, use broadcast mode (peripheral mode)
+            tracing::info!("📤 Broadcasting {} fragments (no specific peer connected)", fragments.len());
+            Ok(self.ble_bridge.send_fragments(fragments).await?)
+        }
     }
 
     /// Submit a transaction to Solana when online
@@ -446,6 +471,11 @@ impl PolliNetSDK {
     pub async fn connect_to_ble_peer(&self, peer_address: &str) -> Result<(), PolliNetError> {
         tracing::info!("🔗 Connecting to BLE peer: {}", peer_address);
         self.ble_bridge.connect_to_device(peer_address).await?;
+        
+        // Track the connected peer for sending data
+        let mut connected_peer = self.connected_peer.write().await;
+        *connected_peer = Some(peer_address.to_string());
+        
         tracing::info!("✅ Connected to peer: {}", peer_address);
         Ok(())
     }
