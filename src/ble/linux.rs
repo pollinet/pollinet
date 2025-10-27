@@ -709,47 +709,156 @@ mod linux_impl {
             let device = self.adapter.device(device_address)
                 .map_err(|e| BleError::PlatformError(format!("Failed to get device: {}", e)))?;
             
-            // Connect to the device
-            device.connect().await
-                .map_err(|e| BleError::ConnectionFailed(format!("Failed to connect to device {}: {}", address, e)))?;
-            
-            tracing::info!("✅ Connected to device: {}", address);
-            
-            // Discover GATT services after connection
-            tracing::info!("🔍 Discovering GATT services...");
-            let services = match Self::discover_gatt_services(&device).await {
-                Ok(services) => {
-                    tracing::info!("✅ Successfully discovered {} GATT services", services.len());
-                    services
-                }
-                Err(e) => {
-                    tracing::warn!("⚠️  Failed to discover GATT services: {}", e);
-                    tracing::warn!("   Continuing with connection but write operations may not work");
-                    HashMap::new()
-                }
-            };
-            
-            // Set up GATT data reception if we have services
-            if !services.is_empty() {
-                tracing::info!("📡 Setting up GATT data reception...");
-                if let Err(e) = Self::setup_gatt_data_reception(&device, &services, self.receive_callback.clone()).await {
-                    tracing::warn!("⚠️  Failed to set up GATT data reception: {}", e);
-                    tracing::warn!("   Connection will continue but data reception may not work");
-                } else {
-                    tracing::info!("✅ GATT data reception set up successfully");
+            // Check if already connected
+            if let Ok(is_connected) = device.is_connected().await {
+                if is_connected {
+                    tracing::info!("✅ Device {} is already connected", address);
+                    
+                    // Still try to set up services if not already done
+                    let clients_guard = self.clients.read().await;
+                    if !clients_guard.contains_key(address) {
+                        drop(clients_guard); // Release read lock before acquiring write lock
+                        
+                        tracing::info!("🔍 Setting up services for already-connected device...");
+                        let services = match Self::discover_gatt_services(&device).await {
+                            Ok(services) => services,
+                            Err(e) => {
+                                tracing::warn!("⚠️  Failed to discover GATT services: {}", e);
+                                HashMap::new()
+                            }
+                        };
+                        
+                        if !services.is_empty() {
+                            if let Err(e) = Self::setup_gatt_data_reception(&device, &services, self.receive_callback.clone()).await {
+                                tracing::warn!("⚠️  Failed to set up GATT data reception: {}", e);
+                            }
+                        }
+                        
+                        let mut clients_guard = self.clients.write().await;
+                        clients_guard.insert(address.to_string(), ClientInfo {
+                            device_address: address.to_string(),
+                            connected_at: std::time::Instant::now(),
+                            services,
+                        });
+                    }
+                    
+                    return Ok(());
                 }
             }
             
-            // Add to connected clients with GATT service information
-            let mut clients_guard = self.clients.write().await;
-            clients_guard.insert(address.to_string(), ClientInfo {
-                device_address: address.to_string(),
-                connected_at: std::time::Instant::now(),
-                services,
-            });
+            // Retry logic for connection
+            let max_retries = 3;
+            let mut retry_count = 0;
+            let mut last_error = None;
             
-            tracing::info!("✅ Successfully connected to device: {} with GATT services and data reception", address);
-            Ok(())
+            while retry_count < max_retries {
+                if retry_count > 0 {
+                    let delay_ms = 1000 * (2u64.pow(retry_count as u32)); // Exponential backoff
+                    tracing::info!("⏳ Retry #{}/{} after {}ms delay...", retry_count + 1, max_retries, delay_ms);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                }
+                
+                tracing::info!("🔌 Connection attempt #{}/{} to device: {}", retry_count + 1, max_retries, address);
+                
+                // Attempt connection with timeout
+                let connect_result = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(10), // 10 second timeout
+                    device.connect()
+                ).await;
+                
+                match connect_result {
+                    Ok(Ok(())) => {
+                        tracing::info!("✅ Successfully connected to device: {}", address);
+                        
+                        // Give the connection a moment to stabilize
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        
+                        // Verify connection is still active
+                        if let Ok(is_connected) = device.is_connected().await {
+                            if !is_connected {
+                                tracing::warn!("⚠️  Connection dropped immediately after connecting");
+                                last_error = Some("Connection dropped immediately".to_string());
+                                retry_count += 1;
+                                continue;
+                            }
+                        }
+                        
+                        // Discover GATT services after connection
+                        tracing::info!("🔍 Discovering GATT services...");
+                        let services = match tokio::time::timeout(
+                            tokio::time::Duration::from_secs(5),
+                            Self::discover_gatt_services(&device)
+                        ).await {
+                            Ok(Ok(services)) => {
+                                tracing::info!("✅ Successfully discovered {} GATT services", services.len());
+                                services
+                            }
+                            Ok(Err(e)) => {
+                                tracing::warn!("⚠️  Failed to discover GATT services: {}", e);
+                                tracing::warn!("   Continuing with connection but write operations may not work");
+                                HashMap::new()
+                            }
+                            Err(_) => {
+                                tracing::warn!("⏰ Timeout discovering GATT services");
+                                HashMap::new()
+                            }
+                        };
+                        
+                        // Set up GATT data reception if we have services
+                        if !services.is_empty() {
+                            tracing::info!("📡 Setting up GATT data reception...");
+                            if let Err(e) = Self::setup_gatt_data_reception(&device, &services, self.receive_callback.clone()).await {
+                                tracing::warn!("⚠️  Failed to set up GATT data reception: {}", e);
+                                tracing::warn!("   Connection will continue but data reception may not work");
+                            } else {
+                                tracing::info!("✅ GATT data reception set up successfully");
+                            }
+                        }
+                        
+                        // Add to connected clients with GATT service information
+                        let mut clients_guard = self.clients.write().await;
+                        clients_guard.insert(address.to_string(), ClientInfo {
+                            device_address: address.to_string(),
+                            connected_at: std::time::Instant::now(),
+                            services,
+                        });
+                        
+                        tracing::info!("✅ Successfully connected to device: {} with GATT services and data reception", address);
+                        return Ok(());
+                    }
+                    Ok(Err(e)) => {
+                        let error_msg = e.to_string();
+                        tracing::warn!("⚠️  Connection attempt failed: {}", error_msg);
+                        
+                        // Check for specific error types that might need special handling
+                        if error_msg.contains("br-connection-aborted-by-local") {
+                            tracing::info!("📋 Bluetooth connection aborted by local device - this can happen due to:");
+                            tracing::info!("   • Connection timeout (device not responding)");
+                            tracing::info!("   • Device is out of range or has weak signal");
+                            tracing::info!("   • Device is busy or already connected to another device");
+                            tracing::info!("   • Bluetooth interference");
+                        } else if error_msg.contains("already connected") {
+                            tracing::info!("✅ Device is already connected");
+                            return Ok(());
+                        } else if error_msg.contains("connection-timeout") {
+                            tracing::warn!("⏰ Connection timed out - device may be out of range");
+                        }
+                        
+                        last_error = Some(error_msg);
+                    }
+                    Err(_) => {
+                        tracing::warn!("⏰ Connection attempt timed out after 10 seconds");
+                        last_error = Some("Connection timeout".to_string());
+                    }
+                }
+                
+                retry_count += 1;
+            }
+            
+            // All retries exhausted
+            let error_msg = last_error.unwrap_or_else(|| "Unknown error".to_string());
+            tracing::error!("❌ Failed to connect to device {} after {} attempts", address, max_retries);
+            Err(BleError::ConnectionFailed(format!("Failed to connect to device {}: {}", address, error_msg)))
         }
 
         async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
