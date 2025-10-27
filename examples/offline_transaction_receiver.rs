@@ -13,7 +13,7 @@ use pollinet::PolliNetSDK;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use tokio::time::{sleep, Duration};
 use base64;
 
@@ -49,119 +49,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🎧 Text message listener started");
     
     // ================================================================
-    // STEP 2: Scan for devices and establish connections
+    // STEP 2: Wait for incoming connections as BLE Peripheral
     // ================================================================
-    info!("\n🔍 STEP 2: Scanning for PolliNet devices...");
-    info!("   Looking for devices advertising PolliNet service...");
+    info!("\n📡 STEP 2: Waiting for incoming BLE connections...");
+    info!("   Receiver is advertising and waiting for sender to connect");
+    info!("   Sender will discover this device, connect, and send transaction");
     
-    let mut connection_attempts = 0;
-    let max_attempts = 20; // Increased for better discovery
+    // Wait for transaction data to be received via GATT
+    // The sender will:
+    // 1. Discover this advertising device
+    // 2. Connect via GATT
+    // 3. Send fragments via GATT writes or notifications
+    // 4. Fragments are automatically collected in the SDK's fragment cache
     
     loop {
-        connection_attempts += 1;
-        info!("\n🔍 Scan attempt #{}/{}", connection_attempts, max_attempts);
+        info!("\n⏳ Waiting for transaction fragments...");
         
-        // Discover peers
-        match sdk.discover_ble_peers().await {
-            Ok(peers) => {
-                if !peers.is_empty() {
-                    info!("📱 Found {} peer(s):", peers.len());
-                    for (i, peer) in peers.iter().enumerate() {
-                        info!("   {}. {} (RSSI: {})", i + 1, peer.device_id, peer.rssi);
-                    }
-                    
-                    // Try to connect to each peer
-                    for peer in &peers {
-                        info!("🔗 Attempting connection to: {}", peer.device_id);
+        // Check for complete transactions
+        match wait_for_transaction_data(&sdk, "incoming", &fragment_buffer).await {
+            Ok(transaction_data) => {
+                info!("✅ Received complete transaction: {} bytes", transaction_data.len());
+                
+                // ================================================================
+                // STEP 3: Submit compressed transaction using PolliNet SDK
+                // ================================================================
+                info!("\n🌐 STEP 3: Submitting transaction to blockchain using PolliNet SDK...");
+                
+                // Use PolliNet SDK to submit the compressed transaction
+                match sdk.submit_offline_transaction(&transaction_data, true).await {
+                    Ok(signature) => {
+                        info!("✅ Transaction submitted successfully!");
+                        info!("   Signature: {}", signature);
+                        info!("   View on Solana Explorer: https://explorer.solana.com/tx/{}?cluster=devnet", signature);
                         
-                        match sdk.connect_to_ble_peer(&peer.device_id).await {
-                            Ok(_) => {
-                                info!("✅ Connected to peer: {}", peer.device_id);
-                                
-                                // Start receiving data from this peer
-                                if let Err(e) = receive_transaction_fragments(&sdk, &peer.device_id, &fragment_buffer).await {
-                                    error!("❌ Error receiving from {}: {}", peer.device_id, e);
-                                }
-                                
-                                // Disconnect after receiving
-                                info!("🔌 Disconnecting from: {}", peer.device_id);
-                                // Note: Disconnect functionality would be implemented here
-                                
-                                // Exit after successful connection and data reception
-                                return Ok(());
-                            }
-                            Err(e) => {
-                                warn!("⚠️  Failed to connect to peer {}: {}", peer.device_id, e);
-                            }
-                        }
+                        // Exit after successful submission
+                        return Ok(());
                     }
-                } else {
-                    info!("🔍 No peers found, continuing scan...");
+                    Err(e) => {
+                        error!("❌ Failed to submit transaction: {}", e);
+                        return Err(format!("Transaction submission failed: {}", e).into());
+                    }
                 }
             }
             Err(e) => {
-                warn!("⚠️  Peer discovery failed: {}", e);
+                error!("❌ Error waiting for transaction data: {}", e);
+                info!("🔄 Continuing to listen for incoming transactions...");
             }
         }
         
-        if connection_attempts >= max_attempts {
-            warn!("⏰ Maximum connection attempts reached, continuing to listen...");
-            // Continue listening indefinitely instead of exiting
-        }
-        
-        // Wait before next attempt
-        sleep(Duration::from_secs(3)).await;
+        // Wait before checking again
+        sleep(Duration::from_secs(2)).await;
     }
 }
 
-/// Receive transaction fragments from a connected peer
-async fn receive_transaction_fragments(
-    sdk: &PolliNetSDK,
-    peer_id: &str,
-    fragment_buffer: &FragmentBuffer,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("📨 Receiving transaction fragments from: {}", peer_id);
-    
-    // Set up a timeout for receiving data
-    let receive_timeout = tokio::time::timeout(
-        Duration::from_secs(30),
-        wait_for_transaction_data(sdk, peer_id, fragment_buffer)
-    ).await;
-    
-    match receive_timeout {
-        Ok(Ok(transaction_data)) => {
-            info!("✅ Received complete transaction data: {} bytes", transaction_data.len());
-            
-            // ================================================================
-            // STEP 3: Submit compressed transaction using PolliNet SDK
-            // ================================================================
-            info!("\n🌐 STEP 3: Submitting transaction to blockchain using PolliNet SDK...");
-            
-            // Use PolliNet SDK to submit the compressed transaction
-            match sdk.submit_offline_transaction(&transaction_data, true).await {
-                Ok(signature) => {
-                    info!("✅ Transaction submitted successfully!");
-                    info!("   Signature: {}", signature);
-                    info!("   View on Solana Explorer: https://explorer.solana.com/tx/{}?cluster=devnet", signature);
-                }
-                Err(e) => {
-                    error!("❌ Failed to submit transaction: {}", e);
-                    return Err(format!("Transaction submission failed: {}", e).into());
-                }
-            }
-        }
-        Ok(Err(e)) => {
-            error!("❌ Error receiving transaction data: {}", e);
-        }
-        Err(_) => {
-            warn!("⏰ Timeout waiting for transaction data from {}", peer_id);
-        }
-    }
-    
-    Ok(())
-}
-
-/// Wait for transaction data from a connected peer
+/// Wait for transaction data from incoming connections
 async fn wait_for_transaction_data(
     sdk: &PolliNetSDK,
     peer_id: &str,
@@ -229,4 +170,5 @@ async fn wait_for_transaction_data(
     
     Err(format!("Timeout waiting for transaction data from {}", peer_id).into())
 }
+
 
