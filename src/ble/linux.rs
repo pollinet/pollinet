@@ -326,7 +326,15 @@ mod linux_impl {
                     
                     // Check if this characteristic supports writing
                     if properties.write || properties.write_without_response {
-                        tracing::info!("✅ Found writable characteristic: {} in service: {}", char_uuid, current_service_uuid);
+                        // Skip standard Bluetooth characteristics (they're not for user data)
+                        let is_standard_bt = char_uuid.as_u128() & 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFu128 == 0x0000000000001000800000805F9B34FBu128;
+                        
+                        if is_standard_bt {
+                            tracing::debug!("⏭️  Skipping standard Bluetooth characteristic: {}", char_uuid);
+                            continue;
+                        }
+                        
+                        tracing::info!("✅ Found writable custom characteristic: {} in service: {}", char_uuid, current_service_uuid);
                         return Ok((service, characteristic));
                     }
                 }
@@ -553,10 +561,18 @@ mod linux_impl {
         async fn send_packet(&self, data: &[u8]) -> Result<(), BleError> {
             tracing::debug!("Sending packet via BLE ({} bytes)", data.len());
             
-            // For now, just log the packet - in a full implementation,
-            // this would send notifications to connected GATT clients
+            // Simulate sending by immediately calling the receive callback
+            // This allows local testing where sender and receiver are the same process
             tracing::info!("📤 BLE Packet sent: {} bytes", data.len());
             tracing::debug!("   Data: {:02x?}", data);
+            
+            // Trigger the receive callback with this data (for local/mesh testing)
+            if let Ok(callback_guard) = self.receive_callback.lock() {
+                if let Some(callback) = callback_guard.as_ref() {
+                    tracing::debug!("🔔 Triggering local receive callback with packet data");
+                    callback(data.to_vec());
+                }
+            }
             
             Ok(())
         }
