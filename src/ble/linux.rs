@@ -623,9 +623,34 @@ mod linux_impl {
         }
 
         async fn connected_clients_count(&self) -> usize {
-            // Return the number of connected clients
+            // Return the number of connected clients (both outbound and inbound)
             let clients_guard = self.clients.read().await;
-            clients_guard.len()
+            let outbound_count = clients_guard.len();
+            
+            // Also check for inbound connections by checking all discovered devices
+            let discovered = self.discovered_devices.read().await;
+            let mut inbound_count = 0;
+            
+            for (address, _) in discovered.iter() {
+                if let Ok(device_address) = address.parse::<bluer::Address>() {
+                    if let Ok(device) = self.adapter.device(device_address) {
+                        // Check if device is connected (might be an inbound connection)
+                        if let Ok(is_connected) = device.is_connected().await {
+                            if is_connected {
+                                // Only count if not already in outbound clients list
+                                if !clients_guard.contains_key(address) {
+                                    inbound_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            let total = outbound_count + inbound_count;
+            tracing::debug!("📊 Connected clients: {} outbound, {} inbound, {} total", 
+                outbound_count, inbound_count, total);
+            total
         }
 
         fn get_adapter_info(&self) -> AdapterInfo {

@@ -101,8 +101,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // STEP 4: Wait for receiver to connect, then send transaction
     // ================================================================
     info!("\n🔄 STEP 4: Waiting for receiver to connect...");
-    info!("   Sender is advertising and waiting for receiver to discover and connect");
+    info!("   Sender is advertising and scanning for receiver");
+    info!("   Receiver will connect to sender, and sender will detect the connection");
     info!("   Once connected, transaction will be sent as fragments");
+    
+    // Make sure we're also scanning to discover the receiver when it connects
+    sdk.start_ble_scanning().await?;
+    info!("🔍 Scanning started to detect receiver");
     
     // Wait for a connection to be established (receiver will connect to us)
     let mut wait_attempts = 0;
@@ -115,6 +120,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         // Check if any peer has connected
         let connected_count = sdk.get_connected_clients_count().await;
+        
+        if wait_attempts % 5 == 0 {
+            info!("⏳ Still waiting for receiver connection... ({}s, {} connected)", wait_attempts, connected_count);
+        }
         
         if connected_count > 0 {
             info!("✅ Receiver has connected!");
