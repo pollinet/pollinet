@@ -573,6 +573,35 @@ impl PolliNetSDK {
         Ok(())
     }
     
+    /// Stop BLE advertising
+    pub async fn stop_ble_advertising(&self) -> Result<(), PolliNetError> {
+        self.ble_bridge.stop_advertising().await?;
+        tracing::info!("🛑 BLE advertising stopped");
+        Ok(())
+    }
+    
+    /// Reset BLE state - stop all scanning and advertising
+    pub async fn reset_ble(&self) -> Result<(), PolliNetError> {
+        tracing::info!("🔄 Resetting BLE state...");
+        
+        // Stop scanning if active
+        if self.is_scanning() {
+            let _ = self.ble_bridge.stop_scanning().await;
+        }
+        
+        // Stop advertising if active
+        if self.is_advertising() {
+            let _ = self.ble_bridge.stop_advertising().await;
+        }
+        
+        // Clear connected peer
+        let mut connected_peer = self.connected_peer.write().await;
+        *connected_peer = None;
+        
+        tracing::info!("✅ BLE state reset complete");
+        Ok(())
+    }
+    
     /// Get list of discovered PolliNet devices
     pub async fn get_discovered_pollinet_devices(&self) -> Result<Vec<ble::adapter::DiscoveredDevice>, PolliNetError> {
         let devices = self.ble_bridge.get_discovered_devices().await?;

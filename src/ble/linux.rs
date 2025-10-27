@@ -1067,7 +1067,7 @@ mod linux_impl {
             // For write without response, we'll use the regular write method
             // as write_without_response might not be available in this version of bluer
             characteristic.write(data).await
-                .map_err(|e| BleError::TransmissionFailed(format!("Failed to write to characteristic {}: {}", char_uuid, e)))?;
+                .map_err(|e| BleError::TransmissionFailed(format!("Failed to write to characteristic (write without response) {}: {}", char_uuid, e)))?;
         }
         
         tracing::info!("✅ Successfully wrote {} bytes to characteristic: {}", data.len(), char_uuid);

@@ -32,17 +32,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fragment_buffer: FragmentBuffer = Arc::new(RwLock::new(HashMap::new()));
 
     // ================================================================
-    // STEP 1: Initialize PolliNet SDK with RPC and start BLE scanning
+    // STEP 1: Initialize PolliNet SDK with RPC and reset BLE state
     // ================================================================
-    info!("\n📡 STEP 1: Starting BLE scanning for PolliNet devices...");
+    info!("\n📡 STEP 1: Initializing PolliNet SDK...");
     
     let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     info!("✅ PolliNet SDK initialized with RPC: {}", rpc_url);
     
+    // Reset any previous BLE connections and state
+    info!("\n🔄 Resetting BLE state...");
+    sdk.reset_ble().await?;
+    info!("✅ BLE state reset - cleared all previous connections");
+    
     // Start BLE networking (advertising + scanning)
     sdk.start_ble_networking().await?;
-    info!("📢 BLE advertising and scanning started");
+    info!("📢 BLE advertising and scanning started fresh");
     
     // Start text message listener
     sdk.start_text_listener().await?;

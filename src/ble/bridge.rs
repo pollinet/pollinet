@@ -102,6 +102,11 @@ impl BleAdapterBridge {
         self.adapter.start_advertising(service_uuid, service_name).await
     }
     
+    /// Stop advertising
+    pub async fn stop_advertising(&self) -> Result<(), BleError> {
+        self.adapter.stop_advertising().await
+    }
+    
     /// Send transaction fragments
     pub async fn send_fragments(&self, fragments: Vec<Fragment>) -> Result<(), BleError> {
         for fragment in fragments {

@@ -81,98 +81,117 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("📦 Compressed size: {} bytes", compressed_data.len());
     
     // ================================================================
-    // STEP 3: Initialize PolliNet SDK and start BLE operations
+    // STEP 3: Reset BLE state and start fresh
     // ================================================================
-    info!("\n📡 STEP 3: Starting BLE advertising and transmission...");
-        
+    info!("\n🔄 STEP 3: Resetting BLE state...");
+    
+    // Reset any previous BLE connections and state
+    sdk.reset_ble().await?;
+    info!("✅ BLE state reset - cleared all previous connections");
+    
     // Start BLE advertising
     sdk.start_ble_networking().await?;
-    info!("📢 BLE advertising started");
+    info!("📢 BLE advertising started fresh");
     
     // // Start text message listener
     // sdk.start_text_listener().await?;
     // info!("🎧 Text message listener started");
     
     // ================================================================
-    // STEP 4: Wait for connections and send transaction fragments
+    // STEP 4: Wait for receiver to connect, then send transaction
     // ================================================================
-    info!("\n🔄 STEP 4: Waiting for BLE connections to send transaction...");
-    info!("   Looking for PolliNet devices to connect to...");
-    info!("   Transaction will be sent as fragments over GATT session");
+    info!("\n🔄 STEP 4: Waiting for receiver to connect...");
+    info!("   Sender is advertising and waiting for receiver to discover and connect");
+    info!("   Once connected, transaction will be sent as fragments");
     
-    let mut connection_attempts = 0;
-    let max_attempts = 10;
+    // Wait for a connection to be established (receiver will connect to us)
+    let mut wait_attempts = 0;
+    let max_wait_attempts = 60; // Wait up to 60 seconds
+    let mut peer_connected = false;
+    let mut connected_peer_id = String::new();
     
-    loop {
-        connection_attempts += 1;
+    while wait_attempts < max_wait_attempts && !peer_connected {
+        wait_attempts += 1;
         
-        // Discover peers
-        match sdk.discover_ble_peers().await {
-            Ok(peers) => {
-                if !peers.is_empty() {
-                    info!("🔍 Found {} peer(s):", peers.len());
-                    for (i, peer) in peers.iter().enumerate() {
-                        info!("   {}. {} (RSSI: {})", i + 1, peer.device_id, peer.rssi);
-                    }
-                    
-                    // Try to connect to the first peer
-                    let target_peer = &peers[0];
-                    info!("🔗 Attempting connection to: {}", target_peer.device_id);
-                    
-                    match sdk.connect_to_ble_peer(&target_peer.device_id).await {
-                        Ok(_) => {
-                            info!("✅ Connected to peer: {}", target_peer.device_id);
-                            
-                            // Fragment the compressed transaction using SDK method
-                            info!("📤 Fragmenting compressed transaction using SDK...");
-                            let fragments = sdk.fragment_transaction(&compressed_data);
-                            info!("   Created {} fragments for transmission", fragments.len());
-                            
-                            // Send fragments using SDK relay method
-                            match sdk.relay_transaction(fragments).await {
-                                Ok(_) => {
-                                    info!("✅ Transaction fragments sent successfully!");
-                                    info!("   Sent {} bytes to peer: {}", compressed_data.len(), target_peer.device_id);
-                                    
-                                    // Mark nonce as used using SDK method
-                                    bundle.mark_used(index)
-                                        .map_err(|e| format!("Failed to mark nonce as used: {}", e))?;
-                                    
-                                    // Save updated bundle using SDK method
-                                    bundle.save_to_file(BUNDLE_FILE)
-                                        .map_err(|e| format!("Failed to save updated bundle: {}", e))?;
-                                    
-                                    info!("💾 Updated bundle saved (nonce marked as used)");
-                                    
-                                    // Wait a bit then exit
-                                    sleep(Duration::from_secs(2)).await;
-                                    break;
-                                }
-                                Err(e) => {
-                                    error!("❌ Failed to send transaction fragments: {}", e);
-                                }
+        // Check if any peer has connected
+        let connected_count = sdk.get_connected_clients_count().await;
+        
+        if connected_count > 0 {
+            info!("✅ Receiver has connected!");
+            peer_connected = true;
+            
+            // Try to discover the connected peer to get its ID
+            match sdk.discover_ble_peers().await {
+                Ok(peers) => {
+                    if !peers.is_empty() {
+                        connected_peer_id = peers[0].device_id.clone();
+                        info!("📱 Connected peer ID: {}", connected_peer_id);
+                        
+                        // Also connect back to the peer for bidirectional communication
+                        match sdk.connect_to_ble_peer(&connected_peer_id).await {
+                            Ok(_) => {
+                                info!("✅ Established bidirectional connection with receiver");
+                            }
+                            Err(e) => {
+                                warn!("⚠️  Could not establish reverse connection: {}", e);
+                                info!("   Continuing with one-way connection...");
                             }
                         }
-                        Err(e) => {
-                            warn!("⚠️  Failed to connect to peer: {}", e);
-                        }
                     }
-                } else {
-                    info!("🔍 No peers found, scanning... (attempt {}/{})", connection_attempts, max_attempts);
+                }
+                Err(e) => {
+                    warn!("⚠️  Could not discover peer details: {}", e);
+                    connected_peer_id = "receiver".to_string();
                 }
             }
-            Err(e) => {
-                warn!("⚠️  Peer discovery failed: {}", e);
-            }
-        }
-        
-        if connection_attempts >= max_attempts {
-            warn!("⏰ Maximum connection attempts reached, exiting...");
+            
             break;
         }
         
-        // Wait before next attempt
-        sleep(Duration::from_secs(3)).await;
+        if wait_attempts % 5 == 0 {
+            info!("⏳ Waiting for receiver connection... ({}s)", wait_attempts);
+        }
+        
+        sleep(Duration::from_secs(1)).await;
+    }
+    
+    if !peer_connected {
+        warn!("⏰ No receiver connected after {} seconds", max_wait_attempts);
+        warn!("   Make sure receiver is running and can discover this device");
+        return Ok(());
+    }
+    
+    // Now send the transaction fragments
+    info!("\n📤 Sending transaction fragments...");
+    
+    // Fragment the compressed transaction using SDK method
+    info!("🔧 Fragmenting compressed transaction using SDK...");
+    let fragments = sdk.fragment_transaction(&compressed_data);
+    info!("   Created {} fragments for transmission", fragments.len());
+    
+    // Send fragments using SDK relay method
+    match sdk.relay_transaction(fragments).await {
+        Ok(_) => {
+            info!("✅ Transaction fragments sent successfully!");
+            info!("   Sent {} bytes to receiver", compressed_data.len());
+            
+            // Mark nonce as used using SDK method
+            bundle.mark_used(index)
+                .map_err(|e| format!("Failed to mark nonce as used: {}", e))?;
+            
+            // Save updated bundle using SDK method
+            bundle.save_to_file(BUNDLE_FILE)
+                .map_err(|e| format!("Failed to save updated bundle: {}", e))?;
+            
+            info!("💾 Updated bundle saved (nonce marked as used)");
+            
+            // Wait a bit for transmission to complete
+            sleep(Duration::from_secs(2)).await;
+        }
+        Err(e) => {
+            error!("❌ Failed to send transaction fragments: {}", e);
+            return Err(format!("Fragment transmission failed: {}", e).into());
+        }
     }
     
     info!("\n🏁 Offline transaction sender completed!");
