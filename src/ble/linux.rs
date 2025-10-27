@@ -720,11 +720,27 @@ mod linux_impl {
                         drop(clients_guard); // Release read lock before acquiring write lock
                         
                         tracing::info!("🔍 Setting up services for already-connected device...");
+                        tracing::info!("⏳ Waiting for GATT services to be resolved...");
+                        
+                        // Wait a bit for GATT services to be resolved
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        
                         let services = match Self::discover_gatt_services(&device).await {
                             Ok(services) => services,
                             Err(e) => {
                                 tracing::warn!("⚠️  Failed to discover GATT services: {}", e);
-                                HashMap::new()
+                                tracing::info!("   Retrying GATT service discovery after delay...");
+                                
+                                // Retry once after a longer delay
+                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                match Self::discover_gatt_services(&device).await {
+                                    Ok(services) => services,
+                                    Err(e) => {
+                                        tracing::warn!("⚠️  Second attempt to discover GATT services failed: {}", e);
+                                        tracing::warn!("   Continuing without GATT services. Write operations may not work.");
+                                        HashMap::new()
+                                    }
+                                }
                             }
                         };
                         
