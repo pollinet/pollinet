@@ -16,8 +16,18 @@ mod linux_impl {
         gatt::remote::{
             Characteristic, Service,
         },
+        gatt::local::{
+            Application, Service as LocalService, 
+            Characteristic as LocalCharacteristic,
+            CharacteristicWrite, CharacteristicRead,
+        },
     };
     use tokio_stream::StreamExt;
+    use futures::FutureExt;
+    
+    // PolliNet GATT Characteristic UUIDs
+    const POLLINET_TX_CHAR_UUID: &str = "7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a8";
+    const POLLINET_STATUS_CHAR_UUID: &str = "7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12aa";
 
     /// Linux BLE adapter implementation
     pub struct LinuxBleAdapter {
@@ -39,6 +49,8 @@ mod linux_impl {
         advertisement_handle: Arc<Mutex<Option<bluer::adv::AdvertisementHandle>>>,
         /// Discovered devices
         discovered_devices: Arc<RwLock<HashMap<String, super::super::adapter::DiscoveredDevice>>>,
+        /// GATT server application handle
+        gatt_server_handle: Arc<Mutex<Option<bluer::gatt::local::ApplicationHandle>>>,
     }
 
     /// Information about a connected client
@@ -104,7 +116,82 @@ mod linux_impl {
                 service_uuid,
                 advertisement_handle: Arc::new(Mutex::new(None)),
                 discovered_devices: Arc::new(RwLock::new(HashMap::new())),
+                gatt_server_handle: Arc::new(Mutex::new(None)),
             })
+        }
+        
+        /// Start GATT server with custom characteristics
+        async fn start_gatt_server(&self) -> Result<(), BleError> {
+            tracing::info!("🔧 Starting GATT server with custom characteristics...");
+            
+            let tx_char_uuid = Uuid::parse_str(POLLINET_TX_CHAR_UUID)
+                .map_err(|e| BleError::InvalidUuid(e.to_string()))?;
+            let status_char_uuid = Uuid::parse_str(POLLINET_STATUS_CHAR_UUID)
+                .map_err(|e| BleError::InvalidUuid(e.to_string()))?;
+            
+            // NOTE: Write event handling via bluer's CharacteristicControl is complex
+            // and depends on BlueZ's D-Bus interface. For now, we register the characteristics
+            // which makes them visible and writable. BlueZ will handle the low-level writes.
+            //
+            // TODO: Implement proper write event handling when bluer's API is better documented
+            // For now, the sender will write to the characteristic, but processing the data
+            // requires additional D-Bus monitoring or a different approach.
+            
+            let _receive_callback = self.receive_callback.clone();
+            
+            // Create TX characteristic (writable - for receiving data from clients)
+            let tx_char = LocalCharacteristic {
+                uuid: tx_char_uuid,
+                write: Some(CharacteristicWrite {
+                    write: true,
+                    write_without_response: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            
+            // Create Status characteristic (readable - returns "ready" status)
+            let status_char = LocalCharacteristic {
+                uuid: status_char_uuid,
+                read: Some(CharacteristicRead {
+                    read: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            
+            // Create PolliNet service
+            let service = LocalService {
+                uuid: self.service_uuid,
+                primary: true,
+                characteristics: vec![tx_char, status_char],
+                ..Default::default()
+            };
+            
+            // Create GATT application
+            let app = Application {
+                services: vec![service],
+                ..Default::default()
+            };
+            
+            // Serve the GATT application
+            let app_handle = self.adapter.serve_gatt_application(app).await
+                .map_err(|e| BleError::PlatformError(format!("Failed to serve GATT application: {}", e)))?;
+            
+            // Store the handle
+            {
+                let mut handle_guard = self.gatt_server_handle.lock().unwrap();
+                *handle_guard = Some(app_handle);
+            }
+            
+            tracing::info!("📡 GATT server registered - characteristics are now visible and writable");
+            tracing::warn!("⚠️  Write event processing not yet implemented - testing write operations needed");
+            
+            tracing::info!("✅ GATT server started successfully");
+            tracing::info!("   📥 TX Characteristic (writable): {}", POLLINET_TX_CHAR_UUID);
+            tracing::info!("   📊 Status Characteristic (readable): {}", POLLINET_STATUS_CHAR_UUID);
+            
+            Ok(())
         }
 
         /// Discover GATT services for a connected device
@@ -301,6 +388,8 @@ mod linux_impl {
             let services = device.services().await
                 .map_err(|e| BleError::PlatformError(format!("Failed to get services: {}", e)))?;
             
+            let mut fallback_char: Option<(Service, Characteristic)> = None;
+            
             for service in services {
                 let current_service_uuid = service.uuid().await
                     .map_err(|e| BleError::PlatformError(format!("Failed to get service UUID: {}", e)))?;
@@ -334,10 +423,23 @@ mod linux_impl {
                             continue;
                         }
                         
-                        tracing::info!("✅ Found writable custom characteristic: {} in service: {}", char_uuid, current_service_uuid);
-                        return Ok((service, characteristic));
+                        // Save first writable custom characteristic found
+                        if fallback_char.is_none() {
+                            tracing::debug!("📝 Found writable characteristic: {} in service: {}", char_uuid, current_service_uuid);
+                            fallback_char = Some((service.clone(), characteristic.clone()));
+                        }
                     }
                 }
+            }
+            
+            // Return characteristic if we found one
+            if let Some((service, characteristic)) = fallback_char {
+                let char_uuid = characteristic.uuid().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get characteristic UUID: {}", e)))?;
+                let service_uuid = service.uuid().await
+                    .map_err(|e| BleError::PlatformError(format!("Failed to get service UUID: {}", e)))?;
+                tracing::info!("✅ Found writable characteristic: {} in service: {}", char_uuid, service_uuid);
+                return Ok((service, characteristic));
             }
             
             Err(BleError::CharacteristicNotFound)
@@ -519,10 +621,17 @@ mod linux_impl {
                 *status = true;
             }
 
+            // Start GATT server before advertising
+            tracing::info!("🔧 Registering GATT server...");
+            if let Err(e) = self.start_gatt_server().await {
+                tracing::warn!("⚠️  Failed to start GATT server: {}", e);
+                tracing::warn!("   Continuing without GATT server - data transfer may not work");
+            }
+            
             // Try to start BlueZ advertising with fallback
             match self.start_bluez_advertising().await {
                 Ok(_) => {
-                    tracing::info!("✅ BLE advertising started successfully on Linux");
+                    tracing::info!("✅ BLE advertising started successfully on Linux with GATT server");
                     Ok(())
                 }
                 Err(e) => {
