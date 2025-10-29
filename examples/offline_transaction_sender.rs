@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n📦 STEP 1: Checking offline bundle availability...");
     
     // Use SDK method to prepare or load bundle
-    let rpc_url = "https://api.devnet.solana.com";
+    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     
     info!("🌐 Connecting to Solana RPC: {}", rpc_url);
