@@ -379,7 +379,16 @@ impl PolliNetSDK {
         &self,
         fragments: Vec<transaction::Fragment>,
     ) -> Result<(), PolliNetError> {
-        // Check if we have a connected peer (central mode)
+        // TEMPORARY FIX: Use broadcast mode due to GATT MTU limitations
+        // GATT notifications are limited to ~20 bytes by default MTU
+        // Broadcast mode doesn't have this limitation
+        tracing::info!("📤 Using broadcast mode for {} fragments (bypassing GATT MTU limitation)", fragments.len());
+        return Ok(self.ble_bridge.send_fragments(fragments).await?);
+        
+        // TODO: Implement proper MTU negotiation for GATT write
+        // Once MTU is negotiated to 512 bytes, re-enable GATT write path below:
+        
+        /* DISABLED - MTU issue causes only 4 bytes to be received
         let connected_peer = self.connected_peer.read().await;
         
         if let Some(peer_address) = connected_peer.as_ref() {
@@ -422,6 +431,7 @@ impl PolliNetSDK {
             tracing::info!("📤 Broadcasting {} fragments (no specific peer connected)", fragments.len());
             Ok(self.ble_bridge.send_fragments(fragments).await?)
         }
+        */
     }
 
     /// Submit a transaction to Solana when online
