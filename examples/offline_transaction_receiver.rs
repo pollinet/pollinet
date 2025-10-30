@@ -172,7 +172,11 @@ async fn wait_for_transaction_data(
     for wait_sec in 0..handshake_timeout {
         // Check for READY? message from sender (short to fit MTU)
         if let Ok(messages) = sdk.check_incoming_messages().await {
+            if !messages.is_empty() {
+                info!("📨 Received {} message(s)", messages.len());
+            }
             for message in messages {
+                info!("   Message content: '{}'", message);
                 if message.contains("RDY?") {
                     info!("✅ Received handshake from sender!");
                     info!("📤 Sending ready confirmation...");
