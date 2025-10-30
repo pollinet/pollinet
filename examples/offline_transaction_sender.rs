@@ -177,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   Sending READY check to receiver...");
     
     // Send READY? message
-    sdk.send_text_message("POLLINET_READY?".to_string()).await
+    sdk.send_text_message("receiver", "POLLINET_READY?").await
         .map_err(|e| format!("Failed to send ready check: {}", e))?;
     
     // Wait for READY! confirmation (max 30 seconds)
@@ -186,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     for wait_sec in 0..handshake_timeout {
         // Check for messages from receiver
-        let messages = sdk.get_text_messages().await;
+        let messages = sdk.check_incoming_messages().await.unwrap_or_default();
         
         for msg in messages {
             if msg.contains("POLLINET_READY!") {

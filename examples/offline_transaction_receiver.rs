@@ -178,7 +178,7 @@ async fn wait_for_transaction_data(
                     info!("📤 Sending ready confirmation...");
                     
                     // Send READY! confirmation
-                    sdk.send_text_message("POLLINET_READY!".to_string()).await
+                    sdk.send_text_message("sender", "POLLINET_READY!").await
                         .map_err(|e| format!("Failed to send ready confirmation: {}", e))?;
                     
                     info!("✅ Ready confirmation sent!");
