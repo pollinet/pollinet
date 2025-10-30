@@ -170,15 +170,15 @@ async fn wait_for_transaction_data(
     let handshake_timeout = 15; // 15 seconds to receive handshake
     
     for wait_sec in 0..handshake_timeout {
-        // Check for READY? message from sender
+        // Check for READY? message from sender (short to fit MTU)
         if let Ok(messages) = sdk.check_incoming_messages().await {
             for message in messages {
-                if message.contains("POLLINET_READY?") {
+                if message.contains("RDY?") {
                     info!("✅ Received handshake from sender!");
                     info!("📤 Sending ready confirmation...");
                     
-                    // Send READY! confirmation
-                    sdk.send_text_message("sender", "POLLINET_READY!").await
+                    // Send READY! confirmation (short to fit MTU)
+                    sdk.send_text_message("sender", "RDY!").await
                         .map_err(|e| format!("Failed to send ready confirmation: {}", e))?;
                     
                     info!("✅ Ready confirmation sent!");

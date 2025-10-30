@@ -176,8 +176,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n🤝 Performing connection handshake...");
     info!("   Sending READY check to receiver...");
     
-    // Send READY? message
-    sdk.send_text_message("receiver", "POLLINET_READY?").await
+    // Send READY? message (short to fit within MTU limit)
+    sdk.send_text_message("receiver", "RDY?").await
         .map_err(|e| format!("Failed to send ready check: {}", e))?;
     
     // Wait for READY! confirmation (max 30 seconds)
@@ -189,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let messages = sdk.check_incoming_messages().await.unwrap_or_default();
         
         for msg in messages {
-            if msg.contains("POLLINET_READY!") {
+            if msg.contains("RDY!") {
                 info!("✅ Receiver confirmed ready!");
                 handshake_confirmed = true;
                 break;
