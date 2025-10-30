@@ -170,7 +170,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     
+    // ============================================================
+    // HANDSHAKE: Wait for receiver to be ready
+    // ============================================================
+    info!("\n🤝 Performing connection handshake...");
+    info!("   Sending READY check to receiver...");
+    
+    // Send READY? message
+    sdk.send_text_message("POLLINET_READY?".to_string()).await
+        .map_err(|e| format!("Failed to send ready check: {}", e))?;
+    
+    // Wait for READY! confirmation (max 30 seconds)
+    let handshake_timeout = 30;
+    let mut handshake_confirmed = false;
+    
+    for wait_sec in 0..handshake_timeout {
+        // Check for messages from receiver
+        let messages = sdk.get_text_messages().await;
+        
+        for msg in messages {
+            if msg.contains("POLLINET_READY!") {
+                info!("✅ Receiver confirmed ready!");
+                handshake_confirmed = true;
+                break;
+            }
+        }
+        
+        if handshake_confirmed {
+            break;
+        }
+        
+        if wait_sec % 5 == 0 && wait_sec > 0 {
+            info!("⏳ Waiting for receiver ready confirmation... ({}s)", wait_sec);
+        }
+        
+        sleep(Duration::from_secs(1)).await;
+    }
+    
+    if !handshake_confirmed {
+        error!("❌ Receiver did not confirm ready state after {}s", handshake_timeout);
+        error!("   The receiver may still be setting up its GATT session.");
+        error!("   Please ensure receiver is fully initialized before connecting.");
+        return Ok(());
+    }
+    
+    // Give receiver a moment to prepare for data
+    info!("⏳ Waiting 2 seconds for receiver to prepare...");
+    sleep(Duration::from_secs(2)).await;
+    
+    // ============================================================
     // Now send the transaction fragments
+    // ============================================================
     info!("\n📤 Sending transaction fragments...");
     
     // Fragment the compressed transaction using SDK method

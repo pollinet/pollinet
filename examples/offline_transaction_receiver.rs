@@ -162,7 +162,55 @@ async fn wait_for_transaction_data(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     info!("⏳ Waiting for transaction data from: {}", peer_id);
     
-    // Wait for real transaction data from BLE peer
+    // ============================================================
+    // HANDSHAKE: Wait for sender ready check and respond
+    // ============================================================
+    info!("🤝 Waiting for sender handshake...");
+    let mut handshake_received = false;
+    let handshake_timeout = 15; // 15 seconds to receive handshake
+    
+    for wait_sec in 0..handshake_timeout {
+        // Check for READY? message from sender
+        if let Ok(messages) = sdk.check_incoming_messages().await {
+            for message in messages {
+                if message.contains("POLLINET_READY?") {
+                    info!("✅ Received handshake from sender!");
+                    info!("📤 Sending ready confirmation...");
+                    
+                    // Send READY! confirmation
+                    sdk.send_text_message("POLLINET_READY!".to_string()).await
+                        .map_err(|e| format!("Failed to send ready confirmation: {}", e))?;
+                    
+                    info!("✅ Ready confirmation sent!");
+                    handshake_received = true;
+                    break;
+                }
+            }
+        }
+        
+        if handshake_received {
+            break;
+        }
+        
+        if wait_sec % 5 == 0 && wait_sec > 0 {
+            info!("⏳ Waiting for sender handshake... ({}s)", wait_sec);
+        }
+        
+        sleep(Duration::from_secs(1)).await;
+    }
+    
+    if !handshake_received {
+        return Err("Timeout waiting for sender handshake".into());
+    }
+    
+    // Give a moment for the confirmation to be processed
+    info!("⏳ Preparing to receive data...");
+    sleep(Duration::from_secs(1)).await;
+    
+    // ============================================================
+    // Now wait for real transaction data from BLE peer
+    // ============================================================
+    info!("📡 Listening for transaction fragments...");
     let mut attempts = 0;
     let max_attempts = 30; // 30 seconds timeout
     
