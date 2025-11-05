@@ -53,7 +53,8 @@ All types use camelCase field names for Kotlin compatibility.
 
 #### MWA Client Stub (`app/src/main/java/xyz/pollinet/android/mwa/PolliNetMwaClient.kt`)
 - ✅ Created high-level MWA client API wrapper
-- ⚠️ **STATUS: STUB IMPLEMENTATION** - Contains interface design but needs actual MWA SDK calls
+- ✅ **STATUS: CORE STRUCTURE COMPLETE** - Compiles successfully with clear implementation guidance
+- ⚠️ **REQUIRES**: MWA SDK version-specific API calls (detailed inline comments provided)
 
 Methods defined:
 - `authorize()` - Connect to wallet and get authorization

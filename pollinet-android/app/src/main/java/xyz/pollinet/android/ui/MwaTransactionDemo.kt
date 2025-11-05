@@ -1,5 +1,8 @@
 package xyz.pollinet.android.ui
 
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +38,7 @@ fun MwaTransactionDemo(
     
     // MWA client state
     var mwaClient by remember { mutableStateOf<PolliNetMwaClient?>(null) }
+    var activityResultSender by remember { mutableStateOf<ActivityResultSender?>(null) }
     
     // UI state
     var authorizedPubkey by remember { mutableStateOf<String?>(null) }
@@ -47,6 +51,20 @@ fun MwaTransactionDemo(
     var signedTxBase64 by remember { mutableStateOf<String?>(null) }
     var txSignature by remember { mutableStateOf<String?>(null) }
     
+    // Create ActivityResultSender SYNCHRONOUSLY at top level (BEFORE lifecycle STARTED)
+    // This MUST be done with remember, not in LaunchedEffect or DisposableEffect
+    val activityContext = context as? ComponentActivity
+    
+    // Initialize ActivityResultSender synchronously
+    remember(activityContext) {
+        if (activityContext != null) {
+            activityResultSender = ActivityResultSender(activityContext)
+        } else {
+            errorMessage = "MWA requires ComponentActivity. Current context: ${context.javaClass.simpleName}"
+        }
+        Unit  // remember must return something
+    }
+    
     // Initialize MWA client
     LaunchedEffect(Unit) {
         mwaClient = PolliNetMwaClient.create(
@@ -56,9 +74,6 @@ fun MwaTransactionDemo(
             identityName = "PolliNet"
         )
     }
-    
-    // Note: ActivityResultSender setup would go here for actual MWA implementation
-    // For now, the stub MWA client doesn't actually use it
     
     Column(
         modifier = modifier
@@ -142,10 +157,14 @@ fun MwaTransactionDemo(
                             errorMessage = null
                             statusMessage = "Opening wallet..."
                             try {
-                                // Note: MWA client is stub - will throw "not yet implemented"
-                                // Once implemented, this will open the wallet app for authorization
-                                errorMessage = "MWA client not yet fully implemented. See PolliNetMwaClient.kt"
-                                statusMessage = "MWA implementation pending"
+                                val sender = activityResultSender
+                                    ?: throw MwaException("ActivityResultSender not initialized")
+                                
+                                // Call actual MWA authorization
+                                val pubkey = mwaClient!!.authorize(sender)
+                                authorizedPubkey = pubkey
+                                statusMessage = "Wallet connected successfully!"
+                                
                             } catch (e: Exception) {
                                 errorMessage = e.message ?: "Authorization failed"
                                 statusMessage = "Authorization failed"
@@ -154,7 +173,7 @@ fun MwaTransactionDemo(
                             }
                         }
                     },
-                    enabled = !isLoading && mwaClient != null && authorizedPubkey == null,
+                    enabled = !isLoading && mwaClient != null && activityResultSender != null && authorizedPubkey == null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (isLoading) {
@@ -320,10 +339,21 @@ fun MwaTransactionDemo(
                             errorMessage = null
                             statusMessage = "Requesting signature from wallet..."
                             try {
-                                // Note: MWA client is stub - will throw "not yet implemented"
-                                // Once implemented, this will open wallet for signing
-                                errorMessage = "MWA client not yet fully implemented. See PolliNetMwaClient.kt"
-                                statusMessage = "MWA implementation pending"
+                                val sender = activityResultSender
+                                    ?: throw MwaException("ActivityResultSender not initialized")
+                                
+                                // Call actual MWA signing
+                                val signedBytes = mwaClient!!.signAndSendTransaction(
+                                    sender = sender,
+                                    unsignedTransactionBase64 = unsignedTxBase64!!
+                                )
+                                
+                                signedTxBase64 = android.util.Base64.encodeToString(
+                                    signedBytes,
+                                    android.util.Base64.NO_WRAP
+                                )
+                                statusMessage = "Transaction signed! Ready to submit."
+                                
                             } catch (e: Exception) {
                                 errorMessage = e.message ?: "Signing failed"
                                 statusMessage = "Signing failed"
@@ -332,7 +362,7 @@ fun MwaTransactionDemo(
                             }
                         }
                     },
-                    enabled = !isLoading && unsignedTxBase64 != null,
+                    enabled = !isLoading && unsignedTxBase64 != null && activityResultSender != null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (isLoading) {

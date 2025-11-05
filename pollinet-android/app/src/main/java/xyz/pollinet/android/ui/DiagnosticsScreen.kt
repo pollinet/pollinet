@@ -229,14 +229,15 @@ fun DiagnosticsScreen() {
         )
 
         // MWA (Mobile Wallet Adapter) Demo
-        StatusCard(
-            title = "🔐 MWA Transaction Demo",
-            content = {
-                MwaTransactionDemo(
-                    sdk = bleService?.sdk
-                )
-            }
-        )
+        // TODO: Re-enable after restructuring to pass ActivityResultSender from Activity level
+        // StatusCard(
+        //     title = "🔐 MWA Transaction Demo",
+        //     content = {
+        //         MwaTransactionDemo(
+        //             sdk = bleService?.sdk
+        //         )
+        //     }
+        // )
 
         // Metrics
         StatusCard(

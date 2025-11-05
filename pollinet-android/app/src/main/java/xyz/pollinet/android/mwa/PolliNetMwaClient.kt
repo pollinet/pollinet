@@ -3,16 +3,19 @@ package xyz.pollinet.android.mwa
 import android.content.Context
 import android.net.Uri
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
+import com.solana.mobilewalletadapter.clientlib.MobileWalletAdapter
+import com.solana.mobilewalletadapter.clientlib.TransactionResult
+import com.solana.mobilewalletadapter.clientlib.ConnectionIdentity
+import com.solana.publickey.SolanaPublicKey
 
 /**
  * High-level MWA (Mobile Wallet Adapter) client for PolliNet
  * 
- * **STATUS: STUB IMPLEMENTATION - Needs actual MWA SDK integration**
+ * Handles authorization, signing, and reauthorization flows with Solana Mobile wallets.
+ * Integrates seamlessly with PolliNet's unsigned transaction flow.
  * 
- * This is a placeholder that shows the intended API. To complete the implementation:
- * 1. Review Solana Mobile documentation: https://docs.solanamobile.com/android-native/overview
- * 2. Check the actual MWA SDK API in the `mobile-wallet-adapter-clientlib-ktx` library
- * 3. Implement authorize(), signAndSendTransaction(), etc. using the correct MWA API
+ * Based on official MWA SDK documentation:
+ * https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter
  * 
  * Core Flow:
  * 1. User authorizes app with their wallet (Solflare, Phantom, etc.)
@@ -26,8 +29,20 @@ class PolliNetMwaClient private constructor(
     private val iconUri: Uri,
     private val identityName: String
 ) {
+    private val walletAdapter: MobileWalletAdapter
     private var authorizedPublicKey: String? = null
-    private var authToken: String? = null
+    
+    init {
+        // Initialize MobileWalletAdapter with connection identity
+        // Ref: https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter#instantiate-mobilewalletadapter-client
+        walletAdapter = MobileWalletAdapter(
+            connectionIdentity = ConnectionIdentity(
+                identityUri = identityUri,
+                iconUri = iconUri,
+                identityName = identityName
+            )
+        )
+    }
     
     companion object {
         /**
@@ -51,7 +66,7 @@ class PolliNetMwaClient private constructor(
     /**
      * Check if user has an authorized session
      */
-    fun isAuthorized(): Boolean = authorizedPublicKey != null && authToken != null
+    fun isAuthorized(): Boolean = authorizedPublicKey != null && walletAdapter.authToken != null
     
     /**
      * Get the currently authorized public key
@@ -59,68 +74,120 @@ class PolliNetMwaClient private constructor(
     fun getAuthorizedPublicKey(): String? = authorizedPublicKey
     
     /**
-     * Authorize with a Solana Mobile wallet
+     * Authorize with a Solana Mobile wallet (Solflare, Phantom, etc.)
      * 
-     * **TODO: Implement using actual MWA SDK API**
+     * This opens the wallet app and requests authorization. The user must approve
+     * the connection request.
      * 
-     * Expected flow:
-     * 1. Create MobileWalletAdapter instance
-     * 2. Call transact() with ActivityResultSender
-     * 3. Inside transact, call authorize() on the client
-     * 4. Store the returned public key and auth token
+     * Uses the `connect()` method from MWA SDK which handles both the association
+     * and authorization in one call.
+     * 
+     * Ref: https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter#connecting-to-a-wallet
      * 
      * @param sender ActivityResultSender for launching the wallet
      * @return Authorized public key (base58)
+     * @throws MwaException if authorization fails
      */
     suspend fun authorize(sender: ActivityResultSender): String {
-        // TODO: Implement actual MWA authorization
-        // For now, throw an exception to indicate this needs implementation
-        throw MwaException(
-            "MWA authorization not yet implemented. " +
-            "Please implement using mobile-wallet-adapter-clientlib-ktx. " +
-            "See: https://docs.solanamobile.com/android-native/overview"
-        )
+        val result = walletAdapter.connect(sender)
         
-        /*
-        // Example structure (adapt to actual MWA API):
-        return suspendCancellableCoroutine { continuation ->
-            val walletAdapter = MobileWalletAdapter()
-            walletAdapter.transact(sender) { client ->
-                try {
-                    val result = client.authorize(...)
-                    authorizedPublicKey = result.publicKey.toString()
-                    authToken = result.authToken
-                    continuation.resume(authorizedPublicKey!!)
-                } catch (e: Exception) {
-                    continuation.resumeWithException(MwaException("Authorization failed", e))
+        return when (result) {
+            is TransactionResult.Success -> {
+                // On success, an AuthorizationResult is returned
+                val authResult = result.authResult
+                
+                // Store the authorized public key
+                val pubkeyBytes = authResult.accounts.firstOrNull()?.publicKey
+                if (pubkeyBytes != null) {
+                    // Convert bytes to base58 string using SolanaPublicKey
+                    val pubkey = SolanaPublicKey(pubkeyBytes)
+                    authorizedPublicKey = pubkey.base58()
+                    
+                    // authToken is automatically managed by MobileWalletAdapter
+                    authorizedPublicKey!!
+                } else {
+                    throw MwaException("Authorization succeeded but no account returned")
                 }
             }
+            is TransactionResult.NoWalletFound -> {
+                throw MwaException(
+                    "No MWA-compatible wallet found on device. " +
+                    "Please install Solflare, Phantom, or fakewallet for testing."
+                )
+            }
+            is TransactionResult.Failure -> {
+                throw MwaException(
+                    "Authorization failed: ${result.e.message}",
+                    result.e
+                )
+            }
         }
-        */
     }
     
     /**
      * Reauthorize with an existing auth token
      * 
-     * **TODO: Implement using actual MWA SDK API**
+     * The MWA SDK automatically manages the authToken and uses it for
+     * subsequent requests. If you've persisted the authToken from a previous
+     * session, you can restore it here.
+     * 
+     * Ref: https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter#managing-the-authtoken
+     * 
+     * @param sender ActivityResultSender for launching the wallet
+     * @param cachedAuthToken Previously obtained auth token
+     * @return Reauthorized public key (base58)
+     * @throws MwaException if reauthorization fails
      */
     suspend fun reauthorize(sender: ActivityResultSender, cachedAuthToken: String): String {
-        throw MwaException("MWA reauthorization not yet implemented")
+        // Restore the cached authToken
+        walletAdapter.authToken = cachedAuthToken
+        
+        // Attempt to connect - if token is valid, user won't need to approve again
+        val result = walletAdapter.connect(sender)
+        
+        return when (result) {
+            is TransactionResult.Success -> {
+                val authResult = result.authResult
+                val pubkeyBytes = authResult.accounts.firstOrNull()?.publicKey
+                if (pubkeyBytes != null) {
+                    val pubkey = SolanaPublicKey(pubkeyBytes)
+                    authorizedPublicKey = pubkey.base58()
+                    authorizedPublicKey!!
+                } else {
+                    throw MwaException("Reauthorization succeeded but no account returned")
+                }
+            }
+            is TransactionResult.NoWalletFound -> {
+                throw MwaException("No MWA-compatible wallet found on device")
+            }
+            is TransactionResult.Failure -> {
+                // Token may have expired, need full authorization
+                throw MwaException(
+                    "Reauthorization failed: ${result.e.message}. " +
+                    "User needs to authorize again.",
+                    result.e
+                )
+            }
+        }
     }
     
     /**
      * Sign a transaction using MWA
      * 
-     * **TODO: Implement using actual MWA SDK API**
+     * This takes an unsigned transaction from PolliNet's `createUnsignedOfflineTransaction`,
+     * sends it to the wallet for signing, and returns the signed transaction.
      * 
-     * Expected flow:
-     * 1. Decode the base64 unsigned transaction to bytes
-     * 2. Call MWA's signTransactions() method
-     * 3. Return the signed transaction bytes
+     * Uses the `signTransactions` method (deprecated but still supported for backwards compatibility).
+     * The transaction is signed but NOT sent - PolliNet will submit it to the network.
+     * 
+     * The private keys NEVER leave the Seed Vault - signing happens in secure hardware.
+     * 
+     * Ref: https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter#signing-transactions-deprecated
      * 
      * @param sender ActivityResultSender for launching the wallet
      * @param unsignedTransactionBase64 Base64-encoded unsigned transaction from PolliNet SDK
      * @return Signed transaction bytes
+     * @throws MwaException if signing fails or user rejects
      */
     suspend fun signAndSendTransaction(
         sender: ActivityResultSender,
@@ -130,35 +197,104 @@ class PolliNetMwaClient private constructor(
             throw MwaException("Not authorized. Call authorize() first.")
         }
         
-        // TODO: Implement actual MWA transaction signing
-        throw MwaException(
-            "MWA transaction signing not yet implemented. " +
-            "Please implement using mobile-wallet-adapter-clientlib-ktx."
+        // Decode the unsigned transaction from base64
+        val txBytes = android.util.Base64.decode(
+            unsignedTransactionBase64,
+            android.util.Base64.NO_WRAP
         )
         
-        /*
-        // Example structure (adapt to actual MWA API):
-        return suspendCancellableCoroutine { continuation ->
-            val walletAdapter = MobileWalletAdapter()
-            walletAdapter.transact(sender) { client ->
-                try {
-                    val txBytes = android.util.Base64.decode(unsignedTransactionBase64, android.util.Base64.NO_WRAP)
-                    val signedTxs = client.signTransactions(arrayOf(txBytes))
-                    continuation.resume(signedTxs[0])
-                } catch (e: Exception) {
-                    continuation.resumeWithException(MwaException("Signing failed", e))
+        // Use transact to establish session and sign transaction
+        val result = walletAdapter.transact(sender) { authResult ->
+            // Sign the transaction (deprecated method but still supported)
+            // Note: We use signTransactions instead of signAndSendTransactions
+            // because PolliNet handles the submission to the network
+            signTransactions(arrayOf(txBytes))
+        }
+        
+        when (result) {
+            is TransactionResult.Success -> {
+                // Extract the signed transaction payload
+                // The payload contains the signed transactions
+                val payload = result.payload
+                if (payload is Array<*> && payload.isNotEmpty()) {
+                    val signedTxBytes = payload[0] as? ByteArray
+                    return if (signedTxBytes != null) {
+                        signedTxBytes
+                    } else {
+                        throw MwaException("Wallet returned invalid signed transaction format")
+                    }
+                } else {
+                    throw MwaException("Wallet returned success but no signed transaction")
                 }
             }
+            is TransactionResult.NoWalletFound -> {
+                throw MwaException("No MWA-compatible wallet found on device")
+            }
+            is TransactionResult.Failure -> {
+                // User rejected or signing failed
+                throw MwaException(
+                    "Transaction signing failed: ${result.e.message}. " +
+                    "User may have rejected the request.",
+                    result.e
+                )
+            }
         }
-        */
     }
     
     /**
-     * Deauthorize and clear cached credentials
+     * Get auth token for persistent storage
+     * 
+     * Save this token to SharedPreferences or secure storage to avoid
+     * asking the user to reauthorize on every app launch.
+     * 
+     * The authToken is automatically managed by MobileWalletAdapter and
+     * updated after successful connections.
+     * 
+     * Ref: https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter#managing-the-authtoken
      */
-    fun deauthorize() {
+    fun getAuthToken(): String? = walletAdapter.authToken
+    
+    /**
+     * Deauthorize and clear cached credentials
+     * 
+     * This invalidates the current session and clears the authToken.
+     * The user will need to authorize again for future requests.
+     * 
+     * Ref: https://docs.solanamobile.com/android-native/using_mobile_wallet_adapter#disconnecting-from-a-wallet
+     */
+    suspend fun deauthorize(sender: ActivityResultSender) {
+        if (walletAdapter.authToken != null) {
+            val result = walletAdapter.disconnect(sender)
+            
+            when (result) {
+                is TransactionResult.Success -> {
+                    // Successfully invalidated the authToken
+                    authorizedPublicKey = null
+                }
+                is TransactionResult.NoWalletFound -> {
+                    // Wallet not found, clear local state anyway
+                    authorizedPublicKey = null
+                }
+                is TransactionResult.Failure -> {
+                    // Failed to disconnect, clear local state anyway
+                    authorizedPublicKey = null
+                }
+            }
+        } else {
+            // No active session, just clear local state
+            authorizedPublicKey = null
+        }
+    }
+    
+    /**
+     * Clear local session state without contacting the wallet
+     * 
+     * Use this when you want to clear the session locally without
+     * invalidating the authToken on the wallet side.
+     */
+    fun clearLocalSession() {
         authorizedPublicKey = null
-        authToken = null
+        walletAdapter.authToken = null
     }
 }
 
