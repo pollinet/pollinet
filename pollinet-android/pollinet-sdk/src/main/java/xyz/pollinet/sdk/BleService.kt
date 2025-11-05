@@ -6,6 +6,7 @@ import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
@@ -81,15 +82,34 @@ class BleService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground()
-        initializeBluetooth()
         
-        // Start metrics collection
-        serviceScope.launch {
-            while (isActive) {
-                sdk?.metrics()?.getOrNull()?.let { _metrics.value = it }
-                delay(1000) // Update every second
+        // Only start foreground if we have required permissions
+        if (hasRequiredPermissions()) {
+            startForeground()
+            initializeBluetooth()
+            
+            // Start metrics collection
+            serviceScope.launch {
+                while (isActive) {
+                    sdk?.metrics()?.getOrNull()?.let { _metrics.value = it }
+                    delay(1000) // Update every second
+                }
             }
+        } else {
+            // Stop the service if permissions aren't granted
+            stopSelf()
+        }
+    }
+    
+    private fun hasRequiredPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+        } else {
+            // Android 10-11
+            checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
     }
 
