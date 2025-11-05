@@ -5,6 +5,7 @@
 
 pub mod ble;
 pub mod nonce;
+pub mod storage;
 pub mod transaction;
 pub mod util;
 
@@ -243,6 +244,66 @@ impl PolliNetSDK {
                 nonce_authority_keypair,
                 cached_nonce,
             )?)
+    }
+    
+    /// Create UNSIGNED offline transaction for MWA (Mobile Wallet Adapter) signing
+    /// 
+    /// This is the MWA-compatible version that takes PUBLIC KEYS only (no private keys).
+    /// Perfect for Solana Mobile Stack integration where private keys never leave Seed Vault.
+    /// 
+    /// Flow:
+    /// 1. Create unsigned transaction with this method (public keys only)
+    /// 2. Pass to MWA for signing in Seed Vault (secure hardware)
+    /// 3. Submit signed transaction to blockchain
+    /// 
+    /// Returns base64-encoded unsigned transaction
+    pub fn create_unsigned_offline_transaction(
+        &self,
+        sender_pubkey: &str,
+        recipient: &str,
+        amount: u64,
+        nonce_authority_pubkey: &str,
+        cached_nonce: &transaction::CachedNonceData,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_offline_transaction(
+                sender_pubkey,
+                recipient,
+                amount,
+                nonce_authority_pubkey,
+                cached_nonce,
+            )?)
+    }
+    
+    /// Get transaction message bytes that need to be signed
+    /// 
+    /// Extracts the raw message from an unsigned transaction for MWA signing.
+    /// MWA/Seed Vault will sign these bytes securely.
+    /// 
+    /// Returns message bytes to sign
+    pub fn get_transaction_message_to_sign(
+        &self,
+        base64_tx: &str,
+    ) -> Result<Vec<u8>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .get_transaction_message_to_sign(base64_tx)?)
+    }
+    
+    /// Get list of public keys that need to sign this transaction
+    /// 
+    /// Returns signers in the order required by Solana protocol.
+    /// Useful for MWA authorization requests.
+    /// 
+    /// Returns vector of public key strings (base58)
+    pub fn get_required_signers(
+        &self,
+        base64_tx: &str,
+    ) -> Result<Vec<String>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .get_required_signers(base64_tx)?)
     }
     
     /// Submit offline-created transaction to blockchain

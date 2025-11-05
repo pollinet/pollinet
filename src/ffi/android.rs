@@ -25,6 +25,16 @@ use crate::PolliNetSDK;
 #[cfg(feature = "android")]
 use solana_sdk::pubkey::Pubkey;
 
+#[cfg(feature = "android")]
+use log::{info, error, warn, debug};
+
+// Initialize Android logger once
+#[cfg(feature = "android")]
+use std::sync::Once;
+
+#[cfg(feature = "android")]
+static ANDROID_LOGGER_INIT: Once = Once::new();
+
 // Global state for SDK instances
 #[cfg(feature = "android")]
 lazy_static::lazy_static! {
@@ -45,47 +55,114 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
     _class: JClass,
     config_bytes: JByteArray,
 ) -> jlong {
+    // Initialize Android logger (only once)
+    ANDROID_LOGGER_INIT.call_once(|| {
+        #[cfg(feature = "android_logger")]
+        {
+            android_logger::init_once(
+                android_logger::Config::default()
+                    .with_max_level(log::LevelFilter::Debug)
+                    .with_tag("PolliNet-Rust"),
+            );
+            info!("🔧 Android logger initialized");
+        }
+    });
+    
+    info!("📱 FFI init called");
+    
     let result: Result<jlong, String> = (|| {
+        info!("Step 1: Initializing runtime...");
+        
         // Initialize runtime if needed
-        runtime::init_runtime().ok(); // Ignore if already initialized
+        match runtime::init_runtime() {
+            Ok(_) => {
+                info!("✅ Runtime initialized successfully");
+            },
+            Err(e) if e.contains("already initialized") => {
+                info!("ℹ️  Runtime already initialized");
+            },
+            Err(e) => {
+                error!("❌ Runtime init failed: {}", e);
+                return Err(format!("Failed to initialize runtime: {}", e));
+            }
+        }
 
+        info!("Step 2: Parsing config...");
+        
         // Parse config
         let config_data: Vec<u8> = env
             .convert_byte_array(&config_bytes)
-            .map_err(|e| format!("Failed to read config bytes: {}", e))?;
+            .map_err(|e| {
+                error!("❌ Failed to read config bytes: {}", e);
+                format!("Failed to read config bytes: {}", e)
+            })?;
 
+        info!("Step 3: Deserializing config ({} bytes)...", config_data.len());
+        
         let config: SdkConfig = serde_json::from_slice(&config_data)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
+            .map_err(|e| {
+                error!("❌ Failed to parse config: {}", e);
+                format!("Failed to parse config: {}", e)
+            })?;
+
+        info!("Step 4: Config parsed - RPC: {:?}, logging: {}", config.rpc_url, config.enable_logging);
 
         // Initialize logging if requested
         if config.enable_logging {
             let _ = tracing_subscriber::fmt()
                 .with_max_level(parse_log_level(config.log_level.as_deref()))
                 .try_init();
+            info!("✅ Tracing subscriber initialized");
         }
 
+        info!("Step 5: Creating transport...");
+        
         // Create transport instance
-        let transport = runtime::block_on(async {
+        let mut transport = runtime::block_on(async {
             if let Some(rpc_url) = &config.rpc_url {
+                info!("Creating transport with RPC: {}", rpc_url);
                 HostBleTransport::new_with_rpc(rpc_url).await
             } else {
+                info!("Creating transport without RPC");
                 HostBleTransport::new().await
             }
+        }).map_err(|e| {
+            error!("❌ Transport creation failed: {}", e);
+            e
         })?;
 
+        // Set secure storage if directory provided
+        if let Some(storage_dir) = &config.storage_directory {
+            info!("Step 5b: Setting up secure storage at: {}", storage_dir);
+            transport.set_secure_storage(storage_dir)
+                .map_err(|e| {
+                    error!("❌ Failed to set secure storage: {}", e);
+                    e
+                })?;
+            info!("✅ Secure storage configured");
+        } else {
+            info!("ℹ️  No storage directory provided - bundle persistence disabled");
+        }
+
+        info!("Step 6: Storing transport...");
+        
         let transport_arc = Arc::new(transport);
         let mut transports = TRANSPORTS.lock();
         transports.push(transport_arc);
         let handle = (transports.len() - 1) as jlong;
 
-        tracing::info!("✅ PolliNet SDK initialized with handle {}", handle);
+        info!("✅ PolliNet SDK initialized successfully with handle {}", handle);
         Ok(handle)
     })();
 
     match result {
-        Ok(handle) => handle,
+        Ok(handle) => {
+            info!("🎉 Returning handle {} to Kotlin", handle);
+            handle
+        },
         Err(e) => {
-            tracing::error!("Failed to initialize SDK: {}", e);
+            error!("💥 SDK initialization failed: {}", e);
+            error!("Returning error handle -1");
             -1 // Error handle
         }
     }
@@ -563,5 +640,415 @@ fn parse_log_level(level: Option<&str>) -> tracing::Level {
         Some("error") => tracing::Level::ERROR,
         _ => tracing::Level::INFO,
     }
+}
+
+// =============================================================================
+// Offline Bundle Management (M7) - Core PolliNet Features
+// =============================================================================
+
+/// Prepare offline bundle for creating transactions without internet
+/// This is a CORE PolliNet feature for offline/mesh transaction creation
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareOfflineBundle(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: PrepareOfflineBundleRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        // Parse sender keypair from base64
+        let keypair_bytes = base64::decode(&request.sender_keypair_base64)
+            .map_err(|e| format!("Invalid keypair base64: {}", e))?;
+        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
+            .map_err(|e| format!("Invalid keypair bytes: {}", e))?;
+
+        tracing::info!("📦 Preparing offline bundle for {} transactions", request.count);
+
+        // Use secure storage if available
+        let bundle = if let Some(storage) = transport.secure_storage() {
+            tracing::info!("🔒 Using secure storage for bundle persistence");
+            
+            // Load existing bundle if it exists
+            let existing_bundle = storage.load_bundle()
+                .map_err(|e| format!("Failed to load existing bundle: {}", e))?;
+            
+            if let Some(ref existing) = existing_bundle {
+                tracing::info!("📂 Found existing bundle with {} nonces (available: {}, used: {})", 
+                    existing.nonce_caches.len(), existing.available_nonces(), existing.used_nonces());
+            } else {
+                tracing::info!("📂 No existing bundle found - will create new one");
+            }
+            
+            // Save to temp file so prepare_offline_bundle can load it
+            let temp_path = std::env::temp_dir().join("pollinet_temp_bundle.json");
+            if let Some(existing) = &existing_bundle {
+                existing.save_to_file(temp_path.to_str().unwrap())
+                    .map_err(|e| format!("Failed to save temp bundle: {}", e))?;
+                tracing::info!("💾 Saved existing bundle to temp file for processing");
+            }
+            
+            // Prepare bundle (will refresh used nonces or create new ones)
+            let bundle = runtime::block_on(async {
+                transport
+                    .transaction_service()
+                    .prepare_offline_bundle(
+                        request.count,
+                        &sender_keypair,
+                        if existing_bundle.is_some() {
+                            temp_path.to_str()
+                        } else {
+                            None
+                        },
+                    )
+                    .await
+            })
+            .map_err(|e| format!("Failed to prepare bundle: {}", e))?;
+            
+            // Clean up temp file
+            if temp_path.exists() {
+                let _ = std::fs::remove_file(&temp_path);
+            }
+            
+            // Save updated bundle to secure storage
+            storage.save_bundle(&bundle)
+                .map_err(|e| format!("Failed to save bundle: {}", e))?;
+            
+            tracing::info!("💾 Bundle saved to secure storage");
+            tracing::info!("   Total nonces: {}, Available: {}, Used: {}", 
+                bundle.nonce_caches.len(), bundle.available_nonces(), bundle.used_nonces());
+            bundle
+        } else {
+            tracing::warn!("⚠️  No secure storage configured - bundle will not persist");
+            
+            // Fallback to traditional file-based approach
+            runtime::block_on(async {
+                transport
+                    .transaction_service()
+                    .prepare_offline_bundle(
+                        request.count,
+                        &sender_keypair,
+                        request.bundle_file.as_deref(),
+                    )
+                    .await
+            })
+            .map_err(|e| format!("Failed to prepare bundle: {}", e))?
+        };
+
+        tracing::info!("✅ Bundle prepared with {} total nonces ({} available)", 
+            bundle.nonce_caches.len(), bundle.available_nonces());
+
+        // Convert to FFI bundle type (with proper camelCase serialization)
+        let ffi_bundle = crate::ffi::types::OfflineTransactionBundle::from_transaction_bundle(&bundle);
+        
+        // Serialize bundle to JSON
+        let bundle_json = serde_json::to_string(&ffi_bundle)
+            .map_err(|e| format!("Failed to serialize bundle: {}", e))?;
+
+        let response: FfiResult<String> = FfiResult::success(bundle_json);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Create offline transaction using cached nonce data
+/// NO internet required - core PolliNet offline feature
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createOfflineTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: CreateOfflineTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        // Parse keypairs
+        let sender_bytes = base64::decode(&request.sender_keypair_base64)
+            .map_err(|e| format!("Invalid sender keypair: {}", e))?;
+        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&sender_bytes)
+            .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
+
+        let authority_bytes = base64::decode(&request.nonce_authority_keypair_base64)
+            .map_err(|e| format!("Invalid authority keypair: {}", e))?;
+        let authority_keypair = solana_sdk::signature::Keypair::from_bytes(&authority_bytes)
+            .map_err(|e| format!("Invalid authority keypair bytes: {}", e))?;
+
+        tracing::info!("📴 Creating OFFLINE transaction (no internet required)");
+
+        // Load bundle from secure storage
+        let storage = transport.secure_storage()
+            .ok_or_else(|| "Secure storage not configured".to_string())?;
+        
+        let mut bundle = storage.load_bundle()
+            .map_err(|e| format!("Failed to load bundle: {}", e))?
+            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+        
+        tracing::info!("📂 Loaded bundle: {} total nonces, {} available", 
+            bundle.nonce_caches.len(), bundle.available_nonces());
+        
+        // Find first available (unused) nonce
+        let nonce_to_use = bundle.nonce_caches.iter_mut()
+            .find(|n| !n.used)
+            .ok_or_else(|| "No available nonces - all have been used. Call prepareOfflineBundle to refresh.".to_string())?;
+        
+        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+        tracing::info!("   Blockhash: {}", nonce_to_use.blockhash);
+        
+        // Clone the nonce data before marking as used (for transaction creation)
+        let cached_nonce = nonce_to_use.clone();
+        
+        // Mark nonce as used BEFORE creating transaction
+        nonce_to_use.used = true;
+        tracing::info!("✅ Marked nonce as used");
+        
+        // Save updated bundle immediately
+        storage.save_bundle(&bundle)
+            .map_err(|e| format!("Failed to save bundle: {}", e))?;
+        tracing::info!("💾 Bundle saved with updated nonce status");
+        tracing::info!("   Available nonces remaining: {}", bundle.available_nonces());
+
+        // Create transaction offline using the selected nonce
+        let compressed_tx = transport
+            .transaction_service()
+            .create_offline_transaction(
+                &sender_keypair,
+                &request.recipient,
+                request.amount,
+                &authority_keypair,
+                &cached_nonce,
+            )
+            .map_err(|e| format!("Failed to create offline transaction: {}", e))?;
+
+        tracing::info!("✅ Offline transaction created: {} bytes", compressed_tx.len());
+
+        // Encode to base64
+        let tx_base64 = base64::encode(&compressed_tx);
+
+        let response: FfiResult<String> = FfiResult::success(tx_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Submit offline-created transaction to blockchain
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_submitOfflineTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: SubmitOfflineTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        // Decode transaction from base64
+        let tx_bytes = base64::decode(&request.transaction_base64)
+            .map_err(|e| format!("Invalid transaction base64: {}", e))?;
+
+        tracing::info!("Submitting offline transaction to blockchain");
+
+        // Submit transaction
+        let signature = runtime::block_on(async {
+            transport
+                .transaction_service()
+                .submit_offline_transaction(&tx_bytes, request.verify_nonce)
+                .await
+        })
+        .map_err(|e| format!("Failed to submit transaction: {}", e))?;
+
+        tracing::info!("✅ Transaction submitted: {}", signature);
+
+        let response: FfiResult<String> = FfiResult::success(signature);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
+// =============================================================================
+
+/// Create UNSIGNED offline transaction for MWA signing
+/// Takes PUBLIC KEYS only (no private keys) - MWA-compatible
+/// Returns unsigned transaction that MWA/Seed Vault can sign
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedOfflineTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: CreateUnsignedOfflineTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("🔓 Creating UNSIGNED offline transaction for MWA");
+        tracing::info!("   Sender pubkey: {}", request.sender_pubkey);
+        tracing::info!("   NO private keys involved - MWA will sign");
+
+        // Load bundle from secure storage
+        let storage = transport.secure_storage()
+            .ok_or_else(|| "Secure storage not configured".to_string())?;
+        
+        let mut bundle = storage.load_bundle()
+            .map_err(|e| format!("Failed to load bundle: {}", e))?
+            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+        
+        tracing::info!("📂 Loaded bundle: {} total nonces, {} available", 
+            bundle.nonce_caches.len(), bundle.available_nonces());
+        
+        // Find first available (unused) nonce
+        let nonce_to_use = bundle.nonce_caches.iter_mut()
+            .find(|n| !n.used)
+            .ok_or_else(|| "No available nonces - all have been used. Call prepareOfflineBundle to refresh.".to_string())?;
+        
+        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+        
+        // Clone the nonce data before marking as used
+        let cached_nonce = nonce_to_use.clone();
+        
+        // Mark nonce as used BEFORE creating transaction
+        nonce_to_use.used = true;
+        tracing::info!("✅ Marked nonce as used");
+        
+        // Save updated bundle immediately
+        storage.save_bundle(&bundle)
+            .map_err(|e| format!("Failed to save bundle: {}", e))?;
+        tracing::info!("💾 Bundle saved with updated nonce status");
+        tracing::info!("   Available nonces remaining: {}", bundle.available_nonces());
+
+        // Create UNSIGNED transaction
+        let unsigned_tx = transport
+            .transaction_service()
+            .create_unsigned_offline_transaction(
+                &request.sender_pubkey,
+                &request.recipient,
+                request.amount,
+                &request.nonce_authority_pubkey,
+                &cached_nonce,
+            )
+            .map_err(|e| format!("Failed to create unsigned transaction: {}", e))?;
+
+        tracing::info!("✅ Unsigned transaction created for MWA signing");
+        tracing::info!("   Transaction ready for Seed Vault signature");
+
+        let response: FfiResult<String> = FfiResult::success(unsigned_tx);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Get the message bytes that need to be signed by MWA
+/// Extracts the raw message from unsigned transaction for MWA/Seed Vault
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getTransactionMessageToSign(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: GetMessageToSignRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("📝 Extracting message to sign for MWA");
+
+        // Get message bytes
+        let message_bytes = transport
+            .transaction_service()
+            .get_transaction_message_to_sign(&request.unsigned_transaction_base64)
+            .map_err(|e| format!("Failed to extract message: {}", e))?;
+
+        // Encode to base64 for transport
+        let message_base64 = base64::encode(&message_bytes);
+
+        tracing::info!("✅ Message extracted: {} bytes", message_bytes.len());
+
+        let response: FfiResult<String> = FfiResult::success(message_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Get list of public keys that need to sign this transaction
+/// Returns array of public key strings in signing order
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getRequiredSigners(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: GetRequiredSignersRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("👥 Getting required signers for transaction");
+
+        // Get signers
+        let signers = transport
+            .transaction_service()
+            .get_required_signers(&request.unsigned_transaction_base64)
+            .map_err(|e| format!("Failed to get signers: {}", e))?;
+
+        tracing::info!("✅ Found {} required signers", signers.len());
+
+        let response: FfiResult<Vec<String>> = FfiResult::success(signers);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
 }
 

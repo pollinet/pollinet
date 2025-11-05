@@ -201,6 +201,200 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
+    // Offline Bundle Management - Core PolliNet Features
+    // =========================================================================
+
+    /**
+     * Prepare offline bundle for creating transactions without internet
+     * This is a CORE PolliNet feature for offline/mesh transaction creation
+     * 
+     * Smart bundle management:
+     * - Refreshes used nonces (FREE!)
+     * - Only creates new nonce accounts if needed (~$0.20 each)
+     * - Reuses existing nonce accounts to save money
+     * 
+     * @param count Number of nonces to prepare
+     * @param senderKeypair Sender keypair as raw bytes (64 bytes)
+     * @param bundleFile Optional file path to load/save bundle
+     * @return OfflineTransactionBundle with available nonces
+     */
+    suspend fun prepareOfflineBundle(
+        count: Int,
+        senderKeypair: ByteArray,
+        bundleFile: String? = null
+    ): Result<OfflineTransactionBundle> = withContext(Dispatchers.IO) {
+        try {
+            val request = PrepareOfflineBundleRequest(
+                count = count,
+                senderKeypairBase64 = android.util.Base64.encodeToString(
+                    senderKeypair,
+                    android.util.Base64.NO_WRAP
+                ),
+                bundleFile = bundleFile
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.prepareOfflineBundle(handle, requestJson)
+            
+            // Parse the bundle JSON string from the result
+            val bundleJsonResult = parseResult<String>(resultJson)
+            bundleJsonResult.map { bundleJsonStr ->
+                json.decodeFromString<OfflineTransactionBundle>(bundleJsonStr)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Create transaction completely offline using cached nonce data
+     * NO internet required - core PolliNet offline feature
+     * 
+     * @param senderKeypair Sender keypair as raw bytes (64 bytes)
+     * @param nonceAuthorityKeypair Nonce authority keypair as raw bytes (64 bytes)
+     * @param recipient Recipient public key
+     * @param amount Amount in lamports
+     * @param cachedNonce Cached nonce data from bundle
+     * @return Base64-encoded compressed transaction ready for BLE
+     */
+    suspend fun createOfflineTransaction(
+        senderKeypair: ByteArray,
+        nonceAuthorityKeypair: ByteArray,
+        recipient: String,
+        amount: Long
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = CreateOfflineTransactionRequest(
+                senderKeypairBase64 = android.util.Base64.encodeToString(
+                    senderKeypair,
+                    android.util.Base64.NO_WRAP
+                ),
+                nonceAuthorityKeypairBase64 = android.util.Base64.encodeToString(
+                    nonceAuthorityKeypair,
+                    android.util.Base64.NO_WRAP
+                ),
+                recipient = recipient,
+                amount = amount
+                // Nonce is automatically picked from stored bundle
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.createOfflineTransaction(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Submit offline-created transaction to blockchain
+     * 
+     * @param transactionBase64 Base64-encoded transaction from createOfflineTransaction
+     * @param verifyNonce Whether to verify nonce is still valid before submission
+     * @return Transaction signature if successful
+     */
+    suspend fun submitOfflineTransaction(
+        transactionBase64: String,
+        verifyNonce: Boolean = true
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = SubmitOfflineTransactionRequest(
+                transactionBase64 = transactionBase64,
+                verifyNonce = verifyNonce
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.submitOfflineTransaction(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
+    // =========================================================================
+
+    /**
+     * Create UNSIGNED offline transaction for MWA/Seed Vault signing
+     * Takes PUBLIC KEYS only (no private keys) - compatible with Solana Mobile Stack
+     * 
+     * This allows secure transaction signing where private keys never leave
+     * the Seed Vault hardware security module.
+     * 
+     * @param senderPubkey Sender's public key as base58 string
+     * @param nonceAuthorityPubkey Nonce authority's public key as base58 string
+     * @param recipient Recipient's public key as base58 string
+     * @param amount Amount in lamports
+     * @return Base64-encoded unsigned transaction ready for MWA signing
+     */
+    suspend fun createUnsignedOfflineTransaction(
+        senderPubkey: String,
+        nonceAuthorityPubkey: String,
+        recipient: String,
+        amount: Long
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = CreateUnsignedOfflineTransactionRequest(
+                senderPubkey = senderPubkey,
+                nonceAuthorityPubkey = nonceAuthorityPubkey,
+                recipient = recipient,
+                amount = amount
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.createUnsignedOfflineTransaction(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get transaction message bytes that need to be signed by MWA
+     * 
+     * This extracts the raw message from an unsigned transaction so that
+     * MWA/Seed Vault can sign it securely.
+     * 
+     * @param unsignedTransactionBase64 Base64-encoded unsigned transaction
+     * @return Base64-encoded message bytes to sign
+     */
+    suspend fun getTransactionMessageToSign(
+        unsignedTransactionBase64: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = GetMessageToSignRequest(
+                unsignedTransactionBase64 = unsignedTransactionBase64
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.getTransactionMessageToSign(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get list of public keys that need to sign this transaction
+     * 
+     * Returns the signers in the order required by Solana protocol.
+     * This is useful for MWA authorization requests.
+     * 
+     * @param unsignedTransactionBase64 Base64-encoded unsigned transaction
+     * @return List of public key strings (base58) that need to sign
+     */
+    suspend fun getRequiredSigners(
+        unsignedTransactionBase64: String
+    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val request = GetRequiredSignersRequest(
+                unsignedTransactionBase64 = unsignedTransactionBase64
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.getRequiredSigners(handle, requestJson)
+            parseResult<List<String>>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -243,7 +437,8 @@ data class SdkConfig(
     val version: Int = 1,
     val rpcUrl: String? = null,
     val enableLogging: Boolean = true,
-    val logLevel: String? = "info"
+    val logLevel: String? = "info",
+    val storageDirectory: String? = null
 )
 
 @Serializable
@@ -302,5 +497,82 @@ data class MetricsSnapshot(
     val reassemblyFailures: Int,
     val lastError: String,
     val updatedAt: Long
+)
+
+// ============================================================================
+// Offline Bundle Management - Core PolliNet Features
+// ============================================================================
+
+@Serializable
+data class PrepareOfflineBundleRequest(
+    val version: Int = 1,
+    val count: Int,
+    val senderKeypairBase64: String,
+    val bundleFile: String? = null
+)
+
+@Serializable
+data class CachedNonceData(
+    val version: Int = 1,
+    val nonceAccount: String,
+    val authority: String,
+    val blockhash: String,
+    val lamportsPerSignature: Long,
+    val cachedAt: Long,
+    val used: Boolean
+)
+
+@Serializable
+data class OfflineTransactionBundle(
+    val version: Int = 1,
+    val nonceCaches: List<CachedNonceData>,
+    val maxTransactions: Int,
+    val createdAt: Long
+) {
+    fun availableNonces(): Int = nonceCaches.count { !it.used }
+    fun usedNonces(): Int = nonceCaches.count { it.used }
+    fun totalNonces(): Int = nonceCaches.size
+}
+
+@Serializable
+data class CreateOfflineTransactionRequest(
+    val version: Int = 1,
+    val senderKeypairBase64: String,
+    val nonceAuthorityKeypairBase64: String,
+    val recipient: String,
+    val amount: Long
+    // NOTE: Nonce is automatically picked from stored bundle - no need to send it
+)
+
+@Serializable
+data class SubmitOfflineTransactionRequest(
+    val version: Int = 1,
+    val transactionBase64: String,
+    val verifyNonce: Boolean = true
+)
+
+// ============================================================================
+// MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
+// ============================================================================
+
+@Serializable
+data class CreateUnsignedOfflineTransactionRequest(
+    val version: Int = 1,
+    val senderPubkey: String,
+    val nonceAuthorityPubkey: String,
+    val recipient: String,
+    val amount: Long
+)
+
+@Serializable
+data class GetMessageToSignRequest(
+    val version: Int = 1,
+    val unsignedTransactionBase64: String
+)
+
+@Serializable
+data class GetRequiredSignersRequest(
+    val version: Int = 1,
+    val unsignedTransactionBase64: String
 )
 

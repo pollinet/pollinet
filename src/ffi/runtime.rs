@@ -12,10 +12,16 @@ static RUNTIME: OnceCell<Arc<Mutex<Runtime>>> = OnceCell::new();
 
 /// Initialize the global async runtime
 pub fn init_runtime() -> Result<(), String> {
+    // Use a multi-threaded runtime with a small worker pool
+    // This is needed for spawn_blocking support (e.g., RPC calls)
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2) // Keep it lightweight for Android
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+    
     RUNTIME
-        .set(Arc::new(Mutex::new(
-            Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?,
-        )))
+        .set(Arc::new(Mutex::new(runtime)))
         .map_err(|_| "Runtime already initialized".to_string())
 }
 

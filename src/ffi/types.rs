@@ -39,22 +39,31 @@ impl<T> FfiResult<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateUnsignedTransactionRequest {
+    #[serde(default = "default_version")]
     pub version: u32,
     pub sender: String,
     pub recipient: String,
+    #[serde(rename = "feePayer")]
     pub fee_payer: String,
     pub amount: u64,
+    #[serde(rename = "nonceAccount")]
     pub nonce_account: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateUnsignedSplTransactionRequest {
+    #[serde(default = "default_version")]
     pub version: u32,
+    #[serde(rename = "senderWallet")]
     pub sender_wallet: String,
+    #[serde(rename = "recipientWallet")]
     pub recipient_wallet: String,
+    #[serde(rename = "feePayer")]
     pub fee_payer: String,
+    #[serde(rename = "mintAddress")]
     pub mint_address: String,
     pub amount: u64,
+    #[serde(rename = "nonceAccount")]
     pub nonce_account: String,
 }
 
@@ -71,10 +80,73 @@ pub struct CastUnsignedVoteRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrepareOfflineBundleRequest {
+    #[serde(default = "default_version")]
     pub version: u32,
-    pub count: u32,
-    pub sender_keypair: String, // base64 encoded bytes
+    pub count: usize,
+    #[serde(rename = "senderKeypairBase64")]
+    pub sender_keypair_base64: String, // base64 encoded bytes
+    #[serde(rename = "bundleFile")]
     pub bundle_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateOfflineTransactionRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "senderKeypairBase64")]
+    pub sender_keypair_base64: String,
+    #[serde(rename = "nonceAuthorityKeypairBase64")]
+    pub nonce_authority_keypair_base64: String,
+    pub recipient: String,
+    pub amount: u64,
+    // NOTE: Nonce is picked automatically from stored bundle
+    // No need to send cached_nonce - we manage it internally
+}
+
+// MWA-compatible: Create UNSIGNED transaction (no keypairs, only pubkeys)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateUnsignedOfflineTransactionRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "senderPubkey")]
+    pub sender_pubkey: String,
+    #[serde(rename = "nonceAuthorityPubkey")]
+    pub nonce_authority_pubkey: String,
+    pub recipient: String,
+    pub amount: u64,
+    // NOTE: Nonce is picked automatically from stored bundle
+}
+
+// Get message to sign for MWA
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetMessageToSignRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "unsignedTransactionBase64")]
+    pub unsigned_transaction_base64: String,
+}
+
+// Get required signers for a transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetRequiredSignersRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "unsignedTransactionBase64")]
+    pub unsigned_transaction_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitOfflineTransactionRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "transactionBase64")]
+    pub transaction_base64: String,
+    #[serde(rename = "verifyNonce", default = "default_verify_nonce")]
+    pub verify_nonce: bool,
+}
+
+fn default_verify_nonce() -> bool {
+    true
 }
 
 // ============================================================================
@@ -83,21 +155,63 @@ pub struct PrepareOfflineBundleRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedNonceData {
+    #[serde(default = "default_version")]
     pub version: u32,
+    #[serde(rename = "nonceAccount")]
     pub nonce_account: String,
     pub authority: String,
     pub blockhash: String,
+    #[serde(rename = "lamportsPerSignature")]
     pub lamports_per_signature: u64,
+    #[serde(rename = "cachedAt")]
     pub cached_at: u64,
     pub used: bool,
 }
 
+impl CachedNonceData {
+    /// Convert from FFI type to transaction module's type
+    pub fn to_transaction_type(&self) -> crate::transaction::CachedNonceData {
+        crate::transaction::CachedNonceData {
+            nonce_account: self.nonce_account.clone(),
+            authority: self.authority.clone(),
+            blockhash: self.blockhash.clone(),
+            lamports_per_signature: self.lamports_per_signature,
+            cached_at: self.cached_at,
+            used: self.used,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OfflineTransactionBundle {
+    #[serde(default = "default_version")]
     pub version: u32,
+    #[serde(rename = "nonceCaches")]
     pub nonce_caches: Vec<CachedNonceData>,
+    #[serde(rename = "maxTransactions")]
     pub max_transactions: u32,
+    #[serde(rename = "createdAt")]
     pub created_at: u64,
+}
+
+impl OfflineTransactionBundle {
+    /// Convert from transaction module's bundle type to FFI bundle type
+    pub fn from_transaction_bundle(bundle: &crate::transaction::OfflineTransactionBundle) -> Self {
+        Self {
+            version: 1,
+            nonce_caches: bundle.nonce_caches.iter().map(|nc| CachedNonceData {
+                version: 1,
+                nonce_account: nc.nonce_account.clone(),
+                authority: nc.authority.clone(),
+                blockhash: nc.blockhash.clone(),
+                lamports_per_signature: nc.lamports_per_signature,
+                cached_at: nc.cached_at,
+                used: nc.used,
+            }).collect(),
+            max_transactions: bundle.max_transactions as u32,
+            created_at: bundle.created_at,
+        }
+    }
 }
 
 // ============================================================================
@@ -138,10 +252,15 @@ pub struct ProtocolEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsSnapshot {
+    #[serde(rename = "fragmentsBuffered")]
     pub fragments_buffered: u32,
+    #[serde(rename = "transactionsComplete")]
     pub transactions_complete: u32,
+    #[serde(rename = "reassemblyFailures")]
     pub reassembly_failures: u32,
+    #[serde(rename = "lastError")]
     pub last_error: String,
+    #[serde(rename = "updatedAt")]
     pub updated_at: u64,
 }
 
@@ -151,9 +270,23 @@ pub struct MetricsSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SdkConfig {
+    #[serde(default = "default_version")]
     pub version: u32,
+    #[serde(rename = "rpcUrl", default)]
     pub rpc_url: Option<String>,
+    #[serde(rename = "enableLogging", default = "default_enable_logging")]
     pub enable_logging: bool,
+    #[serde(rename = "logLevel", default)]
     pub log_level: Option<String>,
+    #[serde(rename = "storageDirectory", default)]
+    pub storage_directory: Option<String>,
+}
+
+fn default_version() -> u32 {
+    1
+}
+
+fn default_enable_logging() -> bool {
+    true
 }
 

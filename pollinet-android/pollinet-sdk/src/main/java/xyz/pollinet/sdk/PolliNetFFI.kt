@@ -127,5 +127,61 @@ object PolliNetFFI {
      * @return JSON FfiResult with FragmentList
      */
     external fun fragment(handle: Long, txBytes: ByteArray): String
+
+    // =========================================================================
+    // Offline Bundle Management (Core PolliNet Features)
+    // =========================================================================
+
+    /**
+     * Prepare offline bundle for creating transactions without internet
+     * This is a CORE PolliNet feature for offline/mesh transaction creation
+     * @param requestJson JSON-encoded PrepareOfflineBundleRequest
+     * @return JSON FfiResult with OfflineTransactionBundle JSON string
+     */
+    external fun prepareOfflineBundle(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Create transaction completely offline using cached nonce data
+     * NO internet required - core PolliNet offline feature
+     * @param requestJson JSON-encoded CreateOfflineTransactionRequest
+     * @return JSON FfiResult with base64-encoded compressed transaction
+     */
+    external fun createOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Submit offline-created transaction to blockchain
+     * @param requestJson JSON-encoded SubmitOfflineTransactionRequest
+     * @return JSON FfiResult with transaction signature
+     */
+    external fun submitOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    // =========================================================================
+    // MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
+    // =========================================================================
+
+    /**
+     * Create UNSIGNED offline transaction for MWA/Seed Vault signing
+     * Takes PUBLIC KEYS only (no private keys) - compatible with Solana Mobile Stack
+     * Returns unsigned transaction that MWA will sign securely
+     * @param requestJson JSON-encoded CreateUnsignedOfflineTransactionRequest
+     * @return JSON FfiResult with base64-encoded unsigned transaction
+     */
+    external fun createUnsignedOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Get transaction message bytes that need to be signed by MWA
+     * Extracts the raw message from unsigned transaction for secure signing
+     * @param requestJson JSON-encoded GetMessageToSignRequest
+     * @return JSON FfiResult with base64-encoded message bytes
+     */
+    external fun getTransactionMessageToSign(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Get list of public keys that need to sign this transaction
+     * Returns signers in the order required by Solana protocol
+     * @param requestJson JSON-encoded GetRequiredSignersRequest
+     * @return JSON FfiResult with array of public key strings
+     */
+    external fun getRequiredSigners(handle: Long, requestJson: ByteArray): String
 }
 

@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import xyz.pollinet.android.ui.DiagnosticsScreen
@@ -32,6 +34,10 @@ import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.SdkConfig
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        private const val TAG = "PolliNet.MainActivity"
+    }
+    
     private var bleService: BleService? = null
     private var isBound = false
     private var sdk: PolliNetSDK? = null
@@ -63,6 +69,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        Log.d(TAG, "onCreate: Starting PolliNet Android")
+        
         enableEdgeToEdge()
         setContent {
             PollinetandroidTheme {
@@ -72,6 +80,7 @@ class MainActivity : ComponentActivity() {
         
         // Request BLE permissions
         requestBlePermissions()
+        Log.d(TAG, "onCreate: Completed")
     }
     
     private fun requestBlePermissions() {
@@ -103,15 +112,21 @@ class MainActivity : ComponentActivity() {
     }
     
     private fun startBleService() {
+        Log.d(TAG, "startBleService: Starting BLE service")
         val intent = Intent(this, BleService::class.java).apply {
             action = BleService.ACTION_START
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            Log.d(TAG, "startBleService: Service started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "startBleService: Failed to start service", e)
         }
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
     
     override fun onDestroy() {
@@ -130,13 +145,15 @@ fun PolliNetApp() {
     var sdk by remember { mutableStateOf<PolliNetSDK?>(null) }
     
     // Initialize SDK
+    val context = LocalContext.current
     LaunchedEffect(Unit) {
         scope.launch {
             PolliNetSDK.initialize(
                 SdkConfig(
                     rpcUrl = "https://api.devnet.solana.com", // Use devnet for testing
                     enableLogging = true,
-                    logLevel = "info"
+                    logLevel = "info",
+                    storageDirectory = context.filesDir.absolutePath
                 )
             ).onSuccess {
                 sdk = it

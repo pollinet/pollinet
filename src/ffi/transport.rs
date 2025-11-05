@@ -5,6 +5,7 @@
 //! protocol state.
 
 use crate::transaction::{Fragment as TxFragment, FragmentType, TransactionService};
+use crate::storage::SecureStorage;
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -30,6 +31,9 @@ pub struct HostBleTransport {
     
     /// Transaction service for fragmentation and building
     transaction_service: Arc<TransactionService>,
+    
+    /// Secure storage for nonce bundles (optional)
+    secure_storage: Option<Arc<SecureStorage>>,
 }
 
 impl HostBleTransport {
@@ -61,10 +65,11 @@ impl HostBleTransport {
             completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
             transaction_service: Arc::new(transaction_service),
+            secure_storage: None,
         })
     }
     
-    /// Create with an RPC client
+    /// Create with an RPC client and optional secure storage
     pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, String> {
         let transaction_service = TransactionService::new_with_rpc(rpc_url)
             .await
@@ -76,7 +81,22 @@ impl HostBleTransport {
             completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
             transaction_service: Arc::new(transaction_service),
+            secure_storage: None,
         })
+    }
+    
+    /// Set secure storage directory for nonce bundle persistence
+    pub fn set_secure_storage(&mut self, storage_dir: &str) -> Result<(), String> {
+        let storage = SecureStorage::new(storage_dir)
+            .map_err(|e| format!("Failed to create secure storage: {}", e))?;
+        self.secure_storage = Some(Arc::new(storage));
+        tracing::info!("🔒 Secure storage enabled for nonce bundles");
+        Ok(())
+    }
+    
+    /// Get secure storage if available
+    pub fn secure_storage(&self) -> Option<&Arc<SecureStorage>> {
+        self.secure_storage.as_ref()
     }
 
     /// Push inbound data from GATT characteristic

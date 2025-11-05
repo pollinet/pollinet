@@ -957,8 +957,21 @@ impl TransactionService {
             )
         })?;
 
-        // Fetch the account
-        let account = client.get_account(nonce_pubkey).map_err(|e| {
+        // Clone what we need for the blocking call
+        let nonce_pubkey = *nonce_pubkey;
+        let client_url = client.url();
+        
+        // Fetch the account in a blocking task to avoid blocking the async runtime
+        let account = tokio::task::spawn_blocking(move || {
+            let blocking_client = solana_client::rpc_client::RpcClient::new_with_commitment(
+                client_url,
+                CommitmentConfig::confirmed(),
+            );
+            blocking_client.get_account(&nonce_pubkey)
+        })
+        .await
+        .map_err(|e| TransactionError::RpcClient(format!("Task join error: {}", e)))?
+        .map_err(|e| {
             TransactionError::RpcClient(format!("Failed to fetch nonce account: {}", e))
         })?;
 
@@ -1265,6 +1278,153 @@ impl TransactionService {
         tracing::info!("   Ready for BLE transmission and later submission");
 
         Ok(compressed)
+    }
+
+    /// Create UNSIGNED offline transaction for MWA signing
+    /// Takes PUBLIC KEYS only (no private keys exposed)
+    /// Returns base64-encoded unsigned transaction that MWA can sign
+    /// 
+    /// This is the MWA-compatible version - NO signing happens in Rust
+    pub fn create_unsigned_offline_transaction(
+        &self,
+        sender_pubkey: &str,
+        recipient: &str,
+        amount: u64,
+        nonce_authority_pubkey: &str,
+        cached_nonce: &CachedNonceData,
+    ) -> Result<String, TransactionError> {
+        // Parse public keys
+        let sender_pubkey = Pubkey::from_str(sender_pubkey).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid sender pubkey: {}", e))
+        })?;
+        let recipient_pubkey = Pubkey::from_str(recipient).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid recipient: {}", e))
+        })?;
+        let nonce_account_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid nonce account: {}", e))
+        })?;
+        let nonce_authority_pubkey = Pubkey::from_str(nonce_authority_pubkey).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid nonce authority: {}", e))
+        })?;
+        let nonce_blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid blockhash: {}", e))
+        })?;
+
+        // Verify nonce authority matches
+        if nonce_authority_pubkey.to_string() != cached_nonce.authority {
+            return Err(TransactionError::InvalidPublicKey(format!(
+                "Nonce authority mismatch. Expected: {}, Got: {}",
+                cached_nonce.authority,
+                nonce_authority_pubkey
+            )));
+        }
+
+        // Calculate age of cached data
+        let age_seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() - cached_nonce.cached_at;
+        let age_hours = age_seconds / 3600;
+
+        if age_hours > 24 {
+            tracing::warn!("⚠️  Cached nonce data is {} hours old", age_hours);
+            tracing::warn!("   Nonce may have been advanced by another party");
+        }
+
+        tracing::info!("🔓 Creating UNSIGNED transaction for MWA signing");
+        tracing::info!("   Sender: {}", sender_pubkey);
+        tracing::info!("   Recipient: {}", recipient_pubkey);
+        tracing::info!("   Amount: {} lamports", amount);
+        tracing::info!("   Nonce account: {}", cached_nonce.nonce_account);
+        tracing::info!("   NO private keys involved - MWA will sign");
+
+        // Create instructions (NO signing)
+        let advance_nonce_ix = system_instruction::advance_nonce_account(
+            &nonce_account_pubkey,
+            &nonce_authority_pubkey,
+        );
+        tracing::info!("✅ Instruction 1: Advance nonce account");
+
+        let transfer_ix = system_instruction::transfer(&sender_pubkey, &recipient_pubkey, amount);
+        tracing::info!("✅ Instruction 2: Transfer {} lamports", amount);
+
+        // Create UNSIGNED transaction
+        let mut transaction = Transaction::new_with_payer(
+            &[advance_nonce_ix, transfer_ix],
+            Some(&sender_pubkey),
+        );
+
+        // Use cached blockhash
+        transaction.message.recent_blockhash = nonce_blockhash;
+
+        // DO NOT SIGN - leave signatures empty for MWA
+        tracing::info!("✅ Unsigned transaction created");
+        tracing::info!("   Signers needed: nonce authority, sender");
+        tracing::info!("   Ready for MWA signing");
+
+        // Serialize unsigned transaction
+        let serialized = bincode1::serialize(&transaction)
+            .map_err(|e| TransactionError::Serialization(e.to_string()))?;
+
+        // Encode to base64 for transport
+        let base64_tx = base64::encode(&serialized);
+
+        tracing::info!("✅ Unsigned transaction: {} bytes (base64: {} chars)", 
+            serialized.len(), base64_tx.len());
+
+        Ok(base64_tx)
+    }
+
+    /// Extract the message that needs to be signed for MWA
+    /// Returns the raw message bytes that MWA/Seed Vault will sign
+    pub fn get_transaction_message_to_sign(
+        &self,
+        base64_tx: &str,
+    ) -> Result<Vec<u8>, TransactionError> {
+        // Decode from base64
+        let tx_bytes = base64::decode(base64_tx).map_err(|e| {
+            TransactionError::Serialization(format!("Failed to decode base64: {}", e))
+        })?;
+
+        // Deserialize transaction
+        let tx: Transaction = bincode1::deserialize(&tx_bytes).map_err(|e| {
+            TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e))
+        })?;
+
+        // The message to sign is the serialized message
+        let message_bytes = tx.message_data();
+
+        tracing::info!("📝 Extracted message to sign: {} bytes", message_bytes.len());
+
+        Ok(message_bytes)
+    }
+
+    /// Get list of public keys that need to sign this transaction
+    /// Returns array of public keys in the order they need to sign
+    pub fn get_required_signers(
+        &self,
+        base64_tx: &str,
+    ) -> Result<Vec<String>, TransactionError> {
+        // Decode from base64
+        let tx_bytes = base64::decode(base64_tx).map_err(|e| {
+            TransactionError::Serialization(format!("Failed to decode base64: {}", e))
+        })?;
+
+        // Deserialize transaction
+        let tx: Transaction = bincode1::deserialize(&tx_bytes).map_err(|e| {
+            TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e))
+        })?;
+
+        // Get signers from message header
+        let num_required_signatures = tx.message.header.num_required_signatures as usize;
+        let signers: Vec<String> = tx.message.account_keys[..num_required_signatures]
+            .iter()
+            .map(|key| key.to_string())
+            .collect();
+
+        tracing::info!("👥 Required signers: {:?}", signers);
+
+        Ok(signers)
     }
 
     /// Submit offline-created transaction to blockchain
@@ -1943,3 +2103,7 @@ pub use solana_sdk::hash::Hash;
 
 pub mod pollinet_message;
 pub use pollinet_message::{HopRecord, PolliNetMessage};
+
+// MWA integration tests
+#[cfg(test)]
+mod mwa_tests;

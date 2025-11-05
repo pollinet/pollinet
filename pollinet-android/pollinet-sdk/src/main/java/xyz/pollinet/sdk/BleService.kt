@@ -55,8 +55,9 @@ class BleService : Service() {
     private var gattCharacteristicTx: BluetoothGattCharacteristic? = null
     private var gattCharacteristicRx: BluetoothGattCharacteristic? = null
     
-    // SDK instance
-    private var sdk: PolliNetSDK? = null
+    // SDK instance (exposed for testing)
+    var sdk: PolliNetSDK? = null
+        private set
     
     // State
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -199,6 +200,13 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     fun stopAdvertising() {
         bleAdvertiser?.stopAdvertising(advertiseCallback)
+    }
+
+    /**
+     * Push inbound data to the transport layer (for testing)
+     */
+    suspend fun pushInboundData(data: ByteArray) {
+        sdk?.pushInbound(data)
     }
 
     /**
