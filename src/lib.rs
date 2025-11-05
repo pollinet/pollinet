@@ -8,6 +8,9 @@ pub mod nonce;
 pub mod transaction;
 pub mod util;
 
+#[cfg(feature = "android")]
+pub mod ffi;
+
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;

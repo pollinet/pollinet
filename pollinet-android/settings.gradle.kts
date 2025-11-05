@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "pollinet-android"
 include(":app")
+include(":pollinet-sdk")
