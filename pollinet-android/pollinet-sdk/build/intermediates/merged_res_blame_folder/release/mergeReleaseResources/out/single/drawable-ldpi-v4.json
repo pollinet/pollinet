@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-ldpi-v4/ic_call_answer_low.png",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/drawable-ldpi-v4/ic_call_answer_low.png"
+    },
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-ldpi-v4/ic_call_answer_video_low.png",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/drawable-ldpi-v4/ic_call_answer_video_low.png"
+    },
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-ldpi-v4/ic_call_answer_video.png",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/drawable-ldpi-v4/ic_call_answer_video.png"
+    },
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-ldpi-v4/ic_call_answer.png",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/drawable-ldpi-v4/ic_call_answer.png"
+    },
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-ldpi-v4/ic_call_decline.png",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/drawable-ldpi-v4/ic_call_decline.png"
+    },
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-ldpi-v4/ic_call_decline_low.png",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/drawable-ldpi-v4/ic_call_decline_low.png"
+    }
+]

@@ -82,12 +82,26 @@ class BleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.d("BleService", "onCreate: Starting BLE service initialization")
+        
         createNotificationChannel()
         
         // Only start foreground if we have required permissions
         if (hasRequiredPermissions()) {
+            android.util.Log.d("BleService", "onCreate: Permissions granted, starting foreground")
             startForeground()
-            initializeBluetooth()
+            
+            // Initialize Bluetooth asynchronously to avoid blocking onCreate
+            serviceScope.launch {
+                try {
+                    android.util.Log.d("BleService", "onCreate: Initializing Bluetooth")
+                    initializeBluetooth()
+                    android.util.Log.d("BleService", "onCreate: Bluetooth initialized successfully")
+                } catch (e: Exception) {
+                    android.util.Log.e("BleService", "onCreate: Failed to initialize Bluetooth", e)
+                    _connectionState.value = ConnectionState.ERROR
+                }
+            }
             
             // Start metrics collection
             serviceScope.launch {
@@ -97,9 +111,12 @@ class BleService : Service() {
                 }
             }
         } else {
+            android.util.Log.w("BleService", "onCreate: Missing required permissions, stopping service")
             // Stop the service if permissions aren't granted
             stopSelf()
         }
+        
+        android.util.Log.d("BleService", "onCreate: Completed")
     }
     
     private fun hasRequiredPermissions(): Boolean {
@@ -246,47 +263,80 @@ class BleService : Service() {
     // =========================================================================
 
     private fun initializeBluetooth() {
-        bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        android.util.Log.d("BleService", "initializeBluetooth: Getting Bluetooth manager")
+        bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        
+        if (bluetoothManager == null) {
+            android.util.Log.e("BleService", "initializeBluetooth: Failed to get BluetoothManager")
+            throw IllegalStateException("BluetoothManager not available")
+        }
+        
         bluetoothAdapter = bluetoothManager?.adapter
+        if (bluetoothAdapter == null) {
+            android.util.Log.e("BleService", "initializeBluetooth: BluetoothAdapter is null")
+            throw IllegalStateException("BluetoothAdapter not available")
+        }
+        
+        if (!bluetoothAdapter!!.isEnabled) {
+            android.util.Log.w("BleService", "initializeBluetooth: Bluetooth is not enabled")
+        }
+        
         bleScanner = bluetoothAdapter?.bluetoothLeScanner
         bleAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
         
+        android.util.Log.d("BleService", "initializeBluetooth: Setting up GATT server")
         setupGattServer()
+        android.util.Log.d("BleService", "initializeBluetooth: GATT server setup complete")
     }
 
     @SuppressLint("MissingPermission")
     private fun setupGattServer() {
-        val service = BluetoothGattService(
-            SERVICE_UUID,
-            BluetoothGattService.SERVICE_TYPE_PRIMARY
-        )
-
-        // TX characteristic (server -> client)
-        gattCharacteristicTx = BluetoothGattCharacteristic(
-            TX_CHAR_UUID,
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        ).apply {
-            addDescriptor(
-                BluetoothGattDescriptor(
-                    JavaUUID.fromString("00002902-0000-1000-8000-00805f9b34fb"),
-                    BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
-                )
+        try {
+            android.util.Log.d("BleService", "setupGattServer: Creating GATT service")
+            val service = BluetoothGattService(
+                SERVICE_UUID,
+                BluetoothGattService.SERVICE_TYPE_PRIMARY
             )
+
+            // TX characteristic (server -> client)
+            gattCharacteristicTx = BluetoothGattCharacteristic(
+                TX_CHAR_UUID,
+                BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                BluetoothGattCharacteristic.PERMISSION_READ
+            ).apply {
+                addDescriptor(
+                    BluetoothGattDescriptor(
+                        JavaUUID.fromString("00002902-0000-1000-8000-00805f9b34fb"),
+                        BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
+                    )
+                )
+            }
+
+            // RX characteristic (client -> server)
+            gattCharacteristicRx = BluetoothGattCharacteristic(
+                RX_CHAR_UUID,
+                BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE
+            )
+
+            service.addCharacteristic(gattCharacteristicTx)
+            service.addCharacteristic(gattCharacteristicRx)
+
+            android.util.Log.d("BleService", "setupGattServer: Opening GATT server")
+            gattServer = bluetoothManager?.openGattServer(this, gattServerCallback)
+            
+            if (gattServer == null) {
+                android.util.Log.e("BleService", "setupGattServer: Failed to open GATT server")
+                throw IllegalStateException("Failed to open GATT server")
+            }
+            
+            android.util.Log.d("BleService", "setupGattServer: Adding service to GATT server")
+            val result = gattServer?.addService(service)
+            android.util.Log.d("BleService", "setupGattServer: Service added, result=$result")
+        } catch (e: Exception) {
+            android.util.Log.e("BleService", "setupGattServer: Exception occurred", e)
+            throw e
         }
-
-        // RX characteristic (client -> server)
-        gattCharacteristicRx = BluetoothGattCharacteristic(
-            RX_CHAR_UUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE
-        )
-
-        service.addCharacteristic(gattCharacteristicTx)
-        service.addCharacteristic(gattCharacteristicRx)
-
-        gattServer = bluetoothManager?.openGattServer(this, gattServerCallback)
-        gattServer?.addService(service)
     }
 
     // =========================================================================

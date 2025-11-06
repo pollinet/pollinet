@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
+import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import xyz.pollinet.android.ui.DiagnosticsScreen
 import xyz.pollinet.android.ui.SigningScreen
 import xyz.pollinet.android.ui.TransactionBuilderScreen
@@ -42,6 +43,9 @@ class MainActivity : ComponentActivity() {
     private var isBound = false
     private var sdk: PolliNetSDK? = null
     private var permissionsGranted = false
+    
+    // MWA ActivityResultSender - MUST be initialized as a field (not lazy) before onCreate
+    private val mwaActivityResultSender = ActivityResultSender(this)
     
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -74,7 +78,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             PollinetandroidTheme {
-                PolliNetApp()
+                PolliNetApp(mwaActivityResultSender = mwaActivityResultSender)
             }
         }
         
@@ -139,7 +143,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun PolliNetApp() {
+fun PolliNetApp(mwaActivityResultSender: ActivityResultSender) {
     var selectedTab by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
     var sdk by remember { mutableStateOf<PolliNetSDK?>(null) }
@@ -150,7 +154,7 @@ fun PolliNetApp() {
         scope.launch {
             PolliNetSDK.initialize(
                 SdkConfig(
-                    rpcUrl = "https://api.devnet.solana.com", // Use devnet for testing
+                    rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6", // Use devnet for testing
                     enableLogging = true,
                     logLevel = "info",
                     storageDirectory = context.filesDir.absolutePath
@@ -188,7 +192,10 @@ fun PolliNetApp() {
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             when (selectedTab) {
-                0 -> DiagnosticsScreen()
+                0 -> DiagnosticsScreen(
+                    mwaActivityResultSender = mwaActivityResultSender,
+                    mainSdk = sdk
+                )
                 1 -> TransactionBuilderScreen(sdk = sdk)
                 2 -> SigningScreen(sdk = sdk)
             }

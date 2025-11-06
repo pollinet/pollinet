@@ -282,11 +282,42 @@ pub struct SdkConfig {
     pub storage_directory: Option<String>,
 }
 
-fn default_version() -> u32 {
+pub(crate) fn default_version() -> u32 {
     1
 }
 
 fn default_enable_logging() -> bool {
     true
+}
+
+// ============================================================================
+// Nonce creation for MWA
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateUnsignedNonceTransactionsRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    pub count: usize,
+    #[serde(rename = "payerPubkey")]
+    pub payer_pubkey: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnsignedNonceTransaction {
+    #[serde(rename = "unsignedTransactionBase64")]
+    pub unsigned_transaction_base64: String,
+    #[serde(rename = "nonceKeypairBase64")]
+    pub nonce_keypair_base64: String,
+    #[serde(rename = "noncePubkey")]
+    pub nonce_pubkey: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheNonceAccountsRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "nonceAccounts")]
+    pub nonce_accounts: Vec<String>,
 }
 

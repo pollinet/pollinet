@@ -91,7 +91,7 @@ Simply pass the storage directory when initializing the SDK:
 
 ```kotlin
 val config = SdkConfig(
-    rpcUrl = "https://api.devnet.solana.com",
+    rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
     enableLogging = true,
     storageDirectory = context.filesDir.absolutePath  // ← Android's private storage
 )

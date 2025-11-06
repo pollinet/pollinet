@@ -394,6 +394,88 @@ class PolliNetSDK private constructor(
         }
     }
 
+    /**
+     * Create unsigned nonce account creation transactions for MWA signing
+     * 
+     * This generates N unsigned transactions that create nonce accounts on-chain.
+     * Each transaction must be co-signed by:
+     * 1. The ephemeral nonce keypair (returned here, sign locally)
+     * 2. The payer (sign with MWA)
+     * 
+     * @param count Number of nonce accounts to create
+     * @param payerPubkey Public key of the account paying for nonce accounts (base58)
+     * @return Result containing list of unsigned transactions with nonce keypairs
+     */
+    suspend fun createUnsignedNonceTransactions(
+        count: Int,
+        payerPubkey: String
+    ): Result<List<UnsignedNonceTransaction>> = withContext(Dispatchers.IO) {
+        try {
+            val request = CreateUnsignedNonceTransactionsRequest(
+                count = count,
+                payerPubkey = payerPubkey
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.createUnsignedNonceTransactions(handle, requestJson)
+            parseResult<List<UnsignedNonceTransaction>>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Cache nonce account data from on-chain accounts
+     * 
+     * This fetches nonce data from the blockchain and saves it to secure storage
+     * for offline transaction creation. Call this after successfully creating
+     * nonce accounts via MWA.
+     * 
+     * @param nonceAccounts List of nonce account public keys (base58)
+     * @return Result containing the number of accounts cached
+     */
+    suspend fun cacheNonceAccounts(
+        nonceAccounts: List<String>
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val request = CacheNonceAccountsRequest(
+                nonceAccounts = nonceAccounts
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.cacheNonceAccounts(handle, requestJson)
+            val response = parseResult<CacheNonceAccountsResponse>(resultJson)
+            response.map { it.cachedCount }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Add nonce signature to a payer-signed transaction
+     * 
+     * After MWA signs the transaction with the payer key (first signature),
+     * this function adds the nonce keypair signature (second signature).
+     * 
+     * @param payerSignedTransactionBase64 Transaction with payer signature from MWA
+     * @param nonceKeypairBase64 Nonce keypair to sign with
+     * @return Fully-signed transaction ready for submission
+     */
+    suspend fun addNonceSignature(
+        payerSignedTransactionBase64: String,
+        nonceKeypairBase64: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = AddNonceSignatureRequest(
+                payerSignedTransactionBase64 = payerSignedTransactionBase64,
+                nonceKeypairBase64 = nonceKeypairBase64
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.addNonceSignature(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // =========================================================================
     // Private helpers
     // =========================================================================
@@ -574,5 +656,41 @@ data class GetMessageToSignRequest(
 data class GetRequiredSignersRequest(
     val version: Int = 1,
     val unsignedTransactionBase64: String
+)
+
+// ============================================================================
+// Nonce Account Creation for MWA
+// ============================================================================
+
+@Serializable
+data class CreateUnsignedNonceTransactionsRequest(
+    val version: Int = 1,
+    val count: Int,
+    val payerPubkey: String
+)
+
+@Serializable
+data class UnsignedNonceTransaction(
+    val unsignedTransactionBase64: String,
+    val nonceKeypairBase64: String,
+    val noncePubkey: String
+)
+
+@Serializable
+data class CacheNonceAccountsRequest(
+    val version: Int = 1,
+    val nonceAccounts: List<String>
+)
+
+@Serializable
+data class CacheNonceAccountsResponse(
+    val cachedCount: Int
+)
+
+@Serializable
+data class AddNonceSignatureRequest(
+    val version: Int = 1,
+    val payerSignedTransactionBase64: String,
+    val nonceKeypairBase64: String
 )
 

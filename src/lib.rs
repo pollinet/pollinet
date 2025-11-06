@@ -198,7 +198,7 @@ impl PolliNetSDK {
     /// # use pollinet::PolliNetSDK;
     /// # use solana_sdk::signature::Keypair;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let sdk = PolliNetSDK::new_with_rpc("https://api.devnet.solana.com").await?;
+    /// let sdk = PolliNetSDK::new_with_rpc("https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6").await?;
     /// let sender_keypair = Keypair::new();
     /// 
     /// // First time: Creates 10 new nonce accounts (~$2.00)

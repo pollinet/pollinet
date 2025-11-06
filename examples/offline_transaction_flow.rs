@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("║  PHASE 1: ONLINE - Prepare for Offline Use           ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
-    let rpc_url = "https://api.devnet.solana.com";
+    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());

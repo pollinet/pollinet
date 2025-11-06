@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout-watch-v20/abc_alert_dialog_button_bar_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout-watch-v20/abc_alert_dialog_button_bar_material.xml"
+    },
+    {
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout-watch-v20/abc_alert_dialog_title_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout-watch-v20/abc_alert_dialog_title_material.xml"
+    }
+]

@@ -112,7 +112,7 @@ class PolliNetMwaClient private constructor(
             is TransactionResult.NoWalletFound -> {
                 throw MwaException(
                     "No MWA-compatible wallet found on device. " +
-                    "Please install Solflare, Phantom, or fakewallet for testing."
+                    "Please install Solflare, Phantom, or backpack for testing."
                 )
             }
             is TransactionResult.Failure -> {
@@ -241,6 +241,79 @@ class PolliNetMwaClient private constructor(
         }
     }
     
+    /**
+     * Sign an unsigned transaction with wallet
+     * 
+     * Use this for transactions where the wallet needs to add the payer signature.
+     * Returns the transaction with the payer signature added (may still need additional signatures).
+     * 
+     * @param sender ActivityResultSender for launching the wallet
+     * @param unsignedTxBase64 Base64-encoded unsigned transaction
+     * @return Transaction bytes with payer signature added
+     */
+    suspend fun signTransaction(
+        sender: ActivityResultSender,
+        unsignedTxBase64: String
+    ): ByteArray {
+        if (!isAuthorized()) {
+            throw MwaException("Not authorized. Call authorize() first.")
+        }
+        
+        android.util.Log.d("PolliNetMwaClient", "Signing unsigned transaction with wallet")
+        
+        val txBytes = android.util.Base64.decode(
+            unsignedTxBase64,
+            android.util.Base64.NO_WRAP
+        )
+        
+        // Use signTransactions to add payer signature
+        val result = walletAdapter.transact(sender) {
+            android.util.Log.d("PolliNetMwaClient", "Requesting payer signature from wallet...")
+            signTransactions(arrayOf(txBytes))
+        }
+        
+        when (result) {
+            is TransactionResult.Success -> {
+                val payload = result.payload
+                android.util.Log.d("PolliNetMwaClient", "✅ Wallet signed successfully")
+                android.util.Log.d("PolliNetMwaClient", "Payload type: ${payload?.javaClass?.name}")
+                
+                if (payload == null) {
+                    throw MwaException("Wallet returned null payload")
+                }
+                
+                // MWA returns SignPayloadsResult which wraps the actual signed transactions
+                // Access the signedPayloads field to get Array<ByteArray>
+                val signedPayloads = try {
+                    // Use reflection to access signedPayloads field from SignPayloadsResult
+                    val field = payload.javaClass.getDeclaredField("signedPayloads")
+                    field.isAccessible = true
+                    field.get(payload) as? Array<ByteArray>
+                } catch (e: Exception) {
+                    android.util.Log.e("PolliNetMwaClient", "Failed to extract signedPayloads: ${e.message}")
+                    null
+                }
+                
+                if (signedPayloads != null && signedPayloads.isNotEmpty()) {
+                    val signedTxBytes = signedPayloads[0]
+                    android.util.Log.d("PolliNetMwaClient", "✅ Got signed transaction (${signedTxBytes.size} bytes)")
+                    return signedTxBytes
+                }
+                
+                throw MwaException("Failed to extract signed transaction from payload")
+            }
+            is TransactionResult.NoWalletFound -> {
+                throw MwaException("No MWA-compatible wallet found on device")
+            }
+            is TransactionResult.Failure -> {
+                throw MwaException(
+                    "Signing failed: ${result.e.message}",
+                    result.e
+                )
+            }
+        }
+    }
+
     /**
      * Get auth token for persistent storage
      * 

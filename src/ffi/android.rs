@@ -24,6 +24,7 @@ use crate::PolliNetSDK;
 
 #[cfg(feature = "android")]
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signer::Signer;
 
 #[cfg(feature = "android")]
 use log::{info, error, warn, debug};
@@ -1046,6 +1047,237 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getRequiredSigners(
         tracing::info!("✅ Found {} required signers", signers.len());
 
         let response: FfiResult<Vec<String>> = FfiResult::success(signers);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Create unsigned nonce account creation transactions for MWA signing
+/// 
+/// This creates N nonce account creation transactions that can be signed by MWA.
+/// Each transaction includes:
+/// 1. Instructions to create a nonce account
+/// 2. The ephemeral nonce keypair (to be signed locally before MWA)
+/// 
+/// Request JSON: {"count": 5, "payerPubkey": "base58_pubkey"}
+/// Response JSON: [{"unsignedTransactionBase64": "...", "nonceKeypairBase64": "...", "noncePubkey": "..."}]
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedNonceTransactions(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("🎯 FFI createUnsignedNonceTransactions called with handle={}", handle);
+
+        // Convert request
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        // Get transport
+        let transport = get_transport(handle)?;
+
+        // Parse request
+        let request: CreateUnsignedNonceTransactionsRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("Creating {} unsigned nonce transactions for payer: {}", 
+            request.count, request.payer_pubkey);
+
+        // Call the transaction service
+        let transactions = runtime::block_on(async {
+            transport
+                .transaction_service()
+                .create_unsigned_nonce_transactions(request.count, &request.payer_pubkey)
+                .await
+                .map_err(|e| format!("Failed to create nonce transactions: {}", e))
+        })?;
+
+        tracing::info!("✅ Created {} unsigned nonce transactions", transactions.len());
+
+        let response: FfiResult<Vec<UnsignedNonceTransaction>> = FfiResult::success(transactions);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Cache nonce data from existing on-chain nonce accounts
+/// 
+/// This fetches nonce data from the blockchain and adds it to secure storage.
+/// Useful after creating nonce accounts via MWA - call this to cache the newly created nonces.
+/// 
+/// Request JSON: {"nonceAccounts": ["pubkey1", "pubkey2", ...]}
+/// Response JSON: {"cachedCount": 5}
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cacheNonceAccounts(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("🗄️  FFI cacheNonceAccounts called with handle={}", handle);
+
+        // Convert request
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        // Get transport
+        let transport = get_transport(handle)?;
+
+        // Parse request
+        let request: CacheNonceAccountsRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("Caching {} nonce accounts", request.nonce_accounts.len());
+
+        // Fetch and save nonce data to secure storage
+        let cached_count = runtime::block_on(async {
+            if let Some(secure_storage) = transport.secure_storage() {
+                use crate::transaction::OfflineTransactionBundle;
+                
+                // Load existing bundle or create new one
+                let mut bundle = match secure_storage.load_bundle() {
+                    Ok(Some(existing)) => existing,
+                    Ok(None) | Err(_) => {
+                        // Create new bundle if none exists
+                        tracing::info!("Creating new bundle");
+                        OfflineTransactionBundle::new()
+                    }
+                };
+
+                let mut count = 0;
+                // Fetch and add the new nonce data
+                for nonce_account in &request.nonce_accounts {
+                    match transport
+                        .transaction_service()
+                        .prepare_offline_nonce_data(nonce_account)
+                        .await
+                    {
+                        Ok(cached_nonce) => {
+                            bundle.add_nonce(cached_nonce);
+                            count += 1;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to fetch nonce data for {}: {}", nonce_account, e);
+                        }
+                    }
+                }
+
+                // Save the updated bundle
+                secure_storage.save_bundle(&bundle)
+                    .map_err(|e| format!("Failed to save bundle: {}", e))?;
+
+                tracing::info!("✅ Saved bundle with {} new nonces to secure storage", count);
+                Ok::<usize, String>(count)
+            } else {
+                Err("Secure storage not initialized".to_string())
+            }
+        })?;
+
+        #[derive(serde::Serialize)]
+        struct CacheResponse {
+            #[serde(rename = "cachedCount")]
+            cached_count: usize,
+        }
+
+        let response_data = CacheResponse { cached_count };
+        let response: FfiResult<CacheResponse> = FfiResult::success(response_data);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Add nonce signature to a payer-signed transaction
+/// This is called after MWA has added the payer signature (first signature)
+/// to add the nonce keypair signature (second signature)
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("✍️  FFI addNonceSignature called with handle={}", handle);
+
+        // Convert request
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        // Get transport
+        let transport = get_transport(handle)?;
+
+        // Parse request
+        #[derive(serde::Deserialize)]
+        struct AddNonceSignatureRequest {
+            #[serde(default = "crate::ffi::types::default_version")]
+            version: u32,
+            #[serde(rename = "payerSignedTransactionBase64")]
+            payer_signed_transaction_base64: String,
+            #[serde(rename = "nonceKeypairBase64")]
+            nonce_keypair_base64: String,
+        }
+
+        let request: AddNonceSignatureRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("Adding nonce signature to payer-signed transaction");
+
+        // Decode payer-signed transaction
+        let payer_signed_tx_bytes = base64::decode(&request.payer_signed_transaction_base64)
+            .map_err(|e| format!("Failed to decode payer-signed transaction: {}", e))?;
+
+        // Deserialize transaction
+        let mut tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&payer_signed_tx_bytes)
+            .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
+
+        tracing::info!("Transaction has {} signatures before adding nonce signature", tx.signatures.len());
+
+        // Decode nonce keypair
+        let nonce_keypair_bytes = base64::decode(&request.nonce_keypair_base64)
+            .map_err(|e| format!("Failed to decode nonce keypair: {}", e))?;
+
+        if nonce_keypair_bytes.len() != 64 {
+            return Err(format!("Invalid nonce keypair length: expected 64, got {}", nonce_keypair_bytes.len()));
+        }
+
+        let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
+            .map_err(|e| format!("Failed to create keypair from bytes: {}", e))?;
+
+        tracing::info!("Nonce keypair pubkey: {}", nonce_keypair.pubkey());
+
+        // Get the blockhash from the transaction
+        let blockhash = tx.message.recent_blockhash;
+
+        // Add nonce signature (second signer)
+        tx.try_partial_sign(&[&nonce_keypair], blockhash)
+            .map_err(|e| format!("Failed to add nonce signature: {}", e))?;
+
+        tracing::info!("✅ Transaction now has {} signatures (payer + nonce)", tx.signatures.len());
+
+        // Serialize the fully-signed transaction
+        let fully_signed_bytes = bincode1::serialize(&tx)
+            .map_err(|e| format!("Failed to serialize fully-signed transaction: {}", e))?;
+
+        let fully_signed_base64 = base64::encode(&fully_signed_bytes);
+
+        tracing::info!("✅ Fully-signed transaction ready for submission ({} bytes)", fully_signed_bytes.len());
+
+        let response: FfiResult<String> = FfiResult::success(fully_signed_base64);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
 

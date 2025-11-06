@@ -183,5 +183,34 @@ object PolliNetFFI {
      * @return JSON FfiResult with array of public key strings
      */
     external fun getRequiredSigners(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Create unsigned nonce account creation transactions for MWA signing
+     * Generates N unsigned transactions that create nonce accounts on-chain
+     * Each transaction includes an ephemeral nonce keypair that must be co-signed
+     * 
+     * Workflow:
+     * 1. Call this to get unsigned transactions + nonce keypairs
+     * 2. Sign transactions with nonce keypairs locally
+     * 3. Send to MWA for payer co-signing
+     * 4. Submit fully signed transactions
+     * 5. Cache nonce data for offline transaction creation
+     * 
+     * @param requestJson JSON-encoded CreateUnsignedNonceTransactionsRequest
+     * @return JSON FfiResult with array of UnsignedNonceTransaction
+     */
+    external fun createUnsignedNonceTransactions(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Cache nonce account data from on-chain accounts
+     * Fetches nonce data from blockchain and saves to secure storage
+     * Call this after successfully creating nonce accounts via MWA
+     * 
+     * @param requestJson JSON-encoded CacheNonceAccountsRequest
+     * @return JSON FfiResult with cached count
+     */
+    external fun cacheNonceAccounts(handle: Long, requestJson: ByteArray): String
+    
+    external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
 }
 

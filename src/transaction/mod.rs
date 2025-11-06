@@ -1285,12 +1285,13 @@ impl TransactionService {
     /// Returns base64-encoded unsigned transaction that MWA can sign
     /// 
     /// This is the MWA-compatible version - NO signing happens in Rust
+    /// The nonce authority is automatically read from the cached nonce data
     pub fn create_unsigned_offline_transaction(
         &self,
         sender_pubkey: &str,
         recipient: &str,
         amount: u64,
-        nonce_authority_pubkey: &str,
+        _nonce_authority_pubkey: &str, // Ignored - we use authority from cached_nonce
         cached_nonce: &CachedNonceData,
     ) -> Result<String, TransactionError> {
         // Parse public keys
@@ -1303,21 +1304,17 @@ impl TransactionService {
         let nonce_account_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
             TransactionError::InvalidPublicKey(format!("Invalid nonce account: {}", e))
         })?;
-        let nonce_authority_pubkey = Pubkey::from_str(nonce_authority_pubkey).map_err(|e| {
-            TransactionError::InvalidPublicKey(format!("Invalid nonce authority: {}", e))
-        })?;
         let nonce_blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
             TransactionError::InvalidPublicKey(format!("Invalid blockhash: {}", e))
         })?;
 
-        // Verify nonce authority matches
-        if nonce_authority_pubkey.to_string() != cached_nonce.authority {
-            return Err(TransactionError::InvalidPublicKey(format!(
-                "Nonce authority mismatch. Expected: {}, Got: {}",
-                cached_nonce.authority,
-                nonce_authority_pubkey
-            )));
-        }
+        // Use the nonce authority from the cached data (the actual owner)
+        // This ensures we always use the correct authority regardless of parameter
+        let nonce_authority_pubkey = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid nonce authority from cache: {}", e))
+        })?;
+        
+        tracing::info!("📌 Using nonce authority from cached data: {}", cached_nonce.authority);
 
         // Calculate age of cached data
         let age_seconds = std::time::SystemTime::now()
@@ -1425,6 +1422,102 @@ impl TransactionService {
         tracing::info!("👥 Required signers: {:?}", signers);
 
         Ok(signers)
+    }
+
+    /// Create unsigned nonce account creation transactions for MWA signing
+    /// 
+    /// This generates N unsigned transactions that create nonce accounts.
+    /// Each transaction needs to be co-signed by:
+    /// 1. The ephemeral nonce account keypair (generated here, returned to caller)
+    /// 2. The payer (signed by MWA wallet)
+    /// 
+    /// Workflow:
+    /// 1. Generate nonce keypairs
+    /// 2. Create unsigned transactions with nonce account creation instructions
+    /// 3. Return transactions + nonce keypairs to Kotlin
+    /// 4. Kotlin signs with nonce keypairs
+    /// 5. MWA co-signs with payer keypair
+    /// 6. Submit fully signed transactions
+    /// 
+    /// Returns: Vec of (unsigned_tx_base64, nonce_keypair_base64, nonce_pubkey)
+    pub async fn create_unsigned_nonce_transactions(
+        &self,
+        count: usize,
+        payer_pubkey_str: &str,
+    ) -> Result<Vec<crate::ffi::types::UnsignedNonceTransaction>, TransactionError> {
+        use crate::ffi::types::UnsignedNonceTransaction;
+        
+        let client = self.rpc_client.as_ref().ok_or_else(|| {
+            TransactionError::RpcClient(
+                "RPC client not initialized. Use new_with_rpc()".to_string(),
+            )
+        })?;
+
+        tracing::info!("Creating {} unsigned nonce account transactions", count);
+
+        // Parse payer pubkey
+        let payer_pubkey = Pubkey::from_str(payer_pubkey_str).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid payer pubkey: {}", e))
+        })?;
+
+        // Get rent exemption amount
+        let rent_exemption = client
+            .get_minimum_balance_for_rent_exemption(solana_sdk::nonce::State::size())
+            .map_err(|e| TransactionError::RpcClient(format!("Failed to get rent exemption: {}", e)))?;
+        
+        tracing::info!("Rent exemption for nonce account: {} lamports", rent_exemption);
+
+        // Get recent blockhash
+        let recent_blockhash = client
+            .get_latest_blockhash()
+            .map_err(|e| TransactionError::RpcClient(format!("Failed to get blockhash: {}", e)))?;
+
+        let mut result = Vec::new();
+
+        for i in 0..count {
+            // Generate ephemeral nonce keypair
+            let nonce_keypair = Keypair::new();
+            let nonce_pubkey = nonce_keypair.pubkey();
+
+            tracing::info!("Transaction {}/{}: Nonce account {}", i + 1, count, nonce_pubkey);
+
+            // Create nonce account instructions
+            let create_nonce_instructions = system_instruction::create_nonce_account(
+                &payer_pubkey,         // funding account
+                &nonce_pubkey,         // nonce account
+                &payer_pubkey,         // authority (set to payer)
+                rent_exemption,        // lamports
+            );
+
+            // Create transaction (completely unsigned)
+            let mut tx = Transaction::new_with_payer(
+                &create_nonce_instructions,
+                Some(&payer_pubkey),
+            );
+            tx.message.recent_blockhash = recent_blockhash;
+
+            // DO NOT sign yet - keep it completely unsigned
+            // MWA will add payer signature first, then we'll add nonce signature
+            tracing::info!("Creating unsigned transaction (no signatures yet)");
+
+            // Serialize unsigned transaction
+            let tx_bytes = bincode1::serialize(&tx).map_err(|e| {
+                TransactionError::Serialization(format!("Failed to serialize transaction: {}", e))
+            })?;
+
+            // Serialize nonce keypair (will be used to add signature after MWA signs)
+            let nonce_keypair_bytes = nonce_keypair.to_bytes();
+
+            result.push(UnsignedNonceTransaction {
+                unsigned_transaction_base64: base64::encode(&tx_bytes),
+                nonce_keypair_base64: base64::encode(&nonce_keypair_bytes),
+                nonce_pubkey: nonce_pubkey.to_string(),
+            });
+        }
+
+        tracing::info!("✅ Created {} unsigned nonce transactions", result.len());
+
+        Ok(result)
     }
 
     /// Submit offline-created transaction to blockchain

@@ -100,7 +100,7 @@ Button(onClick = {
     scope.launch {
         // Step 1: Initialize SDK
         val config = SdkConfig(
-            rpcUrl = "https://api.devnet.solana.com",
+            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
             enableLogging = true
         )
         
@@ -1525,7 +1525,7 @@ transaction.sign(&[&sender], recent_blockhash);
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 
-let client = RpcClient::new("https://api.devnet.solana.com");
+let client = RpcClient::new("https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6");
 
 // Fetch account data from blockchain
 let account = client

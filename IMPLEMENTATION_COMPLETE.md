@@ -168,7 +168,7 @@ implementation("com.solanamobile:mobile-wallet-adapter-clientlib:2.0.0")
 // 1. Initialize SDK
 val sdk = PolliNetSDK.initialize(
     SdkConfig(
-        rpcUrl = "https://api.devnet.solana.com",
+        rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
         enableLogging = true
     )
 ).getOrThrow()

@@ -31,6 +31,7 @@ import xyz.pollinet.sdk.PolliNetSDK
 @Composable
 fun MwaTransactionDemo(
     sdk: PolliNetSDK?,
+    activityResultSender: ActivityResultSender,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -38,7 +39,6 @@ fun MwaTransactionDemo(
     
     // MWA client state
     var mwaClient by remember { mutableStateOf<PolliNetMwaClient?>(null) }
-    var activityResultSender by remember { mutableStateOf<ActivityResultSender?>(null) }
     
     // UI state
     var authorizedPubkey by remember { mutableStateOf<String?>(null) }
@@ -50,20 +50,6 @@ fun MwaTransactionDemo(
     var unsignedTxBase64 by remember { mutableStateOf<String?>(null) }
     var signedTxBase64 by remember { mutableStateOf<String?>(null) }
     var txSignature by remember { mutableStateOf<String?>(null) }
-    
-    // Create ActivityResultSender SYNCHRONOUSLY at top level (BEFORE lifecycle STARTED)
-    // This MUST be done with remember, not in LaunchedEffect or DisposableEffect
-    val activityContext = context as? ComponentActivity
-    
-    // Initialize ActivityResultSender synchronously
-    remember(activityContext) {
-        if (activityContext != null) {
-            activityResultSender = ActivityResultSender(activityContext)
-        } else {
-            errorMessage = "MWA requires ComponentActivity. Current context: ${context.javaClass.simpleName}"
-        }
-        Unit  // remember must return something
-    }
     
     // Initialize MWA client
     LaunchedEffect(Unit) {
@@ -157,11 +143,8 @@ fun MwaTransactionDemo(
                             errorMessage = null
                             statusMessage = "Opening wallet..."
                             try {
-                                val sender = activityResultSender
-                                    ?: throw MwaException("ActivityResultSender not initialized")
-                                
                                 // Call actual MWA authorization
-                                val pubkey = mwaClient!!.authorize(sender)
+                                val pubkey = mwaClient!!.authorize(activityResultSender)
                                 authorizedPubkey = pubkey
                                 statusMessage = "Wallet connected successfully!"
                                 
@@ -173,7 +156,7 @@ fun MwaTransactionDemo(
                             }
                         }
                     },
-                    enabled = !isLoading && mwaClient != null && activityResultSender != null && authorizedPubkey == null,
+                    enabled = !isLoading && mwaClient != null && authorizedPubkey == null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (isLoading) {
@@ -211,15 +194,109 @@ fun MwaTransactionDemo(
                         scope.launch {
                             isLoading = true
                             errorMessage = null
-                            statusMessage = "Preparing offline bundle..."
+                            statusMessage = "Creating nonce account transactions..."
                             try {
-                                // TODO: This step needs MWA to sign nonce creation
-                                // For now, we'll note it requires wallet signing
-                                statusMessage = "Note: Bundle preparation requires wallet signing for nonce accounts"
-                                errorMessage = "TODO: Implement nonce creation with MWA signing"
+                                // Step 1: Create unsigned nonce transactions
+                                val nonceCount = 1
+                                val unsignedNonceTxs = sdk!!.createUnsignedNonceTransactions(
+                                    count = nonceCount,
+                                    payerPubkey = authorizedPubkey!!
+                                ).getOrThrow()
+                                
+                                statusMessage = "Created $nonceCount nonce transactions. Preparing for wallet signing..."
+                                
+                                // Step 2: Prepare transactions for MWA signing
+                                // Each transaction needs both: nonce keypair signature + payer signature
+                                // For now, we pass unsigned transactions to MWA which will handle signing
+                                val transactionsToSign = unsignedNonceTxs
+                                
+                                statusMessage = "Sending ${transactionsToSign.size} transactions to wallet for signing..."
+                                
+                                // Step 3: Send to MWA for payer to co-sign
+                                // Note: MWA's signAndSendTransactions expects transactions
+                                // Since we have multiple transactions, we'll send them one by one
+                                
+                                val noncePublicKeys = mutableListOf<String>()
+                                var successCount = 0
+                                
+                                for ((index, nonceTx) in transactionsToSign.withIndex()) {
+                                    try {
+                                        statusMessage = "Signing transaction ${index + 1}/${transactionsToSign.size} with wallet (payer)..."
+                                        
+                                        // Step 1: MWA signs with payer key (first signature)
+                                        val payerSignedTxBytes = mwaClient!!.signTransaction(
+                                            sender = activityResultSender,
+                                            unsignedTxBase64 = nonceTx.unsignedTransactionBase64
+                                        )
+                                        
+                                        android.util.Log.d("MwaTransactionDemo", "Payer signature added by wallet")
+                                        statusMessage = "Adding nonce signature ${index + 1}/${transactionsToSign.size}..."
+                                        
+                                        // Step 2: Add nonce signature locally (second signature)
+                                        val payerSignedBase64 = android.util.Base64.encodeToString(
+                                            payerSignedTxBytes,
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                        
+                                        val fullySignedBase64 = sdk.addNonceSignature(
+                                            payerSignedTransactionBase64 = payerSignedBase64,
+                                            nonceKeypairBase64 = nonceTx.nonceKeypairBase64
+                                        ).getOrThrow()
+                                        
+                                        android.util.Log.d("MwaTransactionDemo", "Nonce signature added (fully signed)")
+                                        statusMessage = "Submitting transaction ${index + 1}/${transactionsToSign.size} to Solana..."
+                                        
+                                        // Step 3: Submit fully-signed transaction to Solana
+                                        val txSignature = sdk.submitOfflineTransaction(
+                                            transactionBase64 = fullySignedBase64,
+                                            verifyNonce = false  // Don't verify nonce for creation txs
+                                        ).getOrThrow()
+                                        
+                                        // Transaction was submitted successfully
+                                        noncePublicKeys.add(nonceTx.noncePubkey)
+                                        successCount++
+                                        
+                                        android.util.Log.d("MwaTransactionDemo", "Transaction ${index + 1} submitted: $txSignature")
+                                        statusMessage = "Transaction ${index + 1}/${transactionsToSign.size} confirmed! Sig: ${txSignature.take(8)}..."
+                                        
+                                        // Wait a bit between transactions
+                                        kotlinx.coroutines.delay(1500)
+                                        
+                                    } catch (e: MwaException) {
+                                        android.util.Log.e("MwaTransactionDemo", "Failed to sign transaction ${index + 1}: ${e.message}", e)
+                                        errorMessage = "Transaction ${index + 1} failed: ${e.message}"
+                                        // Continue with remaining transactions
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("MwaTransactionDemo", "Failed to process transaction ${index + 1}", e)
+                                        errorMessage = "Transaction ${index + 1} failed: ${e.message}"
+                                        android.util.Log.e("MwaTransactionDemo", "Error details", e)
+                                        // Continue with remaining transactions
+                                    }
+                                }
+                                
+                                if (successCount == 0) {
+                                    throw Exception("Failed to create any nonce accounts. Check logs for details.")
+                                }
+                                
+                                if (successCount < transactionsToSign.size) {
+                                    android.util.Log.w("MwaTransactionDemo", "Only $successCount/${transactionsToSign.size} nonce accounts created successfully")
+                                }
+                                
+                                statusMessage = "Caching $successCount nonce accounts..."
+                                
+                                // Step 4: Cache the nonce data for offline use
+                                val cachedCount = sdk.cacheNonceAccounts(noncePublicKeys).getOrThrow()
+                                
+                                statusMessage = "✅ Successfully prepared offline bundle with $cachedCount nonce accounts!"
+                                errorMessage = null
+                                
+                            } catch (e: MwaException) {
+                                errorMessage = "Wallet error: ${e.message}"
+                                statusMessage = "Failed to prepare bundle"
                             } catch (e: Exception) {
                                 errorMessage = e.message ?: "Bundle preparation failed"
                                 statusMessage = "Failed to prepare bundle"
+                                android.util.Log.e("MwaTransactionDemo", "Bundle preparation error", e)
                             } finally {
                                 isLoading = false
                             }
@@ -268,7 +345,7 @@ fun MwaTransactionDemo(
                                 val result = sdk!!.createUnsignedOfflineTransaction(
                                     senderPubkey = authorizedPubkey!!,
                                     nonceAuthorityPubkey = authorizedPubkey!!, // Same as sender for demo
-                                    recipient = "11111111111111111111111111111111", // System program for demo
+                                    recipient = authorizedPubkey!!, // Self-transfer for demo
                                     amount = 1000000L // 0.001 SOL
                                 )
                                 
@@ -339,13 +416,11 @@ fun MwaTransactionDemo(
                             errorMessage = null
                             statusMessage = "Requesting signature from wallet..."
                             try {
-                                val sender = activityResultSender
-                                    ?: throw MwaException("ActivityResultSender not initialized")
-                                
-                                // Call actual MWA signing
-                                val signedBytes = mwaClient!!.signAndSendTransaction(
-                                    sender = sender,
-                                    unsignedTransactionBase64 = unsignedTxBase64!!
+                                // Call signTransaction (NOT signAndSendTransaction)
+                                // This signs the transaction and returns the signed bytes
+                                val signedBytes = mwaClient!!.signTransaction(
+                                    sender = activityResultSender,
+                                    unsignedTxBase64 = unsignedTxBase64!!
                                 )
                                 
                                 signedTxBase64 = android.util.Base64.encodeToString(
@@ -357,12 +432,13 @@ fun MwaTransactionDemo(
                             } catch (e: Exception) {
                                 errorMessage = e.message ?: "Signing failed"
                                 statusMessage = "Signing failed"
+                                android.util.Log.e("MwaTransactionDemo", "Signing error", e)
                             } finally {
                                 isLoading = false
                             }
                         }
                     },
-                    enabled = !isLoading && unsignedTxBase64 != null && activityResultSender != null,
+                    enabled = !isLoading && unsignedTxBase64 != null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (isLoading) {

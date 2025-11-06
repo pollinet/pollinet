@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import kotlinx.coroutines.launch
 import xyz.pollinet.sdk.BleService
 import xyz.pollinet.sdk.CreateUnsignedTransactionRequest
@@ -29,7 +30,10 @@ import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.SdkConfig
 
 @Composable
-fun DiagnosticsScreen() {
+fun DiagnosticsScreen(
+    mwaActivityResultSender: ActivityResultSender,
+    mainSdk: PolliNetSDK?  // SDK with RPC from MainActivity
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
@@ -229,15 +233,15 @@ fun DiagnosticsScreen() {
         )
 
         // MWA (Mobile Wallet Adapter) Demo
-        // TODO: Re-enable after restructuring to pass ActivityResultSender from Activity level
-        // StatusCard(
-        //     title = "🔐 MWA Transaction Demo",
-        //     content = {
-        //         MwaTransactionDemo(
-        //             sdk = bleService?.sdk
-        //         )
-        //     }
-        // )
+        StatusCard(
+            title = "🔐 MWA Transaction Demo",
+            content = {
+                MwaTransactionDemo(
+                    sdk = mainSdk,  // Use SDK with RPC for nonce creation
+                    activityResultSender = mwaActivityResultSender
+                )
+            }
+        )
 
         // Metrics
         StatusCard(
@@ -445,7 +449,7 @@ private fun FFITestButtons(
                     try {
                         onLog("Testing transaction builder...")
                         val config = SdkConfig(
-                            rpcUrl = "https://api.devnet.solana.com",
+                            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
                             storageDirectory = context.filesDir.absolutePath
                         )
                         val result = PolliNetSDK.initialize(config)
@@ -602,7 +606,7 @@ private fun OfflineBundleDemo(
                         onLog("   Cost: 3 × $0.20 = $0.60 (first time)")
                         
                         val config = xyz.pollinet.sdk.SdkConfig(
-                            rpcUrl = "https://api.devnet.solana.com",
+                            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
                             enableLogging = true,
                             storageDirectory = context.filesDir.absolutePath
                         )
@@ -677,7 +681,7 @@ private fun OfflineBundleDemo(
                         onLog("   Using cached nonce data")
                         
                         val config = xyz.pollinet.sdk.SdkConfig(
-                            rpcUrl = "https://api.devnet.solana.com",
+                            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
                             enableLogging = true,
                             storageDirectory = context.filesDir.absolutePath
                         )
@@ -752,7 +756,7 @@ private fun OfflineBundleDemo(
                         onLog("   Back online - submitting to blockchain")
                         
                         val config = xyz.pollinet.sdk.SdkConfig(
-                            rpcUrl = "https://api.devnet.solana.com",
+                            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
                             enableLogging = true,
                             storageDirectory = context.filesDir.absolutePath
                         )

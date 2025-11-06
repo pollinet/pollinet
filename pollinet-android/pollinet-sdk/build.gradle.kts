@@ -74,8 +74,12 @@ tasks.register<Exec>("buildRustLib") {
     
     workingDir = file("../../")
     
+    // Use absolute path to cargo
+    val cargoHome = System.getenv("CARGO_HOME") ?: "${System.getProperty("user.home")}/.cargo"
+    val cargoPath = "$cargoHome/bin/cargo"
+    
     commandLine(
-        "cargo", "ndk",
+        cargoPath, "ndk",
         "-t", "arm64-v8a",
         "-t", "armeabi-v7a", 
         "-t", "x86_64",
