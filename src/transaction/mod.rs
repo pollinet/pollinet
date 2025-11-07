@@ -1550,6 +1550,27 @@ impl TransactionService {
         tracing::info!("   Instructions: {}", tx.message.instructions.len());
         tracing::info!("   Blockhash: {}", tx.message.recent_blockhash);
 
+        // Verify signatures locally before submitting to RPC
+        let required_signers = tx.message.header.num_required_signatures as usize;
+        let signer_keys: Vec<String> = tx.message.account_keys
+            .iter()
+            .take(required_signers)
+            .map(|k| k.to_string())
+            .collect();
+
+        tracing::info!("   Required signers ({}): {:?}", required_signers, signer_keys);
+
+        if let Err(err) = tx.verify() {
+            tracing::error!("❌ Local signature verification failed before submission: {}", err);
+            for (index, signature) in tx.signatures.iter().enumerate() {
+                tracing::error!("   Signature[{}]: {}", index, signature);
+            }
+
+            return Err(TransactionError::RpcClient(
+                format!("Transaction signature verification failed locally: {}", err),
+            ));
+        }
+
         // Optional: Verify nonce account hasn't been advanced
         if verify_nonce {
             tracing::info!("Verifying nonce account is still valid...");

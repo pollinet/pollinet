@@ -5,6 +5,7 @@
 //! protocol state.
 
 use crate::transaction::{Fragment as TxFragment, FragmentType, TransactionService};
+use crate::ble::MeshHealthMonitor;
 use crate::storage::SecureStorage;
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
@@ -34,6 +35,9 @@ pub struct HostBleTransport {
     
     /// Secure storage for nonce bundles (optional)
     secure_storage: Option<Arc<SecureStorage>>,
+
+    /// Mesh health monitor for tracking peer/network quality
+    health_monitor: Arc<MeshHealthMonitor>,
 }
 
 impl HostBleTransport {
@@ -66,6 +70,7 @@ impl HostBleTransport {
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
             transaction_service: Arc::new(transaction_service),
             secure_storage: None,
+            health_monitor: Arc::new(MeshHealthMonitor::default()),
         })
     }
     
@@ -82,6 +87,7 @@ impl HostBleTransport {
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
             transaction_service: Arc::new(transaction_service),
             secure_storage: None,
+            health_monitor: Arc::new(MeshHealthMonitor::default()),
         })
     }
     
@@ -97,6 +103,11 @@ impl HostBleTransport {
     /// Get secure storage if available
     pub fn secure_storage(&self) -> Option<&Arc<SecureStorage>> {
         self.secure_storage.as_ref()
+    }
+
+    /// Get health monitor
+    pub fn health_monitor(&self) -> Arc<MeshHealthMonitor> {
+        self.health_monitor.clone()
     }
 
     /// Push inbound data from GATT characteristic

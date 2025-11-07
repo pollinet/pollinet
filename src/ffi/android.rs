@@ -7,7 +7,7 @@
 #[cfg(feature = "android")]
 use jni::objects::{JByteArray, JClass, JString};
 #[cfg(feature = "android")]
-use jni::sys::{jbyteArray, jlong, jstring};
+use jni::sys::{jbyteArray, jlong, jstring, jint};
 #[cfg(feature = "android")]
 use jni::JNIEnv;
 #[cfg(feature = "android")]
@@ -20,14 +20,13 @@ use std::str::FromStr;
 use super::runtime;
 use super::transport::HostBleTransport;
 use super::types::*;
-use crate::PolliNetSDK;
 
 #[cfg(feature = "android")]
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 
 #[cfg(feature = "android")]
-use log::{info, error, warn, debug};
+use log::{info, error};
 
 // Initialize Android logger once
 #[cfg(feature = "android")]
@@ -36,11 +35,10 @@ use std::sync::Once;
 #[cfg(feature = "android")]
 static ANDROID_LOGGER_INIT: Once = Once::new();
 
-// Global state for SDK instances
+// Global state for transport instances
 #[cfg(feature = "android")]
 lazy_static::lazy_static! {
     static ref TRANSPORTS: Arc<Mutex<Vec<Arc<HostBleTransport>>>> = Arc::new(Mutex::new(Vec::new()));
-    static ref SDK_INSTANCES: Arc<Mutex<Vec<Arc<PolliNetSDK>>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
 // =============================================================================
@@ -1284,3 +1282,390 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
     create_result_string(&mut env, result)
 }
 
+// =============================================================================
+// BLE Mesh Operations
+// =============================================================================
+
+/// Fragment a signed transaction for BLE transmission
+/// Returns JSON with array of fragment bytes (base64 encoded)
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragmentTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    transaction_bytes: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("🔄 FFI fragmentTransaction called");
+        
+        let tx_bytes: Vec<u8> = env
+            .convert_byte_array(&transaction_bytes)
+            .map_err(|e| format!("Failed to read transaction: {}", e))?;
+        
+        tracing::info!("Fragmenting transaction of {} bytes", tx_bytes.len());
+        
+        // Fragment the transaction
+        let fragments = crate::ble::fragment_transaction(&tx_bytes);
+        
+        // Convert fragments to FFI-friendly format
+        #[derive(serde::Serialize)]
+        struct FragmentData {
+            #[serde(rename = "transactionId")]
+            transaction_id: String,
+            #[serde(rename = "fragmentIndex")]
+            fragment_index: u16,
+            #[serde(rename = "totalFragments")]
+            total_fragments: u16,
+            #[serde(rename = "dataBase64")]
+            data_base64: String,
+        }
+        
+        let fragment_data: Vec<FragmentData> = fragments.iter().map(|f| {
+            FragmentData {
+                transaction_id: hex::encode(&f.transaction_id),
+                fragment_index: f.fragment_index,
+                total_fragments: f.total_fragments,
+                data_base64: base64::encode(&f.data),
+            }
+        }).collect();
+        
+        tracing::info!("✅ Created {} fragments", fragment_data.len());
+        
+        let response: FfiResult<Vec<FragmentData>> = FfiResult::success(fragment_data);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Reconstruct a transaction from fragments
+/// Takes JSON array of fragment objects with base64 data
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_reconstructTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    fragments_json: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("🔗 FFI reconstructTransaction called");
+        
+        let json_data: Vec<u8> = env
+            .convert_byte_array(&fragments_json)
+            .map_err(|e| format!("Failed to read fragments JSON: {}", e))?;
+        
+        // Parse fragment data from JSON
+        #[derive(serde::Deserialize)]
+        struct FragmentData {
+            #[serde(rename = "transactionId")]
+            transaction_id: String,
+            #[serde(rename = "fragmentIndex")]
+            fragment_index: u16,
+            #[serde(rename = "totalFragments")]
+            total_fragments: u16,
+            #[serde(rename = "dataBase64")]
+            data_base64: String,
+        }
+        
+        let fragment_data: Vec<FragmentData> = serde_json::from_slice(&json_data)
+            .map_err(|e| format!("Failed to parse fragments JSON: {}", e))?;
+        
+        tracing::info!("Reconstructing from {} fragments", fragment_data.len());
+        
+        // Convert to internal fragment format
+        let fragments: Vec<crate::ble::mesh::TransactionFragment> = fragment_data.iter().map(|f| {
+            let mut tx_id = [0u8; 32];
+            let tx_id_bytes = hex::decode(&f.transaction_id)
+                .map_err(|e| format!("Invalid transaction ID: {}", e))?;
+            tx_id.copy_from_slice(&tx_id_bytes);
+            
+            let data = base64::decode(&f.data_base64)
+                .map_err(|e| format!("Invalid fragment data: {}", e))?;
+            
+            Ok(crate::ble::mesh::TransactionFragment {
+                transaction_id: tx_id,
+                fragment_index: f.fragment_index,
+                total_fragments: f.total_fragments,
+                data,
+            })
+        }).collect::<Result<Vec<_>, String>>()?;
+        
+        // Reconstruct the transaction
+        let reconstructed = crate::ble::reconstruct_transaction(&fragments)
+            .map_err(|e| format!("Reconstruction failed: {}", e))?;
+        
+        tracing::info!("✅ Reconstructed transaction: {} bytes", reconstructed.len());
+        
+        // Return base64-encoded transaction
+        let tx_base64 = base64::encode(&reconstructed);
+        
+        let response: FfiResult<String> = FfiResult::success(tx_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get fragmentation statistics for a transaction
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getFragmentationStats(
+    mut env: JNIEnv,
+    _class: JClass,
+    transaction_bytes: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("📊 FFI getFragmentationStats called");
+        
+        let tx_bytes: Vec<u8> = env
+            .convert_byte_array(&transaction_bytes)
+            .map_err(|e| format!("Failed to read transaction: {}", e))?;
+        
+        let stats = crate::ble::FragmentationStats::calculate(&tx_bytes);
+        
+        #[derive(serde::Serialize)]
+        struct StatsResponse {
+            #[serde(rename = "originalSize")]
+            original_size: usize,
+            #[serde(rename = "fragmentCount")]
+            fragment_count: usize,
+            #[serde(rename = "maxFragmentSize")]
+            max_fragment_size: usize,
+            #[serde(rename = "avgFragmentSize")]
+            avg_fragment_size: usize,
+            #[serde(rename = "totalOverhead")]
+            total_overhead: usize,
+            #[serde(rename = "efficiency")]
+            efficiency: f32,
+        }
+        
+        let stats_response = StatsResponse {
+            original_size: stats.original_size,
+            fragment_count: stats.fragment_count,
+            max_fragment_size: stats.max_fragment_size,
+            avg_fragment_size: stats.avg_fragment_size,
+            total_overhead: stats.total_overhead,
+            efficiency: stats.efficiency,
+        };
+        
+        let response: FfiResult<StatsResponse> = FfiResult::success(stats_response);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Transaction Broadcasting
+// =============================================================================
+
+/// Prepare a transaction broadcast (fragments it and returns fragments with packets)
+/// Takes transaction bytes and returns fragments ready for BLE transmission
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareBroadcast(
+    mut env: JNIEnv,
+    _class: JClass,
+    _handle: jlong,
+    transaction_bytes: JByteArray,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("📡 FFI prepareBroadcast called");
+        
+        let tx_bytes: Vec<u8> = env
+            .convert_byte_array(&transaction_bytes)
+            .map_err(|e| format!("Failed to read transaction: {}", e))?;
+        
+        tracing::info!("Preparing broadcast for {} byte transaction", tx_bytes.len());
+        
+        // Fragment the transaction
+        let fragments = crate::ble::fragment_transaction(&tx_bytes);
+        let transaction_id = fragments[0].transaction_id;
+        
+        // Create broadcaster to prepare packets
+        let broadcaster = crate::ble::TransactionBroadcaster::new(uuid::Uuid::new_v4());
+        
+        // Prepare packet for each fragment
+        #[derive(serde::Serialize)]
+        struct FragmentPacket {
+            #[serde(rename = "transactionId")]
+            transaction_id: String,
+            #[serde(rename = "fragmentIndex")]
+            fragment_index: u16,
+            #[serde(rename = "totalFragments")]
+            total_fragments: u16,
+            #[serde(rename = "packetBytes")]
+            packet_bytes: String, // Base64-encoded mesh packet
+        }
+        
+        let mut fragment_packets = Vec::new();
+        for fragment in &fragments {
+            let packet_bytes = broadcaster.prepare_fragment_packet(fragment)?;
+            fragment_packets.push(FragmentPacket {
+                transaction_id: hex::encode(&fragment.transaction_id),
+                fragment_index: fragment.fragment_index,
+                total_fragments: fragment.total_fragments,
+                packet_bytes: base64::encode(&packet_bytes),
+            });
+        }
+        
+        tracing::info!("✅ Prepared {} fragment packets for broadcast", fragment_packets.len());
+        
+        #[derive(serde::Serialize)]
+        struct BroadcastPreparation {
+            #[serde(rename = "transactionId")]
+            transaction_id: String,
+            #[serde(rename = "fragmentPackets")]
+            fragment_packets: Vec<FragmentPacket>,
+        }
+        
+        let preparation = BroadcastPreparation {
+            transaction_id: hex::encode(&transaction_id),
+            fragment_packets,
+        };
+        
+        let response: FfiResult<BroadcastPreparation> = FfiResult::success(preparation);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get mesh health snapshot
+/// Returns current health metrics, peer status, and network topology
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getHealthSnapshot(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("💚 FFI getHealthSnapshot called");
+        
+        let transport = get_transport(handle)?;
+        let monitor = transport.health_monitor();
+        let snapshot = monitor.get_snapshot();
+        
+        tracing::info!("✅ Health snapshot: {} peers, health score: {}", 
+            snapshot.metrics.total_peers, snapshot.metrics.health_score);
+        
+        #[derive(serde::Serialize)]
+        struct HealthSnapshotResponse {
+            #[serde(rename = "snapshot")]
+            snapshot: crate::ble::HealthSnapshot,
+        }
+        
+        let response: FfiResult<HealthSnapshotResponse> = FfiResult::success(HealthSnapshotResponse { snapshot });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Record peer heartbeat
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_recordPeerHeartbeat(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("💓 FFI recordPeerHeartbeat called");
+        
+        let peer_id: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("Failed to read peer_id: {}", e))?
+            .into();
+        
+        let transport = get_transport(handle)?;
+        let monitor = transport.health_monitor();
+        monitor.record_heartbeat(&peer_id);
+        
+        tracing::info!("✅ Recorded heartbeat for peer: {}", peer_id);
+        
+        #[derive(serde::Serialize)]
+        struct SuccessResponse {
+            success: bool,
+        }
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Record peer latency measurement
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_recordPeerLatency(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+    latency_ms: jint,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("⏱️ FFI recordPeerLatency called");
+        
+        let peer_id: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("Failed to read peer_id: {}", e))?
+            .into();
+        
+        let transport = get_transport(handle)?;
+        let monitor = transport.health_monitor();
+        monitor.record_latency(&peer_id, latency_ms as u32);
+        
+        tracing::info!("✅ Recorded {}ms latency for peer: {}", latency_ms, peer_id);
+        
+        #[derive(serde::Serialize)]
+        struct SuccessResponse {
+            success: bool,
+        }
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Record peer RSSI (signal strength)
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_recordPeerRssi(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+    rssi: jint,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("📶 FFI recordPeerRssi called");
+        
+        let peer_id: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("Failed to read peer_id: {}", e))?
+            .into();
+        
+        let transport = get_transport(handle)?;
+        let monitor = transport.health_monitor();
+        monitor.record_rssi(&peer_id, rssi as i8);
+        
+        tracing::info!("✅ Recorded {}dBm RSSI for peer: {}", rssi, peer_id);
+        
+        #[derive(serde::Serialize)]
+        struct SuccessResponse {
+            success: bool,
+        }
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}

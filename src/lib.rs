@@ -44,7 +44,7 @@ impl PolliNetSDK {
 
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-
+        
         Ok(Self {
             ble_bridge,
             transaction_service,
@@ -69,7 +69,7 @@ impl PolliNetSDK {
 
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-
+        
         Ok(Self {
             ble_bridge,
             transaction_service,
@@ -552,10 +552,15 @@ impl PolliNetSDK {
         // Convert to PeerInfo format
         let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
             ble::PeerInfo {
-                device_id: device.address.clone(),
+                peer_id: device.address.clone(),
+                device_uuid: None,
                 capabilities: vec!["CAN_RELAY".to_string()],
                 rssi: device.rssi.unwrap_or(-100),
+                first_seen: device.last_seen,
                 last_seen: device.last_seen,
+                state: ble::PeerState::Discovered,
+                connection_attempts: 0,
+                last_attempt: None,
             }
         }).collect();
         

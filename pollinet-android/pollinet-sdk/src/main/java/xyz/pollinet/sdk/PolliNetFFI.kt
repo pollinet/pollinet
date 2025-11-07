@@ -212,5 +212,38 @@ object PolliNetFFI {
     external fun cacheNonceAccounts(handle: Long, requestJson: ByteArray): String
     
     external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
+    
+    // =========================================================================
+    // BLE Mesh Operations
+    // =========================================================================
+    
+    /**
+     * Fragment a signed transaction for BLE transmission
+     * @param transactionBytes Signed transaction bytes
+     * @return JSON FfiResult with array of FragmentData
+     */
+    external fun fragmentTransaction(transactionBytes: ByteArray): String
+    
+    /**
+     * Reconstruct a transaction from fragments
+     * @param fragmentsJson JSON array of FragmentData objects
+     * @return JSON FfiResult with base64-encoded transaction
+     */
+    external fun reconstructTransaction(fragmentsJson: ByteArray): String
+    
+    /**
+     * Get fragmentation statistics for a transaction
+     * @param transactionBytes Transaction bytes to analyze
+     * @return JSON FfiResult with FragmentationStats
+     */
+    external fun getFragmentationStats(transactionBytes: ByteArray): String
+    
+    /**
+     * Prepare a transaction for broadcast over BLE mesh
+     * @param handle SDK handle
+     * @param transactionBytes Signed transaction bytes
+     * @return JSON FfiResult with BroadcastPreparation
+     */
+    external fun prepareBroadcast(handle: Long, transactionBytes: ByteArray): String
 }
 

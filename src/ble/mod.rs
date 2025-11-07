@@ -8,6 +8,21 @@ pub mod adapter;
 // Bridge between new adapter and legacy functionality
 pub mod bridge;
 
+// Mesh protocol implementation
+pub mod mesh;
+
+// Peer discovery and connection management
+pub mod peer_manager;
+
+// Transaction fragmentation and reassembly
+pub mod fragmenter;
+
+// Transaction broadcasting across mesh
+pub mod broadcaster;
+
+// Mesh health monitoring
+pub mod health_monitor;
+
 // Platform-specific implementations
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -23,6 +38,34 @@ pub mod android;
 
 // Re-export the main adapter interface
 pub use adapter::{BleAdapter, BleError as AdapterBleError, AdapterInfo, create_ble_adapter, POLLINET_SERVICE_UUID, POLLINET_SERVICE_NAME};
+
+// Re-export mesh types
+pub use mesh::{
+    MeshRouter, MeshPacket, MeshHeader, PacketType, TransactionFragment, MeshStats, MeshError,
+    MAX_HOPS, DEFAULT_TTL, MAX_FRAGMENTS, MAX_PAYLOAD_SIZE, MAX_FRAGMENT_DATA,
+};
+
+// Re-export peer manager types
+pub use peer_manager::{
+    PeerManager, PeerInfo, PeerState, PeerCallbacks, PeerManagerStats,
+    MIN_CONNECTIONS, TARGET_CONNECTIONS, MAX_CONNECTIONS,
+};
+
+// Re-export fragmenter functions
+pub use fragmenter::{
+    fragment_transaction, reconstruct_transaction, FragmentationStats,
+};
+
+// Re-export broadcaster types
+pub use broadcaster::{
+    TransactionBroadcaster, BroadcastInfo, BroadcastStatus, BroadcastStatistics,
+};
+
+// Re-export health monitor types
+pub use health_monitor::{
+    MeshHealthMonitor, PeerHealth, PeerState as HealthPeerState, NetworkTopology,
+    HealthMetrics, HealthSnapshot, HealthConfig,
+};
 
 // Legacy BLE mesh transport (keeping for backward compatibility)
 use std::collections::HashMap;
@@ -44,7 +87,7 @@ pub struct MeshTransport {
     /// Active BLE adapter
     adapter: Option<Adapter>,
     /// Connected peers
-    peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
+    peers: Arc<RwLock<HashMap<String, LegacyPeerInfo>>>,
     /// Fragment relay buffer
     relay_buffer: Arc<RwLock<Vec<Fragment>>>,
     /// Device identifier
@@ -57,9 +100,9 @@ pub struct MeshTransport {
     confirmation_characteristic_uuid: Uuid,
 }
 
-/// Information about a connected peer
+/// Legacy information about a connected peer
 #[derive(Debug, Clone)]
-pub struct PeerInfo {
+pub struct LegacyPeerInfo {
     /// Peer device ID
     pub device_id: String,
     /// Peer capabilities
@@ -205,7 +248,7 @@ impl MeshTransport {
     }
     
     /// Discover nearby peers
-    pub async fn discover_peers(&self) -> Result<Vec<PeerInfo>, LegacyBleError> {
+    pub async fn discover_peers(&self) -> Result<Vec<LegacyPeerInfo>, LegacyBleError> {
         // Get the first available adapter
         let adapters = self.manager.adapters().await?;
         if adapters.is_empty() {
@@ -232,7 +275,7 @@ impl MeshTransport {
                     .any(|service| service == &self.service_uuid);
                 
                 if is_pollinet_device {
-                    let peer_info = PeerInfo {
+                    let peer_info = LegacyPeerInfo {
                         device_id: peripheral.id().to_string(),
                         capabilities: vec!["CAN_RELAY".to_string()],
                         rssi: properties.rssi.unwrap_or(-100),
@@ -314,7 +357,7 @@ impl MeshTransport {
         
         // Add to connected peers
         let mut peers = self.peers.write().await;
-        peers.insert(peer_id.to_string(), PeerInfo {
+        peers.insert(peer_id.to_string(), LegacyPeerInfo {
             device_id: peer_id.to_string(),
             capabilities: vec!["CAN_RELAY".to_string()],
             rssi: -50, // Default RSSI for connected peers

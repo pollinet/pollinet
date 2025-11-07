@@ -242,6 +242,11 @@ fun DiagnosticsScreen(
                 )
             }
         )
+        
+        // BLE Mesh Broadcast Visualization
+        BroadcastVisualizationCard(
+            sdk = mainSdk
+        )
 
         // Metrics
         StatusCard(

@@ -477,6 +477,97 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
+    // BLE Mesh Operations
+    // =========================================================================
+    
+    /**
+     * Fragment a signed transaction for BLE transmission
+     * 
+     * Splits a complete signed transaction into smaller fragments that
+     * can be transmitted over BLE with MTU constraints.
+     * 
+     * @param transactionBytes Signed transaction bytes
+     * @return List of fragments ready for BLE transmission
+     */
+    suspend fun fragmentTransaction(transactionBytes: ByteArray): Result<List<FragmentData>> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.fragmentTransaction(transactionBytes)
+            parseResult<List<FragmentData>>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Reconstruct a transaction from BLE fragments
+     * 
+     * Takes a collection of fragments received over BLE and reconstructs
+     * the original signed transaction. Fragments can be provided in any order.
+     * 
+     * @param fragments List of fragments to reconstruct
+     * @return Base64-encoded reconstructed transaction
+     */
+    suspend fun reconstructTransaction(fragments: List<FragmentData>): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val fragmentsJson = json.encodeToString(fragments).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.reconstructTransaction(fragmentsJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Get fragmentation statistics for a transaction
+     * 
+     * Analyzes a transaction and returns statistics about how it would
+     * be fragmented, including efficiency metrics.
+     * 
+     * @param transactionBytes Transaction bytes to analyze
+     * @return Fragmentation statistics
+     */
+    suspend fun getFragmentationStats(transactionBytes: ByteArray): Result<FragmentationStats> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getFragmentationStats(transactionBytes)
+            parseResult<FragmentationStats>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Prepare a transaction for broadcast over BLE mesh
+     * 
+     * Fragments the transaction and wraps each fragment in a mesh packet.
+     * Returns packets ready to send via BLE GATT to connected peers.
+     * 
+     * Each packet includes:
+     * - Transaction ID (for tracking)
+     * - Fragment index and total count
+     * - Complete mesh packet bytes (base64-encoded) ready for BLE transmission
+     * 
+     * Usage:
+     * ```kotlin
+     * val prep = sdk.prepareBroadcast(signedTxBytes).getOrThrow()
+     * for (packet in prep.fragmentPackets) {
+     *     val bytes = Base64.decode(packet.packetBytes, Base64.NO_WRAP)
+     *     bleService.sendToAllPeers(bytes)
+     * }
+     * ```
+     * 
+     * @param transactionBytes Signed Solana transaction
+     * @return BroadcastPreparation with transaction ID and fragment packets
+     */
+    suspend fun prepareBroadcast(transactionBytes: ByteArray): Result<BroadcastPreparation> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.prepareBroadcast(handle, transactionBytes)
+            parseResult<BroadcastPreparation>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -692,5 +783,41 @@ data class AddNonceSignatureRequest(
     val version: Int = 1,
     val payerSignedTransactionBase64: String,
     val nonceKeypairBase64: String
+)
+
+// =============================================================================
+// BLE Mesh Data Types
+// =============================================================================
+
+@Serializable
+data class FragmentData(
+    val transactionId: String,
+    val fragmentIndex: Int,
+    val totalFragments: Int,
+    val dataBase64: String
+)
+
+@Serializable
+data class FragmentationStats(
+    val originalSize: Int,
+    val fragmentCount: Int,
+    val maxFragmentSize: Int,
+    val avgFragmentSize: Int,
+    val totalOverhead: Int,
+    val efficiency: Float
+)
+
+@Serializable
+data class FragmentPacket(
+    val transactionId: String,
+    val fragmentIndex: Int,
+    val totalFragments: Int,
+    val packetBytes: String  // Base64-encoded mesh packet
+)
+
+@Serializable
+data class BroadcastPreparation(
+    val transactionId: String,
+    val fragmentPackets: List<FragmentPacket>
 )
 
