@@ -2,7 +2,7 @@
 2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
 3    package="xyz.pollinet.sdk" >
 4
-5    <uses-sdk android:minSdkVersion="29" />
+5    <uses-sdk android:minSdkVersion="28" />
 6
 7    <!-- Bluetooth permissions for Android 12+ -->
 8    <uses-permission android:name="android.permission.BLUETOOTH" />

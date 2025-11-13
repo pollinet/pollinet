@@ -190,9 +190,11 @@ impl HostBleTransport {
         let mut queue = self.outbound_queue.lock();
         queue.pop_front().and_then(|data| {
             if data.len() <= max_len {
+                tracing::debug!("✅ Returning fragment of {} bytes (max: {})", data.len(), max_len);
                 Some(data)
             } else {
                 // Put it back if too large
+                tracing::warn!("⚠️ Fragment too large: {} bytes (max: {}), putting back in queue", data.len(), max_len);
                 queue.push_front(data);
                 None
             }

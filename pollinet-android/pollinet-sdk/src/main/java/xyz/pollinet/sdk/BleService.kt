@@ -11,11 +11,16 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.util.Base64
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.util.*
+import kotlinx.coroutines.sync.Mutex
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.random.Random
 import java.util.UUID as JavaUUID
 
 /**
@@ -54,6 +59,15 @@ class BleService : Service() {
     private var connectedDevice: BluetoothDevice? = null
     private var gattCharacteristicTx: BluetoothGattCharacteristic? = null
     private var gattCharacteristicRx: BluetoothGattCharacteristic? = null
+    private var clientGatt: BluetoothGatt? = null
+    private var remoteTxCharacteristic: BluetoothGattCharacteristic? = null
+    private var remoteRxCharacteristic: BluetoothGattCharacteristic? = null
+    private val cccdUuid: JavaUUID = JavaUUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    private var remoteWriteInProgress = false
+    
+    // Sending state management
+    private var sendingJob: Job? = null
+    private val sendingMutex = Mutex()
     
     // SDK instance (exposed for testing)
     var sdk: PolliNetSDK? = null
@@ -65,6 +79,15 @@ class BleService : Service() {
     
     private val _metrics = MutableStateFlow<MetricsSnapshot?>(null)
     val metrics: StateFlow<MetricsSnapshot?> = _metrics
+
+    private val _logs = MutableStateFlow<List<String>>(emptyList())
+    val logs: StateFlow<List<String>> = _logs
+
+    private val _isAdvertising = MutableStateFlow(false)
+    val isAdvertising: StateFlow<Boolean> = _isAdvertising
+
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning
     
     enum class ConnectionState {
         DISCONNECTED,
@@ -118,6 +141,94 @@ class BleService : Service() {
         
         android.util.Log.d("BleService", "onCreate: Completed")
     }
+
+    fun clearLogs() {
+        _logs.value = emptyList()
+    }
+
+    fun queueSampleTransaction(byteSize: Int = 1024) {
+        val sdkInstance = sdk ?: run {
+            appendLog("⚠️ SDK not initialized; cannot queue sample transaction")
+            return
+        }
+
+        serviceScope.launch {
+            appendLog("🧪 Queueing sample transaction (${byteSize} bytes)")
+            val payload = ByteArray(byteSize) { Random.nextInt(0, 256).toByte() }
+            sdkInstance.fragment(payload).onSuccess { fragments ->
+                val count = fragments.fragments.size
+                val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
+                appendLog("📤 Queued $count fragments for tx ${txId.take(12)}…")
+                
+                // Start sending loop if not already running
+                ensureSendingLoopStarted()
+            }.onFailure {
+                appendLog("❌ Failed to queue sample transaction: ${it.message}")
+            }
+        }
+    }
+
+    fun queueTransactionFromBase64(base64: String) {
+        val trimmed = base64.trim()
+        if (trimmed.isEmpty()) {
+            appendLog("⚠️ Provided transaction is empty")
+            return
+        }
+
+        val sdkInstance = sdk ?: run {
+            appendLog("⚠️ SDK not initialized; cannot queue transaction")
+            return
+        }
+
+        serviceScope.launch {
+            try {
+                val bytes = Base64.decode(trimmed, Base64.DEFAULT)
+                appendLog("🧾 Queueing provided transaction (${bytes.size} bytes)")
+                sdkInstance.fragment(bytes).onSuccess { fragments ->
+                    val count = fragments.fragments.size
+                    val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
+                    appendLog("📤 Queued $count fragments for tx ${txId.take(12)}…")
+                    
+                    // Start sending loop if not already running
+                    ensureSendingLoopStarted()
+                }.onFailure {
+                    appendLog("❌ Failed to queue provided transaction: ${it.message}")
+                }
+            } catch (e: IllegalArgumentException) {
+                appendLog("❌ Invalid base64 input: ${e.message}")
+            }
+        }
+    }
+
+    fun debugQueueStatus() {
+        serviceScope.launch {
+            val sdkInstance = sdk ?: run {
+                appendLog("⚠️ SDK not initialized")
+                return@launch
+            }
+            
+            appendLog("🔍 === DIAGNOSTIC STATUS ===")
+            appendLog("🔍 Connection: ${_connectionState.value}")
+            appendLog("🔍 Sending job active: ${sendingJob?.isActive}")
+            appendLog("🔍 Write in progress: $remoteWriteInProgress")
+            appendLog("🔍 Client GATT: ${clientGatt != null}")
+            appendLog("🔍 Remote RX char: ${remoteRxCharacteristic != null}")
+            appendLog("🔍 GATT server: ${gattServer != null}")
+            appendLog("🔍 GATT server TX char: ${gattCharacteristicTx != null}")
+            appendLog("🔍 Connected device: ${connectedDevice?.address}")
+            
+            // Try to peek at next outbound
+            val next = sdkInstance.nextOutbound(maxLen = 1024)
+            if (next != null) {
+                appendLog("🔍 Pulled fragment from queue: ${next.size} bytes")
+                // Manually trigger send to test
+                sendToGatt(next)
+            } else {
+                appendLog("🔍 Queue is empty (no fragments available)")
+            }
+            appendLog("🔍 === END DIAGNOSTIC ===")
+        }
+    }
     
     private fun hasRequiredPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -147,6 +258,7 @@ class BleService : Service() {
         serviceScope.cancel()
         stopScanning()
         stopAdvertising()
+        sendingJob?.cancel()
         gattServer?.close()
         sdk?.shutdown()
         super.onDestroy()
@@ -167,6 +279,7 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     fun startScanning() {
         bleScanner?.let { scanner ->
+            appendLog("🔍 Starting BLE scan")
             val scanFilter = ScanFilter.Builder()
                 .setServiceUuid(android.os.ParcelUuid(SERVICE_UUID))
                 .build()
@@ -178,7 +291,9 @@ class BleService : Service() {
             
             scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
             _connectionState.value = ConnectionState.SCANNING
+            _isScanning.value = true
         }
+            ?: appendLog("⚠️ BLE scanner unavailable")
     }
 
     /**
@@ -187,6 +302,10 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     fun stopScanning() {
         bleScanner?.stopScan(scanCallback)
+        if (_isScanning.value) {
+            appendLog("🛑 Stopped BLE scan")
+        }
+        _isScanning.value = false
     }
 
     /**
@@ -195,6 +314,7 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     fun startAdvertising() {
         bleAdvertiser?.let { advertiser ->
+            appendLog("📣 Starting advertising")
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setConnectable(true)
@@ -208,7 +328,8 @@ class BleService : Service() {
                 .build()
             
             advertiser.startAdvertising(settings, data, advertiseCallback)
-        }
+            _isAdvertising.value = true
+        } ?: appendLog("⚠️ BLE advertiser unavailable")
     }
 
     /**
@@ -217,13 +338,25 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     fun stopAdvertising() {
         bleAdvertiser?.stopAdvertising(advertiseCallback)
+        if (_isAdvertising.value) {
+            appendLog("🛑 Stopped advertising")
+        }
+        _isAdvertising.value = false
     }
 
     /**
      * Push inbound data to the transport layer (for testing)
      */
     suspend fun pushInboundData(data: ByteArray) {
-        sdk?.pushInbound(data)
+        val sdkInstance = sdk ?: run {
+            appendLog("⚠️ SDK not initialized; inbound test data dropped")
+            return
+        }
+        sdkInstance.pushInbound(data).onSuccess {
+            appendLog("⬅️ Inbound test data (${previewFragment(data)})")
+        }.onFailure {
+            appendLog("❌ Failed to process inbound test data: ${it.message}")
+        }
     }
 
     /**
@@ -232,29 +365,114 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     fun connectToDevice(device: BluetoothDevice) {
         _connectionState.value = ConnectionState.CONNECTING
+        appendLog("🔗 Connecting to ${device.address}")
         device.connectGatt(this, false, gattCallback)
     }
 
     /**
-     * Send data via BLE
+     * Ensure the sending loop is started
      */
-    private fun sendData() {
-        serviceScope.launch {
-            sdk?.nextOutbound()?.let { data ->
-                sendToGatt(data)
+    private fun ensureSendingLoopStarted() {
+        if (sendingJob?.isActive == true) {
+            appendLog("🔄 Sending loop already active")
+            return
+        }
+        
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            appendLog("⚠️ Not connected - fragments will be sent when connection established")
+            return
+        }
+        
+        appendLog("🚀 Starting sending loop")
+        sendingJob = serviceScope.launch {
+            while (isActive && _connectionState.value == ConnectionState.CONNECTED) {
+                sendNextOutbound()
+                delay(50) // Adjust this delay as needed (50ms for reliability)
             }
+            appendLog("🛑 Sending loop stopped")
+        }
+    }
+
+    /**
+     * Attempt to send the next outbound fragment
+     */
+    private suspend fun sendNextOutbound() {
+        sendingMutex.lock()
+        try {
+            if (remoteWriteInProgress) {
+                // Don't spam logs, just skip this iteration
+                return
+            }
+
+            val sdkInstance = sdk ?: run {
+                appendLog("⚠️ sendNextOutbound: SDK is null")
+                return
+            }
+            
+            val data = sdkInstance.nextOutbound(maxLen = 1024)
+            
+            if (data == null) {
+                // No more data to send - this is normal, only log first time
+                return
+            }
+
+            appendLog("➡️ Sending fragment (${data.size} bytes): ${previewFragment(data)}")
+            sendToGatt(data)
+        } finally {
+            sendingMutex.unlock()
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun sendToGatt(data: ByteArray) {
-        gattCharacteristicTx?.let { characteristic ->
-            characteristic.value = data
-            gattServer?.notifyCharacteristicChanged(
-                connectedDevice,
-                characteristic,
-                false
-            )
+        // Try server/peripheral path first
+        val server = gattServer
+        val txChar = gattCharacteristicTx
+        val device = connectedDevice
+        
+        if (server != null && txChar != null && device != null) {
+            txChar.value = data
+            val success = server.notifyCharacteristicChanged(device, txChar, false)
+            if (success) {
+                appendLog("✅ Sent via server notify to ${device.address}")
+            } else {
+                appendLog("❌ Server notify failed for ${device.address}")
+            }
+            return
+        }
+
+        // Try client/central path
+        val gatt = clientGatt
+        val remoteRx = remoteRxCharacteristic
+        
+        if (gatt == null || remoteRx == null) {
+            appendLog("❌ No valid connection path available (gatt=$gatt, remoteRx=$remoteRx)")
+            return
+        }
+
+        if (remoteWriteInProgress) {
+            appendLog("⏳ Write already in progress, will retry")
+            return
+        }
+
+        remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        remoteRx.value = data
+        remoteWriteInProgress = true
+        
+        val success = gatt.writeCharacteristic(remoteRx)
+        if (success) {
+            appendLog("➡️ Write requested to ${gatt.device.address}")
+        } else {
+            appendLog("❌ writeCharacteristic returned false")
+            remoteWriteInProgress = false
+        }
+    }
+
+    private fun completeRemoteWrite() {
+        if (remoteWriteInProgress) {
+            remoteWriteInProgress = false
+            appendLog("✅ Write complete, ready for next")
+            // Don't manually trigger send here - the loop will handle it
         }
     }
 
@@ -287,6 +505,7 @@ class BleService : Service() {
         android.util.Log.d("BleService", "initializeBluetooth: Setting up GATT server")
         setupGattServer()
         android.util.Log.d("BleService", "initializeBluetooth: GATT server setup complete")
+        appendLog("✅ Bluetooth initialized")
     }
 
     @SuppressLint("MissingPermission")
@@ -347,21 +566,26 @@ class BleService : Service() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             // Auto-connect to first discovered PolliNet device
             stopScanning()
+            appendLog("📡 Discovered device ${result.device.address} (${result.rssi})")
             connectToDevice(result.device)
         }
 
         override fun onScanFailed(errorCode: Int) {
             _connectionState.value = ConnectionState.ERROR
+            appendLog("❌ Scan failed (code $errorCode)")
         }
     }
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
             // Advertising started successfully
+            appendLog("✅ Advertising started (mode=${settingsInEffect.mode})")
         }
 
         override fun onStartFailure(errorCode: Int) {
             _connectionState.value = ConnectionState.ERROR
+            _isAdvertising.value = false
+            appendLog("❌ Advertising failed (code $errorCode)")
         }
     }
 
@@ -372,24 +596,55 @@ class BleService : Service() {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = gatt.device
+                    clientGatt = gatt
+                    appendLog("🤝 Connected to ${gatt.device.address}")
                     gatt.requestMtu(517) // Request max MTU (512 + 5 byte header)
                     gatt.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     connectedDevice = null
+                    clientGatt = null
+                    remoteTxCharacteristic = null
+                    remoteRxCharacteristic = null
+                    remoteWriteInProgress = false
+                    sendingJob?.cancel()
+                    appendLog("🔌 Disconnected from ${gatt.device.address}")
                 }
             }
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                // Start sending loop
-                serviceScope.launch {
-                    while (connectionState.value == ConnectionState.CONNECTED) {
-                        sendData()
-                        delay(10) // Throttle sending
+                appendLog("🔎 Services discovered on ${gatt.device.address}")
+                val service = gatt.getService(SERVICE_UUID)
+                if (service == null) {
+                    appendLog("⚠️ Remote PolliNet service not found")
+                    return
+                }
+
+                remoteTxCharacteristic = service.getCharacteristic(TX_CHAR_UUID)?.also { tx ->
+                    gatt.setCharacteristicNotification(tx, true)
+                    val descriptor = tx.getDescriptor(cccdUuid)
+                    if (descriptor != null) {
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        if (!gatt.writeDescriptor(descriptor)) {
+                            appendLog("⚠️ Failed to write CCCD descriptor")
+                        } else {
+                            appendLog("📬 Enabling notifications on remote TX")
+                        }
+                    } else {
+                        appendLog("⚠️ Remote TX missing CCCD descriptor")
                     }
+                }
+
+                remoteRxCharacteristic = service.getCharacteristic(RX_CHAR_UUID)
+                if (remoteRxCharacteristic == null) {
+                    appendLog("⚠️ Remote RX characteristic not found")
+                } else {
+                    appendLog("✉️ Ready to write to remote RX")
+                    // Start sending loop now that we're fully connected
+                    ensureSendingLoopStarted()
                 }
             }
         }
@@ -401,7 +656,44 @@ class BleService : Service() {
         ) {
             // Forward to Rust FFI
             serviceScope.launch {
-                sdk?.pushInbound(value)
+                val sdkInstance = sdk ?: run {
+                    appendLog("⚠️ SDK not initialized; inbound dropped")
+                    return@launch
+                }
+                sdkInstance.pushInbound(value).onSuccess {
+                    appendLog("⬅️ Received: ${previewFragment(value)}")
+                }.onFailure {
+                    appendLog("❌ Inbound failed: ${it.message}")
+                }
+            }
+        }
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (characteristic.uuid == RX_CHAR_UUID) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    completeRemoteWrite()
+                } else {
+                    remoteWriteInProgress = false
+                    appendLog("❌ Write failed with status $status")
+                }
+            }
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
+            if (descriptor.uuid == cccdUuid) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    appendLog("✅ Remote notifications enabled")
+                } else {
+                    appendLog("❌ Failed to enable notifications (status $status)")
+                }
             }
         }
     }
@@ -413,10 +705,15 @@ class BleService : Service() {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = device
+                    appendLog("🤝 (Server) connected ${device.address}")
+                    // Start sending loop for server mode
+                    ensureSendingLoopStarted()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     connectedDevice = null
+                    sendingJob?.cancel()
+                    appendLog("🔌 (Server) disconnected ${device.address}")
                 }
             }
         }
@@ -434,7 +731,15 @@ class BleService : Service() {
             if (characteristic.uuid == RX_CHAR_UUID) {
                 // Forward to Rust FFI
                 serviceScope.launch {
-                    sdk?.pushInbound(value)
+                    val sdkInstance = sdk ?: run {
+                        appendLog("⚠️ SDK not initialized; write dropped")
+                        return@launch
+                    }
+                    sdkInstance.pushInbound(value).onSuccess {
+                        appendLog("⬅️ RX from ${device.address}: ${previewFragment(value)}")
+                    }.onFailure {
+                        appendLog("❌ Failed to process write: ${it.message}")
+                    }
                 }
                 
                 if (responseNeeded) {
@@ -495,5 +800,24 @@ class BleService : Service() {
             .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
             .build()
     }
-}
 
+    private fun appendLog(message: String) {
+        val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        val entry = "[$timestamp] $message"
+        val current = _logs.value
+        _logs.value = (current + entry).takeLast(50)
+    }
+
+    private fun previewFragment(data: ByteArray): String {
+        return try {
+            val text = String(data, Charsets.UTF_8)
+            when {
+                text.isBlank() -> "empty JSON"
+                text.length > 160 -> text.take(160) + "…"
+                else -> text
+            }
+        } catch (e: Exception) {
+            "${data.size} bytes (binary)"
+        }
+    }
+}

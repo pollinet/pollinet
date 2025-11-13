@@ -1,6 +1,7 @@
 package xyz.pollinet.sdk
 
 import kotlinx.coroutines.*
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -70,7 +71,7 @@ class PolliNetSDK private constructor(
     /**
      * Get next outbound frame to send
      */
-    suspend fun nextOutbound(maxLen: Int = 512): ByteArray? = withContext(Dispatchers.IO) {
+    suspend fun nextOutbound(maxLen: Int = 1024): ByteArray? = withContext(Dispatchers.IO) {
         PolliNetFFI.nextOutbound(handle, maxLen.toLong())
     }
 
@@ -654,6 +655,7 @@ data class Fragment(
     val index: Int,
     val total: Int,
     val data: String, // base64
+    @SerialName("fragment_type")
     val fragmentType: String,
     val checksum: String // base64
 )

@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "xyz.pollinet.android"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"

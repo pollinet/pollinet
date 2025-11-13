@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +46,15 @@ fun DiagnosticsScreen(
     
     val metrics by bleService?.metrics?.collectAsStateWithLifecycle(null) 
         ?: remember { mutableStateOf(null) }
+
+    val advertisingState = bleService?.isAdvertising?.collectAsStateWithLifecycle(false)
+    val isAdvertising = advertisingState?.value ?: false
+
+    val scanningState = bleService?.isScanning?.collectAsStateWithLifecycle(false)
+    val isScanning = scanningState?.value ?: false
+
+    val logsState = bleService?.logs?.collectAsStateWithLifecycle(emptyList())
+    val bleLogs = logsState?.value ?: emptyList()
     
     var permissionsGranted by remember { mutableStateOf(false) }
     var sdkVersion by remember { mutableStateOf("Unknown") }
@@ -201,6 +211,19 @@ fun DiagnosticsScreen(
             }
         )
 
+        StatusCard(
+            title = "BLE Mesh Manual Test",
+            content = {
+                BleMeshManualTestContent(
+                    bleService = bleService,
+                    connectionState = connectionState,
+                    isAdvertising = isAdvertising,
+                    isScanning = isScanning,
+                    logs = bleLogs
+                )
+            }
+        )
+
         // FFI Tests
         StatusCard(
             title = "FFI Tests",
@@ -263,6 +286,188 @@ fun DiagnosticsScreen(
                 TestLogsContent(logs = testLogs)
             }
         )
+    }
+}
+
+@Composable
+private fun BleMeshManualTestContent(
+    bleService: BleService?,
+    connectionState: BleService.ConnectionState,
+    isAdvertising: Boolean,
+    isScanning: Boolean,
+    logs: List<String>
+) {
+    var customTransaction by rememberSaveable { mutableStateOf("") }
+    val logScrollState = rememberScrollState()
+
+    LaunchedEffect(logs) {
+        if (logs.isNotEmpty()) {
+            logScrollState.scrollTo(logScrollState.maxValue)
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Run this on two devices: one advertises, the other scans. Once connected, queue a transaction to push fragments over GATT.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        StatusRow(
+            label = "Connection",
+            value = connectionState.name,
+            isGood = connectionState == BleService.ConnectionState.CONNECTED
+        )
+        StatusRow(
+            label = "Advertising",
+            value = if (isAdvertising) "ON" else "OFF",
+            isGood = isAdvertising
+        )
+        StatusRow(
+            label = "Scanning",
+            value = if (isScanning) "ON" else "OFF",
+            isGood = isScanning
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { bleService?.startAdvertising() },
+                enabled = bleService != null && !isAdvertising,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Start Advertising")
+            }
+            Button(
+                onClick = { bleService?.stopAdvertising() },
+                enabled = bleService != null && isAdvertising,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Stop Advertising")
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { bleService?.startScanning() },
+                enabled = bleService != null && !isScanning,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Start Scanning")
+            }
+            Button(
+                onClick = { bleService?.stopScanning() },
+                enabled = bleService != null && isScanning,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Stop Scanning")
+            }
+        }
+
+        OutlinedTextField(
+            value = customTransaction,
+            onValueChange = { customTransaction = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 100.dp),
+            label = { Text("Base64 Transaction (optional)") },
+            placeholder = { Text("Paste a signed transaction in base64") },
+            minLines = 3,
+            maxLines = 6
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { bleService?.queueSampleTransaction() },
+                enabled = bleService != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Queue Sample (1 KB)")
+            }
+            Button(
+                onClick = { bleService?.queueSampleTransaction(byteSize = 2048) },
+                enabled = bleService != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Queue Sample (2 KB)")
+            }
+        }
+
+        Button(
+            onClick = { bleService?.queueTransactionFromBase64(customTransaction) },
+            enabled = bleService != null && customTransaction.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Queue Base64 Transaction")
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { bleService?.debugQueueStatus() },
+                enabled = bleService != null,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary
+                )
+            ) {
+                Text("Debug Queue")
+            }
+            OutlinedButton(
+                onClick = { bleService?.clearLogs() },
+                enabled = bleService != null && logs.isNotEmpty(),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Clear Logs")
+            }
+        }
+
+        HorizontalDivider()
+
+        Text(
+            text = "Mesh Logs",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        if (logs.isEmpty()) {
+            Text(
+                text = "Logs will appear here once fragments flow through the connection.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(logScrollState),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                logs.forEach { log ->
+                    Text(
+                        text = log,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = when {
+                            log.contains("❌") -> MaterialTheme.colorScheme.error
+                            log.contains("✅") -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 
