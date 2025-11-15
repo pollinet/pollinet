@@ -3,19 +3,30 @@ package xyz.pollinet.android.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Build
+import android.os.IBinder
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import kotlinx.coroutines.launch
 import xyz.pollinet.android.mwa.PolliNetMwaClient
 import xyz.pollinet.android.mwa.MwaException
+import xyz.pollinet.sdk.BleService
 import xyz.pollinet.sdk.PolliNetSDK
 
 /**
@@ -50,8 +61,39 @@ fun MwaTransactionDemo(
     var unsignedTxBase64 by remember { mutableStateOf<String?>(null) }
     var signedTxBase64 by remember { mutableStateOf<String?>(null) }
     var txSignature by remember { mutableStateOf<String?>(null) }
+    var cachedNonceCount by remember { mutableStateOf(0) }
     
-    // Initialize MWA client
+    // BLE state
+    var bleService by remember { mutableStateOf<BleService?>(null) }
+    var isBound by remember { mutableStateOf(false) }
+    var bleMode by remember { mutableStateOf<String?>(null) } // "advertise" or "scan"
+    var bleActivityLog by remember { mutableStateOf<List<String>>(emptyList()) }
+    var receivedTransactions by remember { mutableStateOf<List<String>>(emptyList()) }
+    
+    // Collect BLE service state
+    val bleLogs by bleService?.logs?.collectAsStateWithLifecycle(emptyList()) ?: remember { mutableStateOf(emptyList()) }
+    val isAdvertising by bleService?.isAdvertising?.collectAsStateWithLifecycle(false) ?: remember { mutableStateOf(false) }
+    val isScanning by bleService?.isScanning?.collectAsStateWithLifecycle(false) ?: remember { mutableStateOf(false) }
+    val connectionState by bleService?.connectionState?.collectAsStateWithLifecycle(BleService.ConnectionState.DISCONNECTED) 
+        ?: remember { mutableStateOf(BleService.ConnectionState.DISCONNECTED) }
+    
+    // Service connection
+    val serviceConnection = remember {
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                val binder = service as? BleService.LocalBinder
+                bleService = binder?.getService()
+                isBound = true
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                bleService = null
+                isBound = false
+            }
+        }
+    }
+    
+    // Initialize MWA client and BLE service
     LaunchedEffect(Unit) {
         mwaClient = PolliNetMwaClient.create(
             context = context,
@@ -59,7 +101,39 @@ fun MwaTransactionDemo(
             iconUri = "favicon.ico",  // Relative to assets
             identityName = "PolliNet"
         )
+        
+        // Start and bind BLE service
+        val intent = Intent(context, BleService::class.java).apply {
+            action = BleService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
+    
+    DisposableEffect(Unit) {
+        onDispose {
+            if (isBound) {
+                context.unbindService(serviceConnection)
+            }
+        }
+    }
+    
+    // Helper function to add BLE activity log
+    fun addBleLog(message: String) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        bleActivityLog = bleActivityLog + "[$timestamp] $message"
+        if (bleActivityLog.size > 50) {
+            bleActivityLog = bleActivityLog.takeLast(50)
+        }
+    }
+    
+    // Note: We track cachedNonceCount manually since there's no SDK method to retrieve it
+    // The count is updated after successful nonce creation in the "Prepare Bundle" flow
     
     Column(
         modifier = modifier
@@ -187,17 +261,66 @@ fun MwaTransactionDemo(
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                
+                // Show cached nonce status
+                if (cachedNonceCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "✓",
+                                fontSize = 20.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "$cachedNonceCount nonce account(s) cached",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Ready for offline transactions",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+                
                 Spacer(modifier = Modifier.height(12.dp))
                 
-                Button(
-                    onClick = {
-                        scope.launch {
-                            isLoading = true
-                            errorMessage = null
-                            statusMessage = "Creating nonce account transactions..."
-                            try {
-                                // Step 1: Create unsigned nonce transactions
-                                val nonceCount = 1
+                // Show two buttons: Create New or Refresh Existing
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Button to create new nonces (or refresh if needed)
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isLoading = true
+                                errorMessage = null
+                                
+                                // Check if we should create or refresh
+                                if (cachedNonceCount == 0) {
+                                    statusMessage = "Creating nonce account transactions..."
+                                } else {
+                                    statusMessage = "Refreshing nonce accounts..."
+                                }
+                                
+                                try {
+                                    // Step 1: Create unsigned nonce transactions
+                                    val nonceCount = if (cachedNonceCount == 0) 3 else cachedNonceCount
                                 val unsignedNonceTxs = sdk!!.createUnsignedNonceTransactions(
                                     count = nonceCount,
                                     payerPubkey = authorizedPubkey!!
@@ -285,9 +408,10 @@ fun MwaTransactionDemo(
                                 statusMessage = "Caching $successCount nonce accounts..."
                                 
                                 // Step 4: Cache the nonce data for offline use
-                                val cachedCount = sdk.cacheNonceAccounts(noncePublicKeys).getOrThrow()
+                                val newCachedCount = sdk.cacheNonceAccounts(noncePublicKeys).getOrThrow()
+                                cachedNonceCount = newCachedCount  // Update state
                                 
-                                statusMessage = "✅ Successfully prepared offline bundle with $cachedCount nonce accounts!"
+                                statusMessage = "✅ Successfully prepared offline bundle with $newCachedCount nonce accounts!"
                                 errorMessage = null
                                 
                             } catch (e: MwaException) {
@@ -302,17 +426,19 @@ fun MwaTransactionDemo(
                             }
                         }
                     },
-                    enabled = !isLoading && authorizedPubkey != null && sdk != null,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        enabled = !isLoading && authorizedPubkey != null && sdk != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(if (cachedNonceCount == 0) "Create Nonces" else "Refresh Nonces")
                     }
-                    Text("Prepare Bundle")
+                    
                 }
             }
         }
@@ -462,6 +588,154 @@ fun MwaTransactionDemo(
             }
         }
         
+        // Step 4b: BLE Transmission (Optional Alternative to Direct Submit)
+        if (signedTxBase64 != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Step 4b: Send via BLE (Optional)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Compress, fragment, and transmit signed transaction over BLE mesh",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Mode selection
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    addBleLog("Starting advertising mode...")
+                                    bleMode = "advertise"
+                                    bleService?.startAdvertising()
+                                    addBleLog("Advertising started. Waiting for connection...")
+                                }
+                            },
+                            enabled = bleMode == null && !isAdvertising,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            Text("Advertise")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    addBleLog("Starting scanning mode...")
+                                    bleMode = "scan"
+                                    bleService?.startScanning()
+                                    addBleLog("Scanning for devices...")
+                                }
+                            },
+                            enabled = bleMode == null && !isScanning,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            Text("Scan")
+                        }
+                    }
+                    
+                    // Connection status
+                    if (bleMode != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Mode: ${bleMode?.uppercase()}",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text = "Status: ${connectionState.name}",
+                                fontSize = 14.sp,
+                                color = if (connectionState == BleService.ConnectionState.CONNECTED) 
+                                    MaterialTheme.colorScheme.tertiary 
+                                else MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                    
+                    // Send transaction button (only available when connected)
+                    if (bleMode != null && connectionState == BleService.ConnectionState.CONNECTED) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    addBleLog("Fragmenting signed transaction...")
+                                    try {
+                                        val txBytes = android.util.Base64.decode(signedTxBase64, android.util.Base64.NO_WRAP)
+                                        addBleLog("Transaction size: ${txBytes.size} bytes")
+                                        
+                                        // Fragment the transaction
+                                        bleService?.sdk?.fragment(txBytes)?.onSuccess { result ->
+                                            addBleLog("✅ Fragmented into ${result.fragments.size} fragments")
+                                            addBleLog("Transmitting fragments over BLE...")
+                                            // Fragments are automatically queued for transmission
+                                            addBleLog("✅ Fragments queued for transmission")
+                                        }?.onFailure { error ->
+                                            addBleLog("❌ Fragmentation failed: ${error.message}")
+                                        }
+                                    } catch (e: Exception) {
+                                        addBleLog("❌ Error: ${e.message}")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            Text("Send Transaction via BLE")
+                        }
+                    }
+                    
+                    // Stop button
+                    if (bleMode != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    if (isAdvertising) {
+                                        bleService?.stopAdvertising()
+                                        addBleLog("Stopped advertising")
+                                    }
+                                    if (isScanning) {
+                                        bleService?.stopScanning()
+                                        addBleLog("Stopped scanning")
+                                    }
+                                    bleMode = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Stop BLE")
+                        }
+                    }
+                }
+            }
+        }
+        
         // Step 5: Submit transaction
         Card(
             modifier = Modifier.fillMaxWidth()
@@ -534,16 +808,202 @@ fun MwaTransactionDemo(
             }
         }
         
+        // BLE Receiver Section - Shows received transactions
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "📨 BLE Receiver",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Received transactions will appear here. Reconstruct and submit to blockchain.",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // TODO: Monitor incoming fragments and reconstruct transactions
+                // This would require extending BleService to expose reconstructed transactions
+                if (receivedTransactions.isEmpty()) {
+                    Text(
+                        text = "No transactions received yet. Scan for devices to receive.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontFamily = FontFamily.Monospace
+                    )
+                } else {
+                    Text(
+                        text = "Received ${receivedTransactions.size} transaction(s):",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    receivedTransactions.forEachIndexed { index, tx ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "Transaction ${index + 1}",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${tx.take(64)}...",
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                Button(
+                                    onClick = {
+                                        scope.launch {
+                                            isLoading = true
+                                            statusMessage = "Submitting received transaction ${index + 1}..."
+                                            try {
+                                                val result = sdk?.submitOfflineTransaction(
+                                                    transactionBase64 = tx,
+                                                    verifyNonce = true
+                                                )
+                                                result?.fold(
+                                                    onSuccess = { signature ->
+                                                        addBleLog("✅ Transaction ${index + 1} submitted: ${signature.take(8)}...")
+                                                        statusMessage = "Transaction ${index + 1} submitted successfully!"
+                                                        // Remove from list after successful submission
+                                                        receivedTransactions = receivedTransactions.filterIndexed { i, _ -> i != index }
+                                                    },
+                                                    onFailure = { error ->
+                                                        addBleLog("❌ Failed to submit transaction ${index + 1}: ${error.message}")
+                                                        errorMessage = "Submission failed: ${error.message}"
+                                                    }
+                                                )
+                                            } catch (e: Exception) {
+                                                addBleLog("❌ Error submitting transaction ${index + 1}: ${e.message}")
+                                                errorMessage = "Submission error: ${e.message}"
+                                            } finally {
+                                                isLoading = false
+                                            }
+                                        }
+                                    },
+                                    enabled = !isLoading && sdk != null,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Submit to Blockchain")
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            }
+        }
+        
+        // BLE Activity Log
+        if (bleActivityLog.isNotEmpty() || bleLogs.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📋 Activity Log",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                bleActivityLog = emptyList()
+                                bleService?.clearLogs()
+                            },
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Clear", fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    val logScrollState = rememberScrollState()
+                    LaunchedEffect(bleActivityLog.size, bleLogs.size) {
+                        logScrollState.scrollTo(logScrollState.maxValue)
+                    }
+                    
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(logScrollState)
+                    ) {
+                        // Show custom BLE activity log
+                        bleActivityLog.forEach { log ->
+                            Text(
+                                text = log,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = when {
+                                    log.contains("❌") -> MaterialTheme.colorScheme.error
+                                    log.contains("✅") -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        
+                        // Also show BLE service logs
+                        bleLogs.forEach { log ->
+                            Text(
+                                text = log,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = when {
+                                    log.contains("❌") -> MaterialTheme.colorScheme.error
+                                    log.contains("✅") -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
         // Reset button
-        if (authorizedPubkey != null || unsignedTxBase64 != null) {
+        if (authorizedPubkey != null || unsignedTxBase64 != null || bleMode != null) {
             OutlinedButton(
                 onClick = {
                     authorizedPubkey = null
                     unsignedTxBase64 = null
                     signedTxBase64 = null
                     txSignature = null
+                    cachedNonceCount = 0
+                    bleMode = null
+                    bleActivityLog = emptyList()
+                    receivedTransactions = emptyList()
                     statusMessage = "Reset complete. Connect wallet to begin."
                     errorMessage = null
+                    
+                    // Stop BLE if active
+                    if (isAdvertising) bleService?.stopAdvertising()
+                    if (isScanning) bleService?.stopScanning()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
