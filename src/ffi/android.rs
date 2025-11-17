@@ -1669,3 +1669,214 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_recordPeerRssi(
     
     create_result_string(&mut env, result)
 }
+
+/// Push a received transaction into the auto-submission queue
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushReceivedTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    transaction_bytes: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let tx_bytes: Vec<u8> = env
+            .convert_byte_array(&transaction_bytes)
+            .map_err(|e| format!("Failed to read transaction bytes: {}", e))?;
+        
+        let transport = get_transport(handle)?;
+        let added = transport.push_received_transaction(tx_bytes);
+        
+        #[derive(serde::Serialize)]
+        struct PushResponse {
+            added: bool,
+            queue_size: usize,
+        }
+        
+        let queue_size = transport.received_queue_size();
+        let response: FfiResult<PushResponse> = FfiResult::success(PushResponse { added, queue_size });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get next received transaction for auto-submission
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_nextReceivedTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        match transport.next_received_transaction() {
+            Some((tx_id, tx_bytes, received_at)) => {
+                use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+                
+                #[derive(serde::Serialize)]
+                struct ReceivedTransaction {
+                    tx_id: String,
+                    transaction_base64: String,
+                    received_at: u64,
+                }
+                
+                let response: FfiResult<ReceivedTransaction> = FfiResult::success(ReceivedTransaction {
+                    tx_id,
+                    transaction_base64: BASE64.encode(&tx_bytes),
+                    received_at,
+                });
+                
+                serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+            }
+            None => {
+                let response: FfiResult<Option<String>> = FfiResult::success(None);
+                serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+            }
+        }
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get count of transactions waiting for auto-submission
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getReceivedQueueSize(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let queue_size = transport.received_queue_size();
+        
+        #[derive(serde::Serialize)]
+        struct QueueSizeResponse {
+            queue_size: usize,
+        }
+        
+        let response: FfiResult<QueueSizeResponse> = FfiResult::success(QueueSizeResponse { queue_size });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Mark a transaction as successfully submitted
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_markTransactionSubmitted(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    transaction_bytes: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let tx_bytes: Vec<u8> = env
+            .convert_byte_array(&transaction_bytes)
+            .map_err(|e| format!("Failed to read transaction bytes: {}", e))?;
+        
+        let transport = get_transport(handle)?;
+        transport.mark_transaction_submitted(&tx_bytes);
+        
+        #[derive(serde::Serialize)]
+        struct SuccessResponse {
+            success: bool,
+        }
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Clean up old submitted transaction hashes
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupOldSubmissions(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        transport.cleanup_old_submissions();
+        
+        #[derive(serde::Serialize)]
+        struct SuccessResponse {
+            success: bool,
+        }
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get outbound queue size (non-destructive peek for debugging)
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getOutboundQueueSize(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let queue_size = transport.outbound_queue_size();
+        
+        #[derive(serde::Serialize)]
+        struct QueueSizeResponse {
+            #[serde(rename = "queueSize")]
+            queue_size: usize,
+        }
+        
+        let response: FfiResult<QueueSizeResponse> = FfiResult::success(QueueSizeResponse { queue_size });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get outbound queue debug info (non-destructive peek)
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_debugOutboundQueue(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let queue_info = transport.outbound_queue_debug();
+        
+        #[derive(serde::Serialize)]
+        struct FragmentInfo {
+            index: usize,
+            size: usize,
+        }
+        
+        #[derive(serde::Serialize)]
+        struct QueueDebugResponse {
+            total_fragments: usize,
+            fragments: Vec<FragmentInfo>,
+        }
+        
+        let fragments: Vec<FragmentInfo> = queue_info
+            .iter()
+            .map(|(idx, size)| FragmentInfo { index: *idx, size: *size })
+            .collect();
+        
+        let total_bytes: usize = fragments.iter().map(|f| f.size).sum();
+        
+        tracing::info!("🔍 Queue debug: {} fragments, {} total bytes", fragments.len(), total_bytes);
+        
+        let response = QueueDebugResponse {
+            total_fragments: fragments.len(),
+            fragments,
+        };
+        
+        let ffi_response: FfiResult<QueueDebugResponse> = FfiResult::success(response);
+        serde_json::to_string(&ffi_response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}

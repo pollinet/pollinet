@@ -1,0 +1,1001 @@
+   Compiling libdbus-sys v0.2.5
+   Compiling solana-rpc-client v2.3.13
+   Compiling spl-token-2022 v4.0.1
+   Compiling solana-quic-client v2.3.13
+   Compiling solana-account-decoder v2.3.13
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+   Compiling libdbus-sys v0.2.5
+   Compiling solana-tpu-client v2.3.13
+   Compiling solana-thin-client v2.3.13
+   Compiling solana-rpc-client-nonce-utils v2.3.13
+   Compiling spl-associated-token-account v4.0.0
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+   Compiling libdbus-sys v0.2.5
+   Compiling solana-client v2.3.13
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5
+error: failed to run custom build command for `libdbus-sys v0.2.5`
+
+Caused by:
+  process didn't exit successfully: `/Users/oghenekparoboreminokanju/pollinet/target/debug/build/libdbus-sys-b0f7e24f4acf7617/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=build_vendored.rs
+  cargo:rerun-if-env-changed=DBUS_1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=DBUS_1_STATIC
+  cargo:rerun-if-env-changed=DBUS_1_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64-apple-darwin
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_aarch64_apple_darwin
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+
+  --- stderr
+  pkg_config failed: 
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_LIBS=1 PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags dbus-1 'dbus-1 >= 1.6'
+
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  The file `dbus-1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `dbus-1.pc`.
+
+  One possible solution is to check whether packages
+  'libdbus-1-dev' and 'pkg-config' are installed:
+  On Ubuntu:
+  sudo apt install libdbus-1-dev pkg-config
+  On Fedora:
+  sudo dnf install dbus-devel pkgconf-pkg-config
+
+
+  thread 'main' panicked at /Users/oghenekparoboreminokanju/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libdbus-sys-0.2.5/build.rs:25:9:
+  explicit panic
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   Compiling libdbus-sys v0.2.5

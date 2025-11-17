@@ -1,4 +1,7 @@
 //! Example of creating and transmitting transactions
+//!
+//! ⚠️  Desktop/Linux BLE networking is simulation-only. Use the Android PolliNet
+//! app for production BLE relays.
 
 use pollinet::PolliNetSDK;
 
@@ -9,6 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize SDK
     let sdk = PolliNetSDK::new().await?;
     sdk.start_ble_networking().await?;
+    println!("⚠️ Desktop BLE adapter is simulation-only. Android handles production relays.");
     
     // Create keypairs for the example
     let sender_keypair = solana_sdk::signature::Keypair::new();

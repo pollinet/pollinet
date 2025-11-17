@@ -1,5 +1,8 @@
 //! Example: Offline Transaction Sender
 //!
+//! ⚠️  Desktop/Linux BLE support is simulation-only. Run the Android PolliNet
+//! service for production mesh relays.
+//!
 //! This example demonstrates the complete offline transaction sending workflow:
 //!
 //! 1. Check if offline bundle file exists, if not prepare and save bundle to JSON
@@ -26,6 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 === PolliNet Offline Transaction Sender ===");
     info!("This example demonstrates offline transaction creation and BLE transmission");
+    info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
 
     // Load sender keypair
     let sender_private_key = "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
@@ -133,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match sdk.discover_ble_peers().await {
                 Ok(peers) => {
                     if !peers.is_empty() {
-                        connected_peer_id = peers[0].device_id.clone();
+                        connected_peer_id = peers[0].peer_id.clone();
                         info!("📱 Connected peer ID: {}", connected_peer_id);
                         
                         // Also connect back to the peer for bidirectional communication

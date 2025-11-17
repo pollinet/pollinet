@@ -1,5 +1,8 @@
 //! Example: Offline Transaction Receiver
 //!
+//! ⚠️  Desktop/Linux BLE support is simulation-only. Use the Android PolliNet
+//! service for production BLE relays.
+//!
 //! This example demonstrates the complete offline transaction receiving workflow:
 //!
 //! 1. Scan for PolliNet devices and connect
@@ -27,6 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("📥 === PolliNet Offline Transaction Receiver ===");
     info!("This example demonstrates receiving and processing offline transactions");
+    info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
 
     // Initialize fragment buffer for reassembly
     let fragment_buffer: FragmentBuffer = Arc::new(RwLock::new(HashMap::new()));
@@ -74,21 +78,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if !peers.is_empty() {
                     info!("📱 Found {} peer(s):", peers.len());
                     for (i, peer) in peers.iter().enumerate() {
-                        info!("   {}. {} (RSSI: {})", i + 1, peer.device_id, peer.rssi);
+                        info!("   {}. {} (RSSI: {})", i + 1, peer.peer_id, peer.rssi);
                     }
                     
                     // Connect to the first peer (the sender)
                     for peer in &peers {
-                        info!("🔗 Attempting connection to: {}", peer.device_id);
+                        info!("🔗 Attempting connection to: {}", peer.peer_id);
                         
-                        match sdk.connect_to_ble_peer(&peer.device_id).await {
+                        match sdk.connect_to_ble_peer(&peer.peer_id).await {
                             Ok(_) => {
-                                info!("✅ Connected to sender: {}", peer.device_id);
+                                info!("✅ Connected to sender: {}", peer.peer_id);
                                 sender_connected = true;
                                 break;
                             }
                             Err(e) => {
-                                error!("❌ Failed to connect to peer {}: {}", peer.device_id, e);
+                                error!("❌ Failed to connect to peer {}: {}", peer.peer_id, e);
                             }
                         }
                     }

@@ -1,5 +1,8 @@
 //! PolliNet BLE Mesh Network Node
 //!
+//! ⚠️  Desktop/Linux builds run this node in simulation-only mode. Use the
+//! Android PolliNet service for production BLE relays.
+//!
 //! This example runs a real PolliNet BLE mesh node using the new platform-agnostic
 //! BLE adapter. It continuously discovers and communicates with other PolliNet 
 //! devices in the area. The node will run indefinitely, scanning for peers and 
@@ -119,6 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=================================");
     info!("Starting real BLE mesh node using platform-agnostic BLE adapter...");
     info!("Platform: Linux (BlueZ)");
+    info!("⚠️  Simulation-only path. Android handles production BLE routing.");
 
     // Initialize the PolliNet SDK
     let sdk = PolliNetSDK::new().await?;
@@ -466,26 +470,26 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
 
                     // Display peer information
                     for (i, peer) in peers.iter().enumerate() {
-                        let is_new = !connected_peers.contains(&peer.device_id);
+                        let is_new = !connected_peers.contains(&peer.peer_id);
                         let status = if is_new { "🆕 NEW" } else { "🔄 KNOWN" };
                         
-                        info!("   {}. {} {} (RSSI: {})", i + 1, status, peer.device_id, peer.rssi);
+                        info!("   {}. {} {} (RSSI: {})", i + 1, status, peer.peer_id, peer.rssi);
                         info!("      Capabilities: {:?}", peer.capabilities);
                         info!("      Last seen: {:?}", peer.last_seen);
                         
                         if is_new {
-                            connected_peers.insert(peer.device_id.clone());
+                            connected_peers.insert(peer.peer_id.clone());
                         }
 
                         // Try to connect to new peers using BLE adapter
                         if is_new {
                             info!("      🔗 Attempting GATT connection via BLE adapter...");
-                            match sdk.connect_to_ble_peer(&peer.device_id).await {
+                            match sdk.connect_to_ble_peer(&peer.peer_id).await {
                                 Ok(_) => {
-                                    info!("      ✅ GATT session established with {}", peer.device_id);
+                                    info!("      ✅ GATT session established with {}", peer.peer_id);
                                     
                                     // Wait for incoming data from the connected device
-                                    info!("      📨 Waiting for data from connected device {}...", peer.device_id);
+                                    info!("      📨 Waiting for data from connected device {}...", peer.peer_id);
                                     
                                     // Set up a timeout for receiving data
                                     let timeout_secs = GATT_CONFIG.get()
@@ -494,41 +498,41 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                                     
                                     let receive_timeout = tokio::time::timeout(
                                         tokio::time::Duration::from_secs(timeout_secs),
-                                        wait_for_incoming_data(&peer.device_id)
+                                        wait_for_incoming_data(&peer.peer_id)
                                     ).await;
                                     
                                     match receive_timeout {
                                         Ok(Some(received_data)) => {
-                                            info!("      📨 Received data from {}: '{}'", peer.device_id, received_data);
+                                            info!("      📨 Received data from {}: '{}'", peer.peer_id, received_data);
                                             
                                             // Log received message
-                                            add_received_message_from_connected(received_data, &peer.device_id).await;
+                                            add_received_message_from_connected(received_data, &peer.peer_id).await;
                                             
                                             // Send a response
                                             let response = generate_random_string();
-                                            info!("      📤 Sending response to {}: '{}'", peer.device_id, response);
+                                            info!("      📤 Sending response to {}: '{}'", peer.peer_id, response);
                                             
-                                            match sdk.send_to_peer(&peer.device_id, response.as_bytes()).await {
+                                            match sdk.send_to_peer(&peer.peer_id, response.as_bytes()).await {
                                                 Ok(_) => {
-                                                    info!("      ✅ Response sent successfully to {}", peer.device_id);
-                                                    log_sent_message(&peer.device_id, &response).await;
+                                                    info!("      ✅ Response sent successfully to {}", peer.peer_id);
+                                                    log_sent_message(&peer.peer_id, &response).await;
                                                 }
                                                 Err(e) => {
                                                     info!("      ⚠️  Failed to send response: {}", e);
-                                                    log_failed_send(&peer.device_id, &response, &e.to_string()).await;
+                                                    log_failed_send(&peer.peer_id, &response, &e.to_string()).await;
                                                 }
                                             }
                                         }
                                         Ok(None) => {
-                                            info!("      ⏱️  No data received from {} within timeout", peer.device_id);
+                                            info!("      ⏱️  No data received from {} within timeout", peer.peer_id);
                                         }
                                         Err(_) => {
-                                            info!("      ⏱️  Timeout waiting for data from {}", peer.device_id);
+                                            info!("      ⏱️  Timeout waiting for data from {}", peer.peer_id);
                                         }
                                     }
                                     
                                     // Disconnect after handling
-                                    info!("      🔌 Disconnecting from {}", peer.device_id);
+                                    info!("      🔌 Disconnecting from {}", peer.peer_id);
                                     // Note: Disconnect functionality would need to be implemented in the SDK
                                 }
                                 Err(e) => {

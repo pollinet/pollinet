@@ -24,6 +24,11 @@ PolliNet is an open-source SDK and runtime enabling **offline Solana transaction
 - **Confirmation Routing**  
   Deliver submission confirmations back to origin devices.
 
+## 🧭 Platform Support
+
+- **Android (Production)** – Foreground BLE service, GATT bridge, and diagnostics UI. This is the path we ship and support for real-world mesh relays.
+- **Desktop Simulation (Linux/macOS)** – The Rust examples and Linux BLE adapter are kept for local debugging, CI smoke tests, and mesh simulations only. They are not hardened for production deployments.
+
 ---
 
 ## 📚 Documentation

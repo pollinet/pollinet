@@ -569,6 +569,98 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
+    // Autonomous Transaction Relay System
+    // =========================================================================
+
+    /**
+     * Push a received transaction into the auto-submission queue
+     * Returns true if added, false if duplicate
+     */
+    suspend fun pushReceivedTransaction(transactionBytes: ByteArray): Result<PushResponse> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.pushReceivedTransaction(handle, transactionBytes)
+            parseResult<PushResponse>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get next received transaction for auto-submission
+     * Returns null if queue is empty
+     */
+    suspend fun nextReceivedTransaction(): Result<ReceivedTransaction?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.nextReceivedTransaction(handle)
+            parseResult<ReceivedTransaction?>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get count of transactions waiting for auto-submission
+     */
+    suspend fun getReceivedQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getReceivedQueueSize(handle)
+            val response = parseResult<QueueSizeResponse>(resultJson)
+            response.map { it.queueSize }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Mark a transaction as successfully submitted (for deduplication)
+     */
+    suspend fun markTransactionSubmitted(transactionBytes: ByteArray): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.markTransactionSubmitted(handle, transactionBytes)
+            parseResult<SuccessResponse>(resultJson).map { it.success }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Clean up old submitted transaction hashes (older than 24 hours)
+     */
+    suspend fun cleanupOldSubmissions(): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.cleanupOldSubmissions(handle)
+            parseResult<SuccessResponse>(resultJson).map { it.success }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Get outbound queue size (non-destructive peek for debugging)
+     */
+    suspend fun getOutboundQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getOutboundQueueSize(handle)
+            val response = parseResult<QueueSizeResponse>(resultJson)
+            response.map { it.queueSize }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Debug outbound queue (non-destructive peek)
+     */
+    suspend fun debugOutboundQueue(): Result<OutboundQueueDebug> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.debugOutboundQueue(handle)
+            parseResult<OutboundQueueDebug>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -821,5 +913,44 @@ data class FragmentPacket(
 data class BroadcastPreparation(
     val transactionId: String,
     val fragmentPackets: List<FragmentPacket>
+)
+
+// =============================================================================
+// Autonomous Transaction Relay Data Types
+// =============================================================================
+
+@Serializable
+data class PushResponse(
+    val added: Boolean,
+    val queueSize: Int
+)
+
+@Serializable
+data class ReceivedTransaction(
+    val txId: String,
+    val transactionBase64: String,
+    val receivedAt: Long
+)
+
+@Serializable
+data class QueueSizeResponse(
+    val queueSize: Int
+)
+
+@Serializable
+data class SuccessResponse(
+    val success: Boolean
+)
+
+@Serializable
+data class OutboundQueueDebug(
+    @SerialName("total_fragments") val totalFragments: Int,
+    val fragments: List<FragmentDebugInfo>
+)
+
+@Serializable
+data class FragmentDebugInfo(
+    val index: Int,
+    val size: Int
 )
 

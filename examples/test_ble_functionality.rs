@@ -1,5 +1,8 @@
 //! Comprehensive BLE Testing Example for PolliNet SDK
 //!
+//! ⚠️  Desktop/Linux builds are simulation-only and meant for debugging the Rust
+//! core. Production BLE networking lives in the Android service.
+//!
 //! This example demonstrates all BLE functionality including:
 //! - BLE adapter discovery and initialization
 //! - Advertising and scanning for PolliNet devices
@@ -26,6 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 Starting PolliNet BLE Comprehensive Test Suite");
     info!("==================================================");
+    info!("⚠️  Desktop BLE adapter is for simulation/debug only—use Android for real mesh relays.");
 
     // Test 1: BLE Adapter Discovery and Initialization
     info!("\n📡 TEST 1: BLE Adapter Discovery and Initialization");
@@ -143,7 +147,7 @@ async fn test_ble_advertising_scanning() -> Result<(), Box<dyn std::error::Error
             } else {
                 info!("✅ Found {} PolliNet peers:", peers.len());
                 for (i, peer) in peers.iter().enumerate() {
-                    info!("  {}. Device ID: {}", i + 1, peer.device_id);
+                    info!("  {}. Peer ID: {}", i + 1, peer.peer_id);
                     info!("     RSSI: {}", peer.rssi);
                     info!("     Capabilities: {:?}", peer.capabilities);
                     info!("     Last seen: {:?}", peer.last_seen);
@@ -182,11 +186,11 @@ async fn test_peer_discovery_connection() -> Result<(), Box<dyn std::error::Erro
 
     // Try to connect to the first peer
     let first_peer = &peers[0];
-    info!("Attempting to connect to peer: {}", first_peer.device_id);
+    info!("Attempting to connect to peer: {}", first_peer.peer_id);
     
-    match sdk.connect_to_ble_peer(&first_peer.device_id).await {
+    match sdk.connect_to_ble_peer(&first_peer.peer_id).await {
         Ok(_) => {
-            info!("✅ Successfully connected to peer: {}", first_peer.device_id);
+            info!("✅ Successfully connected to peer: {}", first_peer.peer_id);
             
     // Check peer count using public API
     info!("✅ Peer connection attempt completed");
@@ -375,7 +379,7 @@ async fn test_continuous_ble_operations() -> Result<(), Box<dyn std::error::Erro
                 } else {
                     info!("   Found {} PolliNet peers", peers.len());
                     for peer in peers {
-                        info!("     - {} (RSSI: {})", peer.device_id, peer.rssi);
+                        info!("     - {} (RSSI: {})", peer.peer_id, peer.rssi);
                     }
                 }
             }

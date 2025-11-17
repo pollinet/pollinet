@@ -1,5 +1,8 @@
 //! Example: Text Message Test
 //!
+//! ⚠️  This desktop example uses the Linux/macOS simulation adapter. For
+//! production BLE messaging, run the Android PolliNet app.
+//!
 //! This example demonstrates the text message listening and sending functionality:
 //!
 //! 1. Start BLE advertising and text listener
@@ -19,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 === PolliNet Text Message Test ===");
     info!("This example demonstrates text message listening and sending");
+    info!("⚠️  Running in simulation mode. Android handles production BLE.");
 
     // Initialize SDK
     let sdk = PolliNetSDK::new().await?;

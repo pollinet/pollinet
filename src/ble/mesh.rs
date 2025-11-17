@@ -19,12 +19,17 @@ pub const DEFAULT_TTL: u8 = 10;
 pub const MAX_FRAGMENTS: u16 = 100;
 
 /// Maximum payload size per packet (bytes)
-pub const MAX_PAYLOAD_SIZE: usize = 512;
+/// Target: 150 bytes max after serialization to fit comfortably in BLE MTU
+/// With bincode overhead (~20 bytes), we want raw data + headers < 130 bytes
+pub const MAX_PAYLOAD_SIZE: usize = 100;
 
 /// Mesh packet header size (bytes)
 pub const HEADER_SIZE: usize = 42;
 
 /// Maximum usable fragment data size (bytes)
+/// This is the actual transaction data that fits in a fragment
+/// 100 - 42 - 6 = 52 bytes of transaction data per fragment
+/// This ensures total serialized size stays well under 150 bytes
 pub const MAX_FRAGMENT_DATA: usize = MAX_PAYLOAD_SIZE - HEADER_SIZE - 6;
 
 /// Maximum incomplete transactions in buffer

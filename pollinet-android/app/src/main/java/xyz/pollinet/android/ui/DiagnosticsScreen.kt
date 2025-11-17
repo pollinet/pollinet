@@ -277,6 +277,7 @@ private fun BleMeshManualTestContent(
     isScanning: Boolean,
     logs: List<String>
 ) {
+    val scope = rememberCoroutineScope()
     var customTransaction by rememberSaveable { mutableStateOf("") }
     val logScrollState = rememberScrollState()
 
@@ -409,6 +410,41 @@ private fun BleMeshManualTestContent(
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Clear Logs")
+            }
+        }
+        
+        // Test Controls for Autonomous Relay
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { 
+                    scope.launch {
+                        bleService?.sdk?.getReceivedQueueSize()?.onSuccess { size ->
+                            println("📊 Received Queue Size: $size")
+                        }
+                    }
+                },
+                enabled = bleService?.sdk != null,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary
+                )
+            ) {
+                Text("Check RX Queue", style = MaterialTheme.typography.labelSmall)
+            }
+            
+            OutlinedButton(
+                onClick = { 
+                    scope.launch {
+                        bleService?.sdk?.cleanupOldSubmissions()
+                    }
+                },
+                enabled = bleService?.sdk != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Cleanup", style = MaterialTheme.typography.labelSmall)
             }
         }
 

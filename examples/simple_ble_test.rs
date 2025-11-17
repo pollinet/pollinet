@@ -1,5 +1,8 @@
 //! Simple BLE Testing Example for PolliNet SDK
 //!
+//! ⚠️  Desktop/Linux builds run in simulation-only mode. For production BLE
+//! mesh relays use the Android PolliNet service.
+//!
 //! This is a simplified example that demonstrates the core BLE functionality
 //! without requiring complex setup or multiple devices.
 //!
@@ -19,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 PolliNet Simple BLE Test");
     info!("==========================");
+    info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
 
     // Initialize the SDK
     info!("\n1️⃣  Initializing PolliNet SDK...");
@@ -85,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 info!("✅ Found {} PolliNet peers:", peers.len());
                 for (i, peer) in peers.iter().enumerate() {
-                    info!("   {}. Device ID: {}", i + 1, peer.device_id);
+                    info!("   {}. Peer ID: {}", i + 1, peer.peer_id);
                     info!("      RSSI: {}", peer.rssi);
                     info!("      Capabilities: {:?}", peer.capabilities);
                 }

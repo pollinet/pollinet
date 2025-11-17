@@ -1,7 +1,8 @@
-//! Linux BLE implementation using bluer (BlueZ)
+//! Linux BLE simulation adapter using bluer (BlueZ)
 //! 
-//! This module provides the Linux-specific implementation of the BleAdapter trait
-//! using the bluer crate to interface with BlueZ.
+//! This module is retained for desktop simulations, local debugging, and CI smoke
+//! tests. For production BLE transport we rely on the Android service; the Linux
+//! adapter is **not** hardened for field deployments.
 
 #[cfg(feature = "linux")]
 mod linux_impl {

@@ -24,6 +24,7 @@ pub mod broadcaster;
 pub mod health_monitor;
 
 // Platform-specific implementations
+// Linux is kept for desktop simulation only; Android is the production path.
 #[cfg(target_os = "linux")]
 pub mod linux;
 
@@ -81,6 +82,9 @@ use crate::transaction::Fragment;
 use crate::SERVICE_UUID;
 
 /// BLE mesh transport for PolliNet
+///
+/// This legacy transport is only used for desktop simulations; production BLE
+/// traffic flows through the Android service.
 pub struct MeshTransport {
     /// BLE manager
     manager: Manager,

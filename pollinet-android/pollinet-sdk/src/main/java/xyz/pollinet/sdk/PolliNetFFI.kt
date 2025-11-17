@@ -245,5 +245,60 @@ object PolliNetFFI {
      * @return JSON FfiResult with BroadcastPreparation
      */
     external fun prepareBroadcast(handle: Long, transactionBytes: ByteArray): String
+    
+    // =========================================================================
+    // Autonomous Transaction Relay System
+    // =========================================================================
+    
+    /**
+     * Push a received transaction into the auto-submission queue
+     * @param handle SDK handle
+     * @param transactionBytes Received transaction bytes
+     * @return JSON FfiResult with PushResponse (added: boolean, queueSize: int)
+     */
+    external fun pushReceivedTransaction(handle: Long, transactionBytes: ByteArray): String
+    
+    /**
+     * Get next received transaction for auto-submission
+     * @param handle SDK handle
+     * @return JSON FfiResult with ReceivedTransaction (txId, transactionBase64, receivedAt) or null
+     */
+    external fun nextReceivedTransaction(handle: Long): String
+    
+    /**
+     * Get count of transactions waiting for auto-submission
+     * @param handle SDK handle
+     * @return JSON FfiResult with QueueSizeResponse (queueSize: int)
+     */
+    external fun getReceivedQueueSize(handle: Long): String
+    
+    /**
+     * Mark a transaction as successfully submitted (for deduplication)
+     * @param handle SDK handle
+     * @param transactionBytes Submitted transaction bytes
+     * @return JSON FfiResult with success status
+     */
+    external fun markTransactionSubmitted(handle: Long, transactionBytes: ByteArray): String
+    
+    /**
+     * Clean up old submitted transaction hashes (older than 24 hours)
+     * @param handle SDK handle
+     * @return JSON FfiResult with success status
+     */
+    external fun cleanupOldSubmissions(handle: Long): String
+    
+    /**
+     * Get outbound queue size (non-destructive peek)
+     * @param handle SDK handle
+     * @return JSON FfiResult with queue size
+     */
+    external fun getOutboundQueueSize(handle: Long): String
+    
+    /**
+     * Debug outbound queue (non-destructive peek)
+     * @param handle SDK handle
+     * @return JSON FfiResult with queue debug info
+     */
+    external fun debugOutboundQueue(handle: Long): String
 }
 

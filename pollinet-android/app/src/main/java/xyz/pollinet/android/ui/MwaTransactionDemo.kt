@@ -320,7 +320,7 @@ fun MwaTransactionDemo(
                                 
                                 try {
                                     // Step 1: Create unsigned nonce transactions
-                                    val nonceCount = if (cachedNonceCount == 0) 3 else cachedNonceCount
+                                    val nonceCount = if (cachedNonceCount == 0) 1 else cachedNonceCount
                                 val unsignedNonceTxs = sdk!!.createUnsignedNonceTransactions(
                                     count = nonceCount,
                                     payerPubkey = authorizedPubkey!!

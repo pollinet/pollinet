@@ -4,13 +4,19 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.bluetooth.*
 import android.bluetooth.le.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
@@ -20,6 +26,7 @@ import kotlinx.coroutines.sync.Mutex
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 import java.util.UUID as JavaUUID
 
@@ -68,6 +75,42 @@ class BleService : Service() {
     // Sending state management
     private var sendingJob: Job? = null
     private val sendingMutex = Mutex()
+    private val operationQueue = ConcurrentLinkedQueue<ByteArray>()
+    private var operationInProgress = false
+    
+    // Retry logic for status 133
+    private var descriptorWriteRetries = 0
+    private val MAX_DESCRIPTOR_RETRIES = 3
+    private val mainHandler = Handler(Looper.getMainLooper())
+    
+    // Autonomous transaction relay system
+    private var autoSubmitJob: Job? = null
+    private var cleanupJob: Job? = null
+    
+    // Bonding state receiver
+    private val bondStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
+                val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                }
+                val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                
+                appendLog("🔐 Bond state changed for ${device?.address}: ${bondState.toBondStateString()}")
+                
+                // If bonding completed, retry connection
+                if (bondState == BluetoothDevice.BOND_BONDED && device != null && device == clientGatt?.device) {
+                    appendLog("✅ Bonding completed, retrying connection...")
+                    mainHandler.postDelayed({
+                        clientGatt?.connect()
+                    }, 500)
+                }
+            }
+        }
+    }
     
     // SDK instance (exposed for testing)
     var sdk: PolliNetSDK? = null
@@ -108,6 +151,10 @@ class BleService : Service() {
         android.util.Log.d("BleService", "onCreate: Starting BLE service initialization")
         
         createNotificationChannel()
+        
+        // Register bond state receiver for authentication/encryption support
+        val bondFilter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        registerReceiver(bondStateReceiver, bondFilter)
         
         // Only start foreground if we have required permissions
         if (hasRequiredPermissions()) {
@@ -158,8 +205,12 @@ class BleService : Service() {
             sdkInstance.fragment(payload).onSuccess { fragments ->
                 val count = fragments.fragments.size
                 val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
+                val firstFragmentData = fragments.fragments.firstOrNull()?.data;
+                val firstFragmentType = fragments.fragments.firstOrNull()?.fragmentType
                 appendLog("📤 Queued $count fragments for tx ${txId.take(12)}…")
-                
+                appendLog(" Fragment Data: ${firstFragmentData?.take(12)}…")
+                appendLog(" Fragment Type: $firstFragmentType")
+
                 // Start sending loop if not already running
                 ensureSendingLoopStarted()
             }.onFailure {
@@ -217,15 +268,24 @@ class BleService : Service() {
             appendLog("🔍 GATT server TX char: ${gattCharacteristicTx != null}")
             appendLog("🔍 Connected device: ${connectedDevice?.address}")
             
-            // Try to peek at next outbound
-            val next = sdkInstance.nextOutbound(maxLen = 1024)
-            if (next != null) {
-                appendLog("🔍 Pulled fragment from queue: ${next.size} bytes")
-                // Manually trigger send to test
-                sendToGatt(next)
-            } else {
-                appendLog("🔍 Queue is empty (no fragments available)")
+            // Non-destructive queue peek
+            sdkInstance.getOutboundQueueSize().onSuccess { size ->
+                appendLog("📊 Outbound queue: $size fragments")
+                
+                if (size > 0) {
+                    sdkInstance.debugOutboundQueue().onSuccess { queueDebug ->
+                        appendLog("📦 Queue details:")
+                        queueDebug.fragments.forEach { frag ->
+                            appendLog("  [${frag.index}] ${frag.size} bytes")
+                        }
+                    }
+                } else {
+                    appendLog("📭 Queue is empty")
+                }
+            }.onFailure { e ->
+                appendLog("❌ Failed to get queue size: ${e.message}")
             }
+            
             appendLog("🔍 === END DIAGNOSTIC ===")
         }
     }
@@ -254,14 +314,217 @@ class BleService : Service() {
         return START_STICKY
     }
 
+    // =========================================================================
+    // Autonomous Transaction Relay System
+    // =========================================================================
+
+    /**
+     * Start the autonomous transaction auto-submission loop
+     * This loop continuously monitors for received transactions and auto-submits them
+     */
+    private fun startAutoSubmitLoop() {
+        if (autoSubmitJob?.isActive == true) {
+            appendLog("🔄 Auto-submit loop already running")
+            return
+        }
+        
+        appendLog("🚀 Starting autonomous transaction relay system")
+        
+        autoSubmitJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    val sdkInstance = sdk ?: continue
+                    
+                    // Get next received transaction
+                    val result = sdkInstance.nextReceivedTransaction()
+                    val receivedTx = result.getOrNull()
+                    
+                    if (receivedTx != null) {
+                        appendLog("📥 Processing received transaction: ${receivedTx.txId}")
+                        
+                        // Decode transaction bytes
+                        val txBytes = Base64.decode(receivedTx.transactionBase64, Base64.DEFAULT)
+                        
+                        // Check if we have internet
+                        if (hasInternetConnection()) {
+                            // Submit transaction
+                            appendLog("🌐 Internet available, submitting transaction: ${receivedTx.txId}")
+                            
+                            try {
+                                val submitResult = sdkInstance.submitOfflineTransaction(
+                                    transactionBase64 = receivedTx.transactionBase64,
+                                    verifyNonce = false  // Don't verify for received transactions
+                                )
+                                
+                                submitResult.onSuccess { signature ->
+                                    appendLog("✅ Auto-submitted transaction: ${receivedTx.txId}")
+                                    appendLog("   Signature: $signature")
+                                    
+                                    // Mark as submitted for deduplication
+                                    sdkInstance.markTransactionSubmitted(txBytes)
+                                }.onFailure { e ->
+                                    appendLog("⚠️ Failed to submit transaction ${receivedTx.txId}: ${e.message}")
+                                    // Requeue for retry by pushing it back
+                                    sdkInstance.pushReceivedTransaction(txBytes)
+                                }
+                            } catch (e: Exception) {
+                                appendLog("❌ Error submitting transaction ${receivedTx.txId}: ${e.message}")
+                                // Requeue for retry
+                                sdkInstance.pushReceivedTransaction(txBytes)
+                            }
+                        } else {
+                            // No internet, relay to mesh
+                            appendLog("📡 No internet, relaying transaction ${receivedTx.txId} to mesh")
+                            
+                            // Queue for BLE transmission to other peers (re-fragment)
+                            try {
+                                val fragmentResult = sdkInstance.fragmentTransaction(txBytes)
+                                fragmentResult.onSuccess { fragmentDataList ->
+                                    appendLog("📤 Queued ${fragmentDataList.size} fragments for mesh relay")
+                                    // The fragments are already in the outbound queue
+                                    ensureSendingLoopStarted()
+                                }.onFailure { e ->
+                                    appendLog("⚠️ Failed to queue for relay: ${e.message}")
+                                    // Requeue for later
+                                    sdkInstance.pushReceivedTransaction(txBytes)
+                                }
+                            } catch (e: Exception) {
+                                appendLog("⚠️ Exception while queueing relay: ${e.message}")
+                                // Requeue for later
+                                sdkInstance.pushReceivedTransaction(txBytes)
+                            }
+                        }
+                    }
+                    
+                    // Check every 2 seconds
+                    delay(2000)
+                    
+                } catch (e: Exception) {
+                    appendLog("❌ Auto-submit loop error: ${e.message}")
+                    delay(5000) // Wait longer on error
+                }
+            }
+        }
+        
+        // Also start cleanup job
+        startCleanupJob()
+    }
+
+    /**
+     * Start periodic cleanup of old submission hashes
+     */
+    private fun startCleanupJob() {
+        if (cleanupJob?.isActive == true) {
+            return
+        }
+        
+        cleanupJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    sdk?.cleanupOldSubmissions()
+                    delay(3600_000) // Run every hour
+                } catch (e: Exception) {
+                    appendLog("⚠️ Cleanup job error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if device has internet connectivity
+     */
+    @SuppressLint("MissingPermission")
+    private fun hasInternetConnection(): Boolean {
+        return try {
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) 
+                as? ConnectivityManager ?: return false
+            
+            val network = connectivityManager.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(network) 
+                ?: return false
+            
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (e: Exception) {
+            appendLog("⚠️ Error checking internet: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Handle incoming packet - reassemble and queue for auto-submission
+     */
+    private suspend fun handleReceivedData(data: ByteArray) {
+        try {
+            appendLog("📥 Received data: ${data.size} bytes")
+            
+            // Push to SDK for reassembly
+            // The pushInbound call will handle fragmentation internally
+            // Completed transactions will be picked up by the auto-submit loop
+            val result = sdk?.pushInbound(data)
+            result?.onSuccess {
+                appendLog("✅ Fragment processed and added to reassembly buffer")
+                
+                // Check if we have completed transactions
+                val queueSize = sdk?.getReceivedQueueSize()?.getOrNull() ?: 0
+                if (queueSize > 0) {
+                    appendLog("🎉 Transaction reassembly complete! Queue size: $queueSize")
+                }
+            }?.onFailure { e ->
+                appendLog("⚠️ Error processing fragment: ${e.message}")
+            }
+        } catch (e: Exception) {
+            appendLog("❌ Error in handleReceivedData: ${e.message}")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    override fun onUnbind(intent: Intent?): Boolean {
+        // Close GATT connection when activity unbinds
+        // This is critical to avoid battery drain per Android docs
+        closeGattConnection()
+        return super.onUnbind(intent)
+    }
+    
     override fun onDestroy() {
+        // Cancel all coroutine jobs
+        autoSubmitJob?.cancel()
+        cleanupJob?.cancel()
+        sendingJob?.cancel()
         serviceScope.cancel()
+        
+        // Unregister bond state receiver
+        try {
+            unregisterReceiver(bondStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Receiver was not registered
+        }
+        
+        // Stop BLE operations
         stopScanning()
         stopAdvertising()
-        sendingJob?.cancel()
+        closeGattConnection()
         gattServer?.close()
         sdk?.shutdown()
         super.onDestroy()
+    }
+    
+    /**
+     * Close GATT connection properly to avoid battery drain
+     * Per Android documentation: https://developer.android.com/develop/connectivity/bluetooth/ble/connect-gatt-server#close-gatt-connection
+     * 
+     * CRITICAL: Must call disconnect() before close() per Android best practices
+     */
+    @SuppressLint("MissingPermission")
+    private fun closeGattConnection() {
+        clientGatt?.let { gatt ->
+            appendLog("🔌 Disconnecting and closing GATT connection to ${gatt.device.address}")
+            // Official Android sample shows: disconnect() -> close()
+            // This ensures proper cleanup and prevents battery drain
+            gatt.disconnect()
+            gatt.close()
+            clientGatt = null
+        }
     }
 
     /**
@@ -270,6 +533,9 @@ class BleService : Service() {
     suspend fun initializeSdk(config: SdkConfig): Result<Unit> {
         return PolliNetSDK.initialize(config).map { 
             sdk = it
+            // Start autonomous transaction relay system
+            startAutoSubmitLoop()
+            appendLog("🚀 Autonomous relay system started")
         }
     }
 
@@ -385,9 +651,9 @@ class BleService : Service() {
         
         appendLog("🚀 Starting sending loop")
         sendingJob = serviceScope.launch {
-            while (isActive && _connectionState.value == ConnectionState.CONNECTED) {
+            while (_connectionState.value == ConnectionState.CONNECTED) {
                 sendNextOutbound()
-                delay(50) // Adjust this delay as needed (50ms for reliability)
+                delay(500) // Increased delay for BLE stability (was 500ms)
             }
             appendLog("🛑 Sending loop stopped")
         }
@@ -399,8 +665,8 @@ class BleService : Service() {
     private suspend fun sendNextOutbound() {
         sendingMutex.lock()
         try {
-            if (remoteWriteInProgress) {
-                // Don't spam logs, just skip this iteration
+            if (operationInProgress) {
+                // Operation already in progress, skip
                 return
             }
 
@@ -409,15 +675,22 @@ class BleService : Service() {
                 return
             }
             
-            val data = sdkInstance.nextOutbound(maxLen = 1024)
+            // BLE safe fragment size:
+            // Target max 150 bytes to ensure reliable transmission
+            // This matches the Rust fragmentation (52 bytes data + headers + bincode overhead)
+            val data = sdkInstance.nextOutbound(maxLen = 150)
             
             if (data == null) {
-                // No more data to send - this is normal, only log first time
+                // No more data to send - this is normal
                 return
             }
 
-            appendLog("➡️ Sending fragment (${data.size} bytes): ${previewFragment(data)}")
+            appendLog("➡️ Sending fragment (${data.size}B)")
+            
+            // Send directly - no queue needed with proper GATT callbacks
             sendToGatt(data)
+        } catch (e: Exception){
+            appendLog("❌ Exception in sendNextOutbound: ${e.message}")
         } finally {
             sendingMutex.unlock()
         }
@@ -425,6 +698,7 @@ class BleService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun sendToGatt(data: ByteArray) {
+        // Based on official Android sample (lines 184-202)
         // Try server/peripheral path first
         val server = gattServer
         val txChar = gattCharacteristicTx
@@ -433,11 +707,7 @@ class BleService : Service() {
         if (server != null && txChar != null && device != null) {
             txChar.value = data
             val success = server.notifyCharacteristicChanged(device, txChar, false)
-            if (success) {
-                appendLog("✅ Sent via server notify to ${device.address}")
-            } else {
-                appendLog("❌ Server notify failed for ${device.address}")
-            }
+            appendLog(if (success) "✅ Sent ${data.size}B via notify" else "❌ Notify failed")
             return
         }
 
@@ -446,25 +716,34 @@ class BleService : Service() {
         val remoteRx = remoteRxCharacteristic
         
         if (gatt == null || remoteRx == null) {
-            appendLog("❌ No valid connection path available (gatt=$gatt, remoteRx=$remoteRx)")
+            appendLog("⚠️ GATT or RX characteristic not available")
             return
         }
 
-        if (remoteWriteInProgress) {
-            appendLog("⏳ Write already in progress, will retry")
-            return
-        }
-
-        remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-        remoteRx.value = data
-        remoteWriteInProgress = true
+        // Mark operation in progress for client writes
+        operationInProgress = true
         
-        val success = gatt.writeCharacteristic(remoteRx)
-        if (success) {
-            appendLog("➡️ Write requested to ${gatt.device.address}")
+        // Use official sample's write pattern (Android 13+ vs older)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val result = gatt.writeCharacteristic(
+                remoteRx,
+                data,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            )
+            appendLog("✅ Wrote ${data.size}B (result=$result)")
+            if (result != BluetoothGatt.GATT_SUCCESS) {
+                operationInProgress = false
+            }
         } else {
-            appendLog("❌ writeCharacteristic returned false")
-            remoteWriteInProgress = false
+            remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            @Suppress("DEPRECATION")
+            remoteRx.value = data
+            @Suppress("DEPRECATION")
+            val success = gatt.writeCharacteristic(remoteRx)
+            appendLog(if (success) "✅ Wrote ${data.size}B" else "❌ Write failed")
+            if (!success) {
+                operationInProgress = false
+            }
         }
     }
 
@@ -592,60 +871,119 @@ class BleService : Service() {
     private val gattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            // Based on official Android ConnectGATTSample
+            // https://github.com/android/platform-samples/blob/main/samples/connectivity/bluetooth/ble/ConnectGATTSample.kt
+            
+            appendLog("🔄 Connection state change: status=$status, newState=$newState")
+            
+            // Handle error statuses - per official sample (lines 254-261)
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                appendLog("❌ Connection error: status=$status")
+                when (status) {
+                    5, 15 -> {
+                        // GATT_INSUFFICIENT_AUTHENTICATION or GATT_INSUFFICIENT_ENCRYPTION
+                        appendLog("🔐 Authentication/Encryption required - creating bond...")
+                        gatt.device.createBond()
+                    }
+                    133 -> {
+                        // GATT_ERROR - Try cache refresh
+                        appendLog("⚠️ GATT_ERROR - refreshing cache and retrying...")
+                        refreshDeviceCache(gatt)
+                        gatt.close()
+                        clientGatt = null
+                    }
+                    else -> {
+                        appendLog("❌ Error: See https://developer.android.com/reference/android/bluetooth/BluetoothGatt")
+                    }
+                }
+                _connectionState.value = ConnectionState.DISCONNECTED
+                return
+            }
+            
+            // Handle connection states
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = gatt.device
                     clientGatt = gatt
-                    appendLog("🤝 Connected to ${gatt.device.address}")
-                    gatt.requestMtu(517) // Request max MTU (512 + 5 byte header)
-                    gatt.discoverServices()
+                    appendLog("✅ Connected to ${gatt.device.address}")
+                    
+                    // Request MTU for better throughput (official sample line 137)
+                    // Note: Android 14+ sets default MTU automatically
+                    appendLog("📏 Requesting MTU (247 bytes)...")
+                    gatt.requestMtu(247)
+                    // Service discovery happens in onMtuChanged
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
+                    appendLog("🔌 Disconnected from ${gatt.device.address}")
+                    
+                    // Clean up
                     connectedDevice = null
                     clientGatt = null
                     remoteTxCharacteristic = null
                     remoteRxCharacteristic = null
                     remoteWriteInProgress = false
+                    operationInProgress = false
+                    operationQueue.clear()
+                    descriptorWriteRetries = 0
                     sendingJob?.cancel()
-                    appendLog("🔌 Disconnected from ${gatt.device.address}")
                 }
             }
         }
+        
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            appendLog("📏 MTU changed to $mtu (status=$status)")
+            
+            // Now discover services (official sample pattern)
+            appendLog("🔍 Discovering services...")
+            gatt.discoverServices()
+        }
 
+        @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                appendLog("🔎 Services discovered on ${gatt.device.address}")
-                val service = gatt.getService(SERVICE_UUID)
-                if (service == null) {
-                    appendLog("⚠️ Remote PolliNet service not found")
-                    return
-                }
-
-                remoteTxCharacteristic = service.getCharacteristic(TX_CHAR_UUID)?.also { tx ->
-                    gatt.setCharacteristicNotification(tx, true)
-                    val descriptor = tx.getDescriptor(cccdUuid)
-                    if (descriptor != null) {
-                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        if (!gatt.writeDescriptor(descriptor)) {
-                            appendLog("⚠️ Failed to write CCCD descriptor")
-                        } else {
-                            appendLog("📬 Enabling notifications on remote TX")
-                        }
-                    } else {
-                        appendLog("⚠️ Remote TX missing CCCD descriptor")
-                    }
-                }
-
-                remoteRxCharacteristic = service.getCharacteristic(RX_CHAR_UUID)
-                if (remoteRxCharacteristic == null) {
-                    appendLog("⚠️ Remote RX characteristic not found")
-                } else {
-                    appendLog("✉️ Ready to write to remote RX")
-                    // Start sending loop now that we're fully connected
-                    ensureSendingLoopStarted()
-                }
+            // Based on official Android ConnectGATTSample (line 270-274)
+            appendLog("📋 Services discovered: status=$status")
+            
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                appendLog("❌ Service discovery failed")
+                return
+            }
+            
+            // Find our service
+            val service = gatt.getService(SERVICE_UUID)
+            if (service == null) {
+                appendLog("⚠️ PolliNet service not found")
+                appendLog("   Available: ${gatt.services.map { it.uuid }}")
+                return
+            }
+            
+            appendLog("✅ Service found: $SERVICE_UUID")
+            
+            // Get characteristics
+            remoteTxCharacteristic = service.getCharacteristic(TX_CHAR_UUID)
+            remoteRxCharacteristic = service.getCharacteristic(RX_CHAR_UUID)
+            
+            if (remoteTxCharacteristic == null || remoteRxCharacteristic == null) {
+                appendLog("❌ Missing characteristics")
+                return
+            }
+            
+            appendLog("✅ Characteristics ready")
+            appendLog("   TX: $TX_CHAR_UUID")
+            appendLog("   RX: $RX_CHAR_UUID")
+            
+            // Enable notifications on TX characteristic
+            gatt.setCharacteristicNotification(remoteTxCharacteristic, true)
+            
+            // Write CCCD to enable remote notifications
+            val descriptor = remoteTxCharacteristic?.getDescriptor(cccdUuid)
+            if (descriptor != null) {
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                gatt.writeDescriptor(descriptor)
+                appendLog("📬 Enabling notifications...")
+            } else {
+                appendLog("⚠️ CCCD descriptor not found")
             }
         }
 
@@ -656,15 +994,12 @@ class BleService : Service() {
         ) {
             // Forward to Rust FFI
             serviceScope.launch {
-                val sdkInstance = sdk ?: run {
+                if (sdk == null) {
                     appendLog("⚠️ SDK not initialized; inbound dropped")
                     return@launch
                 }
-                sdkInstance.pushInbound(value).onSuccess {
-                    appendLog("⬅️ Received: ${previewFragment(value)}")
-                }.onFailure {
-                    appendLog("❌ Inbound failed: ${it.message}")
-                }
+                appendLog("⬅️ Received: ${previewFragment(value)}")
+                handleReceivedData(value)
             }
         }
 
@@ -674,26 +1009,41 @@ class BleService : Service() {
             status: Int
         ) {
             if (characteristic.uuid == RX_CHAR_UUID) {
+                operationInProgress = false
+                
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     completeRemoteWrite()
+                    // Process next operation in queue
+                    processOperationQueue()
                 } else {
                     remoteWriteInProgress = false
                     appendLog("❌ Write failed with status $status")
+                    
+                    if (status == 133) {
+                        handleStatus133(gatt)
+                    } else {
+                        // Process next operation anyway
+                        processOperationQueue()
+                    }
                 }
             }
         }
 
+        @SuppressLint("MissingPermission")
         override fun onDescriptorWrite(
             gatt: BluetoothGatt,
             descriptor: BluetoothGattDescriptor,
             status: Int
         ) {
-            if (descriptor.uuid == cccdUuid) {
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    appendLog("✅ Remote notifications enabled")
-                } else {
-                    appendLog("❌ Failed to enable notifications (status $status)")
-                }
+            // Simple handling like official sample
+            appendLog("📝 Descriptor write: status=$status")
+            
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                appendLog("✅ Notifications enabled - ready to transfer data!")
+                // Start sending loop
+                ensureSendingLoopStarted()
+            } else {
+                appendLog("❌ Failed to enable notifications: status=$status")
             }
         }
     }
@@ -731,15 +1081,12 @@ class BleService : Service() {
             if (characteristic.uuid == RX_CHAR_UUID) {
                 // Forward to Rust FFI
                 serviceScope.launch {
-                    val sdkInstance = sdk ?: run {
+                    if (sdk == null) {
                         appendLog("⚠️ SDK not initialized; write dropped")
                         return@launch
                     }
-                    sdkInstance.pushInbound(value).onSuccess {
-                        appendLog("⬅️ RX from ${device.address}: ${previewFragment(value)}")
-                    }.onFailure {
-                        appendLog("❌ Failed to process write: ${it.message}")
-                    }
+                    appendLog("⬅️ RX from ${device.address}: ${previewFragment(value)}")
+                    handleReceivedData(value)
                 }
                 
                 if (responseNeeded) {
@@ -801,6 +1148,58 @@ class BleService : Service() {
             .build()
     }
 
+    /**
+     * Refresh GATT cache - critical for recovering from status 133
+     */
+    private fun refreshDeviceCache(gatt: BluetoothGatt): Boolean {
+        return try {
+            val refresh = gatt.javaClass.getMethod("refresh")
+            val result = refresh.invoke(gatt) as Boolean
+            appendLog("🔄 GATT cache refresh: $result")
+            result
+        } catch (e: Exception) {
+            appendLog("❌ Failed to refresh cache: ${e.message}")
+            false
+        }
+    }
+    
+    /**
+     * Handle status 133 error - disconnect, clear cache, and retry
+     */
+    @SuppressLint("MissingPermission")
+    private fun handleStatus133(gatt: BluetoothGatt) {
+        appendLog("⚠️ Handling status 133 - clearing cache and reconnecting")
+        refreshDeviceCache(gatt)
+        gatt.close()
+        clientGatt = null
+        _connectionState.value = ConnectionState.DISCONNECTED
+        
+        // Retry connection after delay
+        val device = gatt.device
+        mainHandler.postDelayed({
+            appendLog("🔄 Retrying connection after status 133...")
+            try {
+                device.connectGatt(this, false, gattCallback)
+            } catch (e: Exception) {
+                appendLog("❌ Retry connection failed: ${e.message}")
+            }
+        }, 1000)
+    }
+    
+    /**
+     * Process the operation queue - ensures only one BLE operation at a time
+     */
+    @SuppressLint("MissingPermission")
+    private fun processOperationQueue() {
+        if (operationInProgress || operationQueue.isEmpty()) return
+        
+        val data = operationQueue.poll() ?: return
+        operationInProgress = true
+        
+        appendLog("📤 Processing queued operation (${data.size} bytes)")
+        sendToGatt(data)
+    }
+
     private fun appendLog(message: String) {
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val entry = "[$timestamp] $message"
@@ -819,5 +1218,15 @@ class BleService : Service() {
         } catch (e: Exception) {
             "${data.size} bytes (binary)"
         }
+    }
+    
+    /**
+     * Convert bond state integer to human-readable string
+     */
+    private fun Int.toBondStateString() = when (this) {
+        BluetoothDevice.BOND_NONE -> "BOND_NONE"
+        BluetoothDevice.BOND_BONDING -> "BOND_BONDING"
+        BluetoothDevice.BOND_BONDED -> "BOND_BONDED"
+        else -> "UNKNOWN ($this)"
     }
 }
