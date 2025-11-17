@@ -14,11 +14,13 @@
 //! 4. Add sender signature
 //! 5. Submit to Solana (if fully signed)
 
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use base64;
-use bs58;
 use chrono;
-use pollinet::PolliNetSDK;
 use pollinet::nonce;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -34,38 +36,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Unsigned SPL Token Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
+    let rpc_url = "https://api.devnet.solana.com";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key
-    info!("\n=== Loading Sender Keypair ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
-
-    // 3. Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
 
     // 4. Set up nonce account
     info!("\n=== Setting Up Nonce Account ===");
@@ -115,7 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Transaction is ready for signing!");
     info!("   Instructions: [1] Advance nonce, [2] SPL Token Transfer");
     info!("   Required signers:");
-    info!("     - Sender/Token owner (as nonce authority): {}", sender_wallet);
+    info!(
+        "     - Sender/Token owner (as nonce authority): {}",
+        sender_wallet
+    );
     info!("     - Fee payer: {}", fee_payer);
     info!("   Blockhash: From nonce account (durable)");
     info!("\nBase64 transaction (first 60 chars):");
@@ -181,7 +164,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let final_time = chrono::Local::now();
-        info!("✅ Wait complete | Time: {}", final_time.format("%Y-%m-%d %H:%M:%S"));
+        info!(
+            "✅ Wait complete | Time: {}",
+            final_time.format("%Y-%m-%d %H:%M:%S")
+        );
 
         // Submit the SPL transaction
         info!("\n=== Submitting Fully Signed SPL Transaction ===");
@@ -255,4 +241,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

@@ -2,7 +2,7 @@
 //!
 //! Shows how to use the PolliNet SDK for offline Solana transaction propagation
 
-use pollinet::{PolliNetSDK, transaction};
+use pollinet::{transaction, PolliNetSDK};
 use tracing::{error, info};
 
 #[tokio::main]

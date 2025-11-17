@@ -123,7 +123,10 @@ impl Lz4Compressor {
 
         // Check LZ4 header (3 bytes: "LZ4")
         if &compressed_data[..3] != b"LZ4" {
-            tracing::error!("Invalid LZ4 header. Expected 'LZ4', got: {:02x?}", &compressed_data[..3.min(compressed_data.len())]);
+            tracing::error!(
+                "Invalid LZ4 header. Expected 'LZ4', got: {:02x?}",
+                &compressed_data[..3.min(compressed_data.len())]
+            );
             return Err(Lz4Error::InvalidData("Invalid LZ4 header".to_string()));
         }
 
@@ -140,7 +143,11 @@ impl Lz4Compressor {
         // Extract compressed data (starts at byte 7)
         let data = &compressed_data[7..];
 
-        tracing::info!("Decompressing {} bytes to {} bytes", data.len(), original_size);
+        tracing::info!(
+            "Decompressing {} bytes to {} bytes",
+            data.len(),
+            original_size
+        );
 
         // Decompress
         let decompressed = lz4::block::decompress(data, Some(original_size as i32))

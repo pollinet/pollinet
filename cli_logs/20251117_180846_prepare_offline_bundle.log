@@ -1,0 +1,356 @@
+warning: unused import: `MeshRouter`
+ --> src/ble/broadcaster.rs:8:45
+  |
+8 | use crate::ble::mesh::{TransactionFragment, MeshRouter, MeshPacket, PacketType};
+  |                                             ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `futures::stream::StreamExt`
+   --> src/ble/linux.rs:228:21
+    |
+228 |                 use futures::stream::StreamExt;
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `MemcmpEncodedBytes`
+  --> src/nonce/mod.rs:18:56
+   |
+18 | use solana_client::rpc_filter::{RpcFilterType, Memcmp, MemcmpEncodedBytes};
+   |                                                        ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CachedNonceData`
+ --> src/storage.rs:8:52
+  |
+8 | use crate::transaction::{OfflineTransactionBundle, CachedNonceData};
+  |                                                    ^^^^^^^^^^^^^^^
+
+warning: use of deprecated module `solana_sdk::system_instruction`: Use `solana_system_interface` crate instead
+  --> src/nonce/mod.rs:12:5
+   |
+12 |     system_instruction,
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated module `solana_sdk::system_instruction`: Use `solana_system_interface` crate instead
+  --> src/transaction/mod.rs:11:5
+   |
+11 |     system_instruction,
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+   --> src/transaction/mod.rs:392:35
+    |
+392 |         let unsigned_tx = base64::decode(base64_tx).map_err(|e| {
+    |                                   ^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+   --> src/transaction/mod.rs:513:33
+    |
+513 |         let base64_tx = base64::encode(&serialized);
+    |                                 ^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+   --> src/transaction/mod.rs:537:32
+    |
+537 |         let tx_bytes = base64::decode(base64_tx).map_err(|e| {
+    |                                ^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+   --> src/transaction/mod.rs:682:33
+    |
+682 |         let base64_tx = base64::encode(&serialized);
+    |                                 ^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+   --> src/transaction/mod.rs:765:33
+    |
+765 |         let base64_tx = base64::encode(&serialized);
+    |                                 ^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+   --> src/transaction/mod.rs:843:33
+    |
+843 |         let base64_tx = base64::encode(&serialized);
+    |                                 ^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+    --> src/transaction/mod.rs:1367:33
+     |
+1367 |         let base64_tx = base64::encode(&serialized);
+     |                                 ^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+    --> src/transaction/mod.rs:1382:32
+     |
+1382 |         let tx_bytes = base64::decode(base64_tx).map_err(|e| {
+     |                                ^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+    --> src/transaction/mod.rs:1406:32
+     |
+1406 |         let tx_bytes = base64::decode(base64_tx).map_err(|e| {
+     |                                ^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+    --> src/transaction/mod.rs:1644:32
+     |
+1644 |         let tx_bytes = base64::decode(base64_signed_tx).map_err(|e| {
+     |                                ^^^^^^
+
+warning: unused variable: `serialized`
+    --> src/transaction/mod.rs:1916:13
+     |
+1916 |         let serialized = serde_json::to_vec(&confirmation_packet)
+     |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_serialized`
+     |
+     = note: `#[warn(unused_variables)]` on by default
+
+warning: use of deprecated associated function `solana_sdk::hash::Hash::new`: Use 'Hash::new_from_array' instead
+   --> src/nonce/mod.rs:170:27
+    |
+170 |     let blockhash = Hash::new(&data[36..68]);
+    |                           ^^^
+
+warning: unused import: `futures::FutureExt`
+  --> src/ble/linux.rs:27:9
+   |
+27 |     use futures::FutureExt;
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `address`
+  --> src/ble/adapter.rs:71:39
+   |
+71 |     async fn connect_to_device(&self, address: &str) -> Result<(), BleError> {
+   |                                       ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `address`
+  --> src/ble/adapter.rs:76:37
+   |
+76 |     async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+   |                                     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `data`
+  --> src/ble/adapter.rs:76:52
+   |
+76 |     async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
+   |                                                    ^^^^ help: if this is intentional, prefix it with an underscore: `_data`
+
+warning: unused variable: `address`
+  --> src/ble/adapter.rs:81:38
+   |
+81 |     async fn read_from_device(&self, address: &str) -> Result<Vec<u8>, BleError> {
+   |                                      ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `authority`
+   --> src/nonce/mod.rs:111:9
+    |
+111 |         authority: &Pubkey,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_authority`
+
+warning: unused variable: `recent_blockhash`
+   --> src/nonce/mod.rs:112:9
+    |
+112 |         recent_blockhash: &Hash,
+    |         ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_recent_blockhash`
+
+warning: unused variable: `dest`
+  --> src/transaction/pollinet_message.rs:66:9
+   |
+66 |         dest: String,
+   |         ^^^^ help: if this is intentional, prefix it with an underscore: `_dest`
+
+warning: type `PeerFragmentStatus` is more private than the item `BroadcastInfo::peer_status`
+   --> src/ble/broadcaster.rs:118:5
+    |
+118 |     pub peer_status: HashMap<String, PeerFragmentStatus>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `BroadcastInfo::peer_status` is reachable at visibility `pub`
+    |
+note: but type `PeerFragmentStatus` is only usable at visibility `pub(self)`
+   --> src/ble/broadcaster.rs:37:1
+    |
+ 37 | struct PeerFragmentStatus {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: fields `nonce_manager` and `local_cache` are never read
+  --> src/lib.rs:26:5
+   |
+20 | pub struct PolliNetSDK {
+   |            ----------- fields in this struct
+...
+26 |     nonce_manager: Arc<nonce::NonceManager>,
+   |     ^^^^^^^^^^^^^
+27 |     /// Local transaction cache
+28 |     local_cache: Arc<RwLock<transaction::TransactionCache>>,
+   |     ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: fields `adapter` and `confirmation_characteristic_uuid` are never read
+   --> src/ble/mod.rs:92:5
+    |
+ 88 | pub struct MeshTransport {
+    |            ------------- fields in this struct
+...
+ 92 |     adapter: Option<Adapter>,
+    |     ^^^^^^^
+...
+104 |     confirmation_characteristic_uuid: Uuid,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `transaction_id` is never read
+   --> src/ble/mesh.rs:235:5
+    |
+234 | struct IncompleteTransaction {
+    |        --------------------- field in this struct
+235 |     transaction_id: [u8; 32],
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `IncompleteTransaction` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `hop_count` is never read
+   --> src/ble/mesh.rs:293:5
+    |
+291 | struct SeenMessage {
+    |        ----------- field in this struct
+292 |     seen_at: Instant,
+293 |     hop_count: u8,
+    |     ^^^^^^^^^
+    |
+    = note: `SeenMessage` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: constant `MAX_RETRIES` is never used
+  --> src/ble/broadcaster.rs:17:7
+   |
+17 | const MAX_RETRIES: u32 = 3;
+   |       ^^^^^^^^^^^
+
+warning: constant `RETRY_INTERVAL` is never used
+  --> src/ble/broadcaster.rs:20:7
+   |
+20 | const RETRY_INTERVAL: Duration = Duration::from_secs(2);
+   |       ^^^^^^^^^^^^^^
+
+warning: field `peer_id` is never read
+  --> src/ble/broadcaster.rs:39:5
+   |
+37 | struct PeerFragmentStatus {
+   |        ------------------ field in this struct
+38 |     /// Peer ID
+39 |     peer_id: String,
+   |     ^^^^^^^
+   |
+   = note: `PeerFragmentStatus` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: methods `needs_retry` and `record_retry` are never used
+  --> src/ble/broadcaster.rs:72:8
+   |
+50 | impl PeerFragmentStatus {
+   | ----------------------- methods in this implementation
+...
+72 |     fn needs_retry(&self, fragment_index: u16) -> bool {
+   |        ^^^^^^^^^^^
+...
+90 |     fn record_retry(&mut self, fragment_index: u16) {
+   |        ^^^^^^^^^^^^
+
+warning: method `update_status` is never used
+   --> src/ble/broadcaster.rs:177:8
+    |
+127 | impl BroadcastInfo {
+    | ------------------ method in this implementation
+...
+177 |     fn update_status(&mut self) {
+    |        ^^^^^^^^^^^^^
+
+warning: fields `device_address` and `connected_at` are never read
+  --> src/ble/linux.rs:62:9
+   |
+61 |     struct ClientInfo {
+   |            ---------- fields in this struct
+62 |         device_address: String,
+   |         ^^^^^^^^^^^^^^
+63 |         connected_at: std::time::Instant,
+   |         ^^^^^^^^^^^^
+   |
+   = note: `ClientInfo` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `uuid` is never read
+  --> src/ble/linux.rs:71:9
+   |
+70 |     struct GattService {
+   |            ----------- field in this struct
+71 |         uuid: Uuid,
+   |         ^^^^
+   |
+   = note: `GattService` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `uuid` and `value` are never read
+  --> src/ble/linux.rs:78:9
+   |
+77 |     struct GattCharacteristic {
+   |            ------------------ fields in this struct
+78 |         uuid: Uuid,
+   |         ^^^^
+79 |         properties: CharacteristicProperties,
+80 |         value: Option<Vec<u8>>,
+   |         ^^^^^
+   |
+   = note: `GattCharacteristic` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: struct `DeviceInfo` is never constructed
+   --> src/ble/linux.rs:665:12
+    |
+665 |     struct DeviceInfo {
+    |            ^^^^^^^^^^
+
+warning: constant `BUNDLE_VERSION` is never used
+  --> src/storage.rs:11:7
+   |
+11 | const BUNDLE_VERSION: u32 = 1;
+   |       ^^^^^^^^^^^^^^
+
+warning: unused implementer of `Stream` that must be used
+   --> src/ble/linux.rs:351:13
+    |
+351 | /             characteristic.notify().await
+352 | |                 .map_err(|e| BleError::PlatformError(format!("Failed to start notifications for characteristic {}: {}", char_uuid, e)))?;
+    | |________________________________________________________________________________________________________________________________________^
+    |
+    = note: streams do nothing unless polled
+    = note: `#[warn(unused_must_use)]` on by default
+
+warning: `pollinet` (lib) generated 42 warnings (run `cargo fix --lib -p pollinet` to apply 4 suggestions)
+   Compiling pollinet v0.1.0 (/home/oghenekparob_r/pollinet)
+warning: unused import: `solana_sdk::native_token::LAMPORTS_PER_SOL`
+  --> examples/offline_bundle_management.rs:26:5
+   |
+26 | use solana_sdk::native_token::LAMPORTS_PER_SOL;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `solana_sdk::signature::Keypair`
+  --> examples/offline_bundle_management.rs:27:5
+   |
+27 | use solana_sdk::signature::Keypair;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `pollinet` (example "offline_bundle_management") generated 2 warnings (run `cargo fix --example "offline_bundle_management"` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 33.50s
+warning: the following packages contain code that will be rejected by a future version of Rust: bluer v0.16.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running `target/debug/examples/offline_bundle_management`
+[2m2025-11-17T17:09:20.881886Z[0m [32m INFO[0m [2moffline_bundle_management[0m[2m:[0m === PolliNet Offline Bundle Management Example ===
+
+[2m2025-11-17T17:09:20.886681Z[0m [32m INFO[0m [2moffline_bundle_management[0m[2m:[0m 
+=== Creating New Wallet ===
+[2m2025-11-17T17:09:20.886758Z[0m [32m INFO[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m === Creating New Wallet ===
+[2m2025-11-17T17:09:20.887952Z[0m [32m INFO[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m ✅ New wallet created: iS6Z6irhpkMAsPLx7RVDJwYEVHXfqB5LERnPa6RHyAP
+[2m2025-11-17T17:09:20.888083Z[0m [32m INFO[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m    Requesting airdrop of 5 SOL...
+[2m2025-11-17T17:09:26.007426Z[0m [33m WARN[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m ⚠️  Airdrop rate limited (attempt 1/5). Waiting 2 seconds before retry...
+[2m2025-11-17T17:09:28.300198Z[0m [33m WARN[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m ⚠️  Airdrop rate limited (attempt 2/5). Waiting 4 seconds before retry...
+[2m2025-11-17T17:09:32.574282Z[0m [33m WARN[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m ⚠️  Airdrop rate limited (attempt 3/5). Waiting 6 seconds before retry...
+[2m2025-11-17T17:09:38.849671Z[0m [33m WARN[0m [2moffline_bundle_management::wallet_utils[0m[2m:[0m ⚠️  Airdrop rate limited (attempt 4/5). Waiting 8 seconds before retry...
+Error: Error { request: None, kind: RpcError(ForUser("airdrop request failed. This can happen when the rate limit is reached.")) }

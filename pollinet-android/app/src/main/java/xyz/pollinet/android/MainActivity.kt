@@ -154,7 +154,7 @@ fun PolliNetApp(mwaActivityResultSender: ActivityResultSender) {
         scope.launch {
             PolliNetSDK.initialize(
                 SdkConfig(
-                    rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6", // Use devnet for testing
+                    rpcUrl = "https://api.devnet.solana.com", // Use devnet for testing
                     enableLogging = true,
                     logLevel = "info",
                     storageDirectory = context.filesDir.absolutePath

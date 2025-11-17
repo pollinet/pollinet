@@ -15,10 +15,12 @@
 //! - Mesh network transaction propagation
 //! - Store-and-forward scenarios
 
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use base64;
-use bs58;
-use pollinet::PolliNetSDK;
 use pollinet::nonce;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -38,41 +40,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Relay Presigned Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
+    let rpc_url = "https://api.devnet.solana.com";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key
-    info!("\n=== Loading Sender Keypair ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
-    // 3. Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    // 4. Set up nonce account
+    // 3. Set up nonce account
     info!("\n=== Setting Up Nonce Account ===");
     let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
     info!("Using nonce account: {}", nonce_account);
 
-    // 5. Create a custom presigned transaction
+    // 4. Create a custom presigned transaction
     info!("\n=== Creating Custom Presigned Transaction ===");
     info!("This could be ANY Solana transaction - we'll create a simple SOL transfer as example");
 
@@ -104,35 +88,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // In practice, this would come from another node or user
     info!("\n=== Creating Another Transaction (Simulating External Source) ===");
     info!("This simulates receiving a presigned transaction from another party...");
-    
+
     // Create a simple signed transaction directly
     let nonce_pubkey = Pubkey::from_str(nonce_account)?;
     let recipient_pubkey = Pubkey::from_str(recipient)?;
     let nonce_account_data = rpc_client.get_account(&nonce_pubkey)?;
-    let nonce_state: solana_sdk::nonce::state::Versions = bincode1::deserialize(&nonce_account_data.data)?;
+    let nonce_state: solana_sdk::nonce::state::Versions =
+        bincode1::deserialize(&nonce_account_data.data)?;
     let nonce_data = match nonce_state.state() {
         solana_sdk::nonce::State::Initialized(data) => data.clone(),
         _ => return Err("Nonce not initialized".into()),
     };
-    
-    let advance_ix = system_instruction::advance_nonce_account(&nonce_pubkey, &sender_keypair.pubkey());
-    let transfer_ix = system_instruction::transfer(&sender_keypair.pubkey(), &recipient_pubkey, amount);
-    
-    let mut custom_tx = Transaction::new_with_payer(
-        &[advance_ix, transfer_ix],
-        Some(&sender_keypair.pubkey()),
-    );
+
+    let advance_ix =
+        system_instruction::advance_nonce_account(&nonce_pubkey, &sender_keypair.pubkey());
+    let transfer_ix =
+        system_instruction::transfer(&sender_keypair.pubkey(), &recipient_pubkey, amount);
+
+    let mut custom_tx =
+        Transaction::new_with_payer(&[advance_ix, transfer_ix], Some(&sender_keypair.pubkey()));
     custom_tx.message.recent_blockhash = nonce_data.blockhash();
     custom_tx.sign(&[&sender_keypair], nonce_data.blockhash());
-    
+
     // Serialize and encode to base64
     let tx_bytes = bincode1::serialize(&custom_tx)?;
     let base64_tx = base64::encode(&tx_bytes);
-    
+
     info!("✅ Presigned transaction ready for relay");
     info!("   Transaction size: {} bytes", tx_bytes.len());
     info!("   Base64 length: {} characters", base64_tx.len());
-    info!("   First 60 chars: {}...", &base64_tx[..60.min(base64_tx.len())]);
+    info!(
+        "   First 60 chars: {}...",
+        &base64_tx[..60.min(base64_tx.len())]
+    );
 
     // 6. Process and relay the presigned transaction
     info!("\n=== Processing and Relaying Transaction ===");
@@ -190,4 +178,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

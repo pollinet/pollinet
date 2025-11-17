@@ -11,7 +11,9 @@
 //! 5. Relay over BLE mesh
 //! 6. Submit to Solana
 
-use bs58;
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use chrono;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
@@ -29,47 +31,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Governance Vote Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
+    let rpc_url = "https://api.devnet.solana.com";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load voter keypair from private key
-    info!("\n=== Loading Voter Keypair ===");
-    let voter_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(voter_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let voter_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let voter_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Voter loaded: {}", voter_keypair.pubkey());
     info!("   Voter is both the vote caster and nonce authority");
 
-    // 3. Check voter balance
-    info!("\n=== Checking Voter Balance ===");
-    let voter_balance = rpc_client.get_balance(&voter_keypair.pubkey())?;
-    info!(
-        "Voter balance: {} lamports ({} SOL)",
-        voter_balance,
-        voter_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if voter_balance == 0 {
-        return Err("Voter has no balance. Please fund the wallet first.".into());
-    }
-
-    // 4. Set up nonce account
+    // 3. Set up nonce account
     info!("\n=== Setting Up Nonce Account ===");
     let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
     info!("Using nonce account: {}", nonce_account);
     info!("   Nonce authority: {} (voter)", voter_keypair.pubkey());
 
-    // 5. Set governance vote parameters
+    // 4. Set governance vote parameters
     info!("\n=== Governance Vote Parameters ===");
     let proposal_id = "GgathUhdrCWRHowoRKACjgWhYHfxCEdBi5ViqYN6HVxk".to_string();
     let vote_account = voter_keypair.pubkey().to_string(); // Voter's account
@@ -157,7 +137,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let final_time = chrono::Local::now();
-    info!("✅ Wait complete | Time: {}", final_time.format("%Y-%m-%d %H:%M:%S"));
+    info!(
+        "✅ Wait complete | Time: {}",
+        final_time.format("%Y-%m-%d %H:%M:%S")
+    );
     info!("Vote transaction is still valid thanks to durable nonce!");
 
     // 11. Submit vote to Solana blockchain
@@ -183,7 +166,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ 2. Verified voter balance");
     info!("✅ 3. Set up nonce account");
     info!("✅ 4. Created presigned vote transaction with durable nonce");
-    info!("✅ 5. Compressed transaction: {} bytes", compressed_tx.len());
+    info!(
+        "✅ 5. Compressed transaction: {} bytes",
+        compressed_tx.len()
+    );
     info!(
         "✅ 6. Fragmented into {} BLE-ready fragments",
         fragments.len()
@@ -211,4 +197,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

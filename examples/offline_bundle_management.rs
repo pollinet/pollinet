@@ -16,9 +16,11 @@
 //! • Submit transactions
 //! • Automatically removes used nonces from file
 
-use bs58;
-use pollinet::PolliNetSDK;
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use pollinet::transaction::OfflineTransactionBundle;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -33,15 +35,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("=== PolliNet Offline Bundle Management Example ===\n");
 
-    // Load sender keypair
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
+    let rpc_url = "https://api.devnet.solana.com";
+    let rpc_client =
+        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
 
+    // Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
     // ================================================================
@@ -51,23 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("║  PHASE 1: ONLINE - Prepare Nonce Bundle              ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
-
-    // Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
 
     // Prepare bundle with multiple nonce accounts
     info!("\n=== Preparing Offline Bundle ===");

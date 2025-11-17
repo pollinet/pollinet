@@ -1,7 +1,7 @@
 //! Example: SPL Token Transfer with Durable Nonce
 //!
 //! This example demonstrates creating presigned SPL token transactions with nonce accounts.
-//! 
+//!
 //! Flow:
 //! 1. Load sender keypair from private key
 //! 2. Check sender balance
@@ -15,10 +15,12 @@
 //! - SPL token accounts for sender and recipient
 //! - Token balance in sender's token account
 
-use bs58;
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use chrono;
-use pollinet::PolliNetSDK;
 use pollinet::nonce;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -34,61 +36,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet SPL Token Nonce Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
+    let rpc_url = "https://api.devnet.solana.com";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key
-    info!("\n=== Loading Sender Keypair ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
-    // 3. Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
-
-    // 4. Set up nonce account (hardcoded for this example)
+    // 3. Set up nonce account (hardcoded for this example)
     info!("\n=== Setting Up Nonce Account ===");
     let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
     info!("Using nonce account: {}", nonce_account);
     info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
 
-    // 5. Set SPL token transfer parameters
+    // 4. Set SPL token transfer parameters
     info!("\n=== SPL Token Transfer Parameters ===");
-    
+
     // Wallet pubkeys and mint address (ATAs will be derived automatically)
     let sender_wallet = sender_keypair.pubkey().to_string();
     let recipient_wallet = "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX".to_string();
     let mint_address = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string(); // Your token mint
     let token_amount = 1_000_000; // Amount depends on token decimals (e.g., 1 USDC = 1,000,000)
-    
+
     info!("Sender wallet: {}", sender_wallet);
     info!("Recipient wallet: {}", recipient_wallet);
     info!("Token mint: {}", mint_address);
     info!("Token amount: {} (smallest unit)", token_amount);
     info!("ATAs will be automatically derived from wallets + mint");
 
-    // 6. Create the presigned SPL token transfer with nonce
+    // 5. Create the presigned SPL token transfer with nonce
     info!("\n=== Creating SPL Token Transfer ===");
     info!("Creating presigned SPL token transfer with nonce account...");
     info!("Associated Token Accounts will be derived automatically");
@@ -154,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 10. Optional: Wait to demonstrate nonce durability
     info!("\n=== Waiting Period (Optional) ===");
     info!("Waiting for 1 minute to demonstrate nonce transaction durability...");
-    
+
     let total_minutes = 1;
     for remaining_minutes in (1..=total_minutes).rev() {
         let current_time = chrono::Local::now();
@@ -165,9 +145,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
     }
-    
+
     let final_time = chrono::Local::now();
-    info!("✅ Wait complete | Time: {}", final_time.format("%Y-%m-%d %H:%M:%S"));
+    info!(
+        "✅ Wait complete | Time: {}",
+        final_time.format("%Y-%m-%d %H:%M:%S")
+    );
 
     // 11. Submit to Solana blockchain
     info!("\n=== Submitting SPL Transfer to Solana ===");
@@ -176,7 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signature = sdk.submit_transaction_to_solana(&reassembled_tx).await?;
     info!("✅ SPL token transfer submitted successfully!");
     info!("   Transaction signature: {}", signature);
-    info!("   View on Explorer: https://explorer.solana.com/tx/{}?cluster=devnet", signature);
+    info!(
+        "   View on Explorer: https://explorer.solana.com/tx/{}?cluster=devnet",
+        signature
+    );
 
     // 12. Broadcast confirmation
     info!("\n=== Broadcasting Confirmation ===");
@@ -189,8 +175,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ 2. Verified sender balance");
     info!("✅ 3. Set up nonce account: {}", nonce_account);
     info!("✅ 4. Created presigned SPL token transfer with durable nonce");
-    info!("✅ 5. Compressed transaction: {} bytes", compressed_tx.len());
-    info!("✅ 6. Fragmented into {} BLE-ready fragments", fragments.len());
+    info!(
+        "✅ 5. Compressed transaction: {} bytes",
+        compressed_tx.len()
+    );
+    info!(
+        "✅ 6. Fragmented into {} BLE-ready fragments",
+        fragments.len()
+    );
     info!("✅ 7. Reassembled fragments with checksum verification");
     info!("✅ 8. Decompressed and submitted to Solana");
     info!("✅ 9. Broadcasted confirmation: {}", signature);
@@ -205,4 +197,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

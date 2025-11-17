@@ -1,7 +1,7 @@
 //! Example: Complete Offline Transaction Flow
 //!
 //! This example demonstrates the complete workflow for offline transactions:
-//! 
+//!
 //! PHASE 1: ONLINE - Prepare for offline use
 //! 1. Create multiple nonce accounts
 //! 2. Fetch and cache nonce data
@@ -19,9 +19,11 @@
 //!
 //! This demonstrates true offline capability for PolliNet
 
-use bs58;
-use pollinet::PolliNetSDK;
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use pollinet::transaction::OfflineTransactionBundle;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -38,15 +40,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("This example demonstrates creating transactions COMPLETELY OFFLINE");
     info!("No internet connection is required for transaction creation!");
 
-    // Load sender keypair
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
+    let rpc_url = "https://api.devnet.solana.com";
+    let rpc_client =
+        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
 
+    // Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
     // ================================================================
@@ -56,23 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("║  PHASE 1: ONLINE - Prepare for Offline Use           ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
-
-    // Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
 
     // Create multiple nonce accounts for multiple offline transactions
     info!("\n=== Creating Nonce Accounts for Offline Use ===");
@@ -87,15 +71,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..num_nonces {
         info!("Creating nonce account {}/{}...", i + 1, num_nonces);
         let nonce_keypair = nonce::create_nonce_account(&rpc_client, &sender_keypair).await?;
-        
+
         // Wait for confirmation
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        
+
         // Fetch and cache nonce data
         let cached_nonce = sdk
             .prepare_offline_nonce_data(&nonce_keypair.pubkey().to_string())
             .await?;
-        
+
         offline_bundle.add_nonce(cached_nonce);
         info!("  ✅ Nonce {}/{} ready", i + 1, num_nonces);
     }
@@ -104,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // For demo purposes, use existing nonce account
     info!("Using existing nonce account for demonstration...");
     let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-    
+
     let cached_nonce = sdk.prepare_offline_nonce_data(nonce_account).await?;
     offline_bundle.add_nonce(cached_nonce.clone());
     offline_bundle.add_nonce(cached_nonce.clone());
@@ -121,7 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     offline_bundle.save_to_file(cache_file)?;
     info!("✅ Saved offline nonce data to: {}", cache_file);
     info!("   This file can now be used to create transactions offline");
-    info!("   File size: {} bytes", std::fs::metadata(cache_file)?.len());
+    info!(
+        "   File size: {} bytes",
+        std::fs::metadata(cache_file)?.len()
+    );
 
     info!("\n╔═══════════════════════════════════════════════════════╗");
     info!("║  PHASE 1 COMPLETE!                                    ║");
@@ -143,7 +130,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load cached nonce data from file
     info!("\n=== Loading Cached Nonce Data ===");
     let loaded_bundle = OfflineTransactionBundle::load_from_file(cache_file)?;
-    info!("✅ Loaded {} cached nonce accounts", loaded_bundle.available_nonces());
+    info!(
+        "✅ Loaded {} cached nonce accounts",
+        loaded_bundle.available_nonces()
+    );
     info!("   Bundle age: {} hours", loaded_bundle.age_hours());
 
     // Create multiple transactions offline
@@ -159,7 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (i, (recipient, amount)) in recipients.iter().zip(amounts.iter()).enumerate() {
         if let Some(cached_nonce) = loaded_bundle.get_nonce(i) {
-            info!("Creating offline transaction {}/{}...", i + 1, recipients.len());
+            info!(
+                "Creating offline transaction {}/{}...",
+                i + 1,
+                recipients.len()
+            );
             info!("  Recipient: {}", recipient);
             info!("  Amount: {} lamports", amount);
 
@@ -187,11 +181,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tx_file = "offline_transactions.json";
     let tx_json = serde_json::to_string_pretty(&offline_txs)?;
     std::fs::write(tx_file, tx_json)?;
-    info!("✅ Saved {} transactions to: {}", offline_txs.len(), tx_file);
+    info!(
+        "✅ Saved {} transactions to: {}",
+        offline_txs.len(),
+        tx_file
+    );
 
     info!("\n╔═══════════════════════════════════════════════════════╗");
     info!("║  PHASE 2 COMPLETE!                                    ║");
-    info!("║  {} transactions created offline                     ║", offline_txs.len());
+    info!(
+        "║  {} transactions created offline                     ║",
+        offline_txs.len()
+    );
     info!("║  You can now go back online to submit them           ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
@@ -224,7 +225,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(signature) => {
                 info!("  ✅ Transaction submitted successfully!");
                 info!("     Signature: {}", signature);
-                info!("     Explorer: https://explorer.solana.com/tx/{}?cluster=devnet", signature);
+                info!(
+                    "     Explorer: https://explorer.solana.com/tx/{}?cluster=devnet",
+                    signature
+                );
                 signatures.push(signature);
             }
             Err(e) => {
@@ -244,17 +248,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("╚═══════════════════════════════════════════════════════╝");
 
     info!("\n✅ PHASE 1 (ONLINE):");
-    info!("   • Created {} nonce accounts", loaded_bundle.available_nonces());
+    info!(
+        "   • Created {} nonce accounts",
+        loaded_bundle.available_nonces()
+    );
     info!("   • Cached nonce data to file");
     info!("   • File: {}", cache_file);
 
     info!("\n✅ PHASE 2 (OFFLINE):");
     info!("   • Loaded cached nonce data");
-    info!("   • Created {} transactions WITHOUT internet", loaded_txs.len());
+    info!(
+        "   • Created {} transactions WITHOUT internet",
+        loaded_txs.len()
+    );
     info!("   • Saved transactions to file");
 
     info!("\n✅ PHASE 3 (ONLINE):");
-    info!("   • Submitted {} transaction(s) successfully", signatures.len());
+    info!(
+        "   • Submitted {} transaction(s) successfully",
+        signatures.len()
+    );
     info!("   • Signatures:");
     for (i, sig) in signatures.iter().enumerate() {
         info!("     {}. {}", i + 1, sig);
@@ -294,4 +307,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

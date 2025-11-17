@@ -1,9 +1,9 @@
 //! Android BLE implementation stub
-//! 
+//!
 //! This module provides a stub implementation for Android.
 //! In the future, this will use Android Bluetooth APIs via JNI or a native crate.
 
-use super::adapter::{BleAdapter, BleError, AdapterInfo};
+use super::adapter::{AdapterInfo, BleAdapter, BleError};
 use async_trait::async_trait;
 
 /// Android BLE adapter implementation (stub)
@@ -15,14 +15,18 @@ impl AndroidBleAdapter {
     /// Create a new Android BLE adapter (stub)
     pub async fn new() -> Result<Self, BleError> {
         Err(BleError::OperationNotSupported(
-            "Android BLE adapter not yet implemented".to_string()
+            "Android BLE adapter not yet implemented".to_string(),
         ))
     }
 }
 
 #[async_trait]
 impl BleAdapter for AndroidBleAdapter {
-    async fn start_advertising(&self, _service_uuid: &str, _service_name: &str) -> Result<(), BleError> {
+    async fn start_advertising(
+        &self,
+        _service_uuid: &str,
+        _service_name: &str,
+    ) -> Result<(), BleError> {
         unimplemented!("Android BLE adapter not yet implemented")
     }
 
@@ -58,19 +62,21 @@ impl BleAdapter for AndroidBleAdapter {
 
     async fn start_scanning(&self) -> Result<(), BleError> {
         Err(BleError::OperationNotSupported(
-            "Android BLE scanning not yet implemented".to_string()
+            "Android BLE scanning not yet implemented".to_string(),
         ))
     }
 
     async fn stop_scanning(&self) -> Result<(), BleError> {
         Err(BleError::OperationNotSupported(
-            "Android BLE scanning not yet implemented".to_string()
+            "Android BLE scanning not yet implemented".to_string(),
         ))
     }
 
-    async fn get_discovered_devices(&self) -> Result<Vec<super::adapter::DiscoveredDevice>, BleError> {
+    async fn get_discovered_devices(
+        &self,
+    ) -> Result<Vec<super::adapter::DiscoveredDevice>, BleError> {
         Err(BleError::OperationNotSupported(
-            "Android BLE discovery not yet implemented".to_string()
+            "Android BLE discovery not yet implemented".to_string(),
         ))
     }
 }

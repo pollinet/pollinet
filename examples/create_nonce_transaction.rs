@@ -22,10 +22,12 @@
 //! - Pre-funded wallet (sender must have balance)
 //! - Internet connection to submit transaction
 
-use bs58;
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use chrono;
-use pollinet::PolliNetSDK;
 use pollinet::nonce;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -41,41 +43,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Nonce Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
+    let rpc_url = "https://api.devnet.solana.com";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key (in production, use secure key management)
-    info!("\n=== Loading Sender Keypair ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    // Decode base58 private key to bytes
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    // Create keypair from bytes
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
     info!("   Sender will be both the funder and nonce authority");
-
-    // 3. Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
 
     // 4. Search for existing nonce accounts or create new one
     info!("\n=== Setting Up Nonce Account ===");
@@ -97,23 +75,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     info!("   Current blockhash: {}", blockhash);
     //     info!("   Using existing nonce account");
     //     info!("   No wait needed - account already confirmed on-chain");
-        
+
     //     nonce_pubkey.to_string()
     // } else {
     //     info!("No existing nonce accounts found");
     //     info!("Creating new nonce account...");
     //     let nonce_keypair = nonce::create_nonce_account(&rpc_client, &sender_keypair).await?;
     //     let nonce_account_str = nonce_keypair.pubkey().to_string();
-        
+
     //     info!("✅ Nonce account created: {}", nonce_account_str);
     //     info!("   Waiting for confirmation...");
     //     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        
+
     //     nonce_account_str
     // };
 
     let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-    
+
     info!("✅ Nonce account ready: {}", nonce_account);
     info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
 
@@ -208,9 +186,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
     }
-    
+
     let final_time = chrono::Local::now();
-    info!("✅ Wait complete | Time: {}", final_time.format("%Y-%m-%d %H:%M:%S"));
+    info!(
+        "✅ Wait complete | Time: {}",
+        final_time.format("%Y-%m-%d %H:%M:%S")
+    );
     info!("Transaction is still valid thanks to durable nonce!");
 
     // 10. Submit to Solana blockchain
@@ -246,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("\n=== Implementation Notes ===");
     info!("• Nonce account on Solana devnet: {}", nonce_account);
-    info!("• Wallet must be pre-funded (no airdrops in this example)");
+    info!("• New wallet created and funded with 5 SOL via airdrop");
     info!("• Checks for existing nonce account before creating new one");
     info!("• Sender is both the funder and authority of the nonce account");
     info!("• Transaction uses nonce account's stored blockhash (not recent blockhash)");

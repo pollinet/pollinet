@@ -3,12 +3,12 @@
 //! Handles broadcasting signed Solana transactions across the BLE mesh network.
 //! Fragments are sent to all connected peers with flood prevention and tracking.
 
+use crate::ble::mesh::{MeshPacket, MeshRouter, PacketType, TransactionFragment};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
-use crate::ble::mesh::{TransactionFragment, MeshRouter, MeshPacket, PacketType};
-use uuid::Uuid;
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use uuid::Uuid;
 
 /// Maximum age for a broadcast before it's considered expired
 const BROADCAST_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
@@ -50,7 +50,7 @@ struct PeerFragmentStatus {
 impl PeerFragmentStatus {
     fn new(peer_id: String, total_fragments: u16) -> Self {
         let pending_fragments: HashSet<u16> = (0..total_fragments).collect();
-        
+
         Self {
             peer_id,
             sent_fragments: HashSet::new(),
@@ -128,7 +128,7 @@ impl BroadcastInfo {
     fn new(fragments: Vec<TransactionFragment>, peer_ids: Vec<String>) -> Self {
         let transaction_id = fragments[0].transaction_id;
         let total_fragments = fragments.len() as u16;
-        
+
         let peer_status: HashMap<String, PeerFragmentStatus> = peer_ids
             .iter()
             .map(|peer_id| {
@@ -155,7 +155,8 @@ impl BroadcastInfo {
             return 0.0;
         }
 
-        let total_completion: f32 = self.peer_status
+        let total_completion: f32 = self
+            .peer_status
             .values()
             .map(|ps| ps.completion_percentage())
             .sum();
@@ -254,7 +255,7 @@ impl TransactionBroadcaster {
         fragment_index: u16,
     ) -> Result<(), String> {
         let mut broadcasts = self.broadcasts.write().await;
-        
+
         if let Some(info) = broadcasts.get_mut(transaction_id) {
             if let Some(peer_status) = info.peer_status.get_mut(peer_id) {
                 peer_status.mark_sent(fragment_index);
@@ -273,7 +274,9 @@ impl TransactionBroadcaster {
         transaction_id: &[u8; 32],
     ) -> Option<Vec<TransactionFragment>> {
         let broadcasts = self.broadcasts.read().await;
-        broadcasts.get(transaction_id).map(|info| info.fragments.clone())
+        broadcasts
+            .get(transaction_id)
+            .map(|info| info.fragments.clone())
     }
 
     /// Prepare a mesh packet for a fragment
@@ -288,22 +291,14 @@ impl TransactionBroadcaster {
             .map_err(|e| format!("Failed to serialize fragment: {}", e))?;
 
         // Create mesh packet
-        let packet = MeshPacket::new(
-            PacketType::TransactionFragment,
-            self.device_id,
-            payload,
-        );
+        let packet = MeshPacket::new(PacketType::TransactionFragment, self.device_id, payload);
 
         // Serialize packet
         Ok(packet.serialize())
     }
 
-
     /// Get broadcast status for a transaction
-    pub async fn get_broadcast_status(
-        &self,
-        transaction_id: &[u8; 32],
-    ) -> Option<BroadcastInfo> {
+    pub async fn get_broadcast_status(&self, transaction_id: &[u8; 32]) -> Option<BroadcastInfo> {
         let broadcasts = self.broadcasts.read().await;
         broadcasts.get(transaction_id).cloned()
     }
@@ -311,7 +306,7 @@ impl TransactionBroadcaster {
     /// Cancel an ongoing broadcast
     pub async fn cancel_broadcast(&self, transaction_id: &[u8; 32]) -> Result<(), String> {
         let mut broadcasts = self.broadcasts.write().await;
-        
+
         if let Some(info) = broadcasts.get_mut(transaction_id) {
             info.status = BroadcastStatus::Failed;
             tracing::info!("Broadcast {} cancelled", hex::encode(&transaction_id[..8]));
@@ -336,11 +331,16 @@ impl TransactionBroadcaster {
             .count();
         let failed_broadcasts = broadcasts
             .values()
-            .filter(|b| b.status == BroadcastStatus::Failed || b.status == BroadcastStatus::TimedOut)
+            .filter(|b| {
+                b.status == BroadcastStatus::Failed || b.status == BroadcastStatus::TimedOut
+            })
             .count();
 
         let avg_completion = if total_broadcasts > 0 {
-            broadcasts.values().map(|b| b.overall_completion()).sum::<f32>()
+            broadcasts
+                .values()
+                .map(|b| b.overall_completion())
+                .sum::<f32>()
                 / total_broadcasts as f32
         } else {
             0.0
@@ -358,7 +358,7 @@ impl TransactionBroadcaster {
     /// Clean up expired broadcasts
     pub async fn cleanup_expired(&self) {
         let mut broadcasts = self.broadcasts.write().await;
-        
+
         let expired: Vec<[u8; 32]> = broadcasts
             .iter()
             .filter(|(_, info)| {
@@ -454,4 +454,3 @@ mod tests {
         assert_eq!(info.overall_completion(), 100.0);
     }
 }
-

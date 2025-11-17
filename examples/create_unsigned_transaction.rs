@@ -14,10 +14,12 @@
 //! 4. Return uncompressed transaction bytes
 //! 5. (Later) Sign and submit when ready
 
+mod wallet_utils;
+use wallet_utils::create_and_fund_wallet;
+
 use base64;
-use bs58;
-use pollinet::PolliNetSDK;
 use pollinet::nonce;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -33,46 +35,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Unsigned Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
+    let rpc_url = "https://api.devnet.solana.com";
     let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key
-    info!("\n=== Loading Sender Keypair ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
-    // 3. Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
-
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
-
-    // 4. Set up nonce account
+    // 3. Set up nonce account
     info!("\n=== Setting Up Nonce Account ===");
     let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
     info!("Using nonce account: {}", nonce_account);
     info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
 
-    // 5. Set transaction parameters
+    // 4. Set transaction parameters
     info!("\n=== Transaction Parameters ===");
     let sender = sender_keypair.pubkey().to_string();
     let recipient = "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX".to_string();
@@ -89,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     info!("Nonce account: {}", nonce_account);
 
-    // 6. Create UNSIGNED transaction
+    // 5. Create UNSIGNED transaction
     info!("\n=== Creating Unsigned Transaction ===");
     info!("Creating unsigned transaction with nonce account...");
     info!("Transaction will NOT be signed or compressed");
@@ -103,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   Format: base64(bincode(Transaction))");
     info!("   Ready for signing");
 
-    // 7. Display transaction details
+    // 6. Display transaction details
     info!("\n=== Unsigned Transaction Details ===");
     info!("✅ Transaction is ready for signing!");
     info!("   Instructions: [1] Advance nonce, [2] Transfer");
@@ -114,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\nBase64 transaction (first 60 chars):");
     info!("   {}...", &unsigned_tx[..60.min(unsigned_tx.len())]);
 
-    // 8. Demonstrate signing the transaction
+    // 7. Demonstrate signing the transaction
     info!("\n=== Demonstrating Signature Addition ===");
 
     // Simulate signing by sender
@@ -198,10 +178,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("4. Verify all signatures collected");
     info!("5. Submit when fully signed");
 
-    // 9. Summary
+    // 8. Summary
     info!("\n=== Complete Unsigned Transaction Summary ===");
-    info!("✅ 1. Loaded sender from private key");
-    info!("✅ 2. Verified sender balance");
+    info!("✅ 1. Created new wallet and funded with 5 SOL via airdrop");
     info!("✅ 3. Set up nonce account");
     info!(
         "✅ 4. Created UNSIGNED transaction: {} chars (base64)",
