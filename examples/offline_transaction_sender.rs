@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 === PolliNet Offline Transaction Sender ===");
     info!("This example demonstrates offline transaction creation and BLE transmission");
-    info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
+    info!("⚠️  Running in desktop simulation mode. Android SDK provides real BLE (features in development).");
 
     // Create new wallet and request airdrop
     let rpc_url = get_rpc_url();

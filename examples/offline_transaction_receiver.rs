@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("📥 === PolliNet Offline Transaction Receiver ===");
     info!("This example demonstrates receiving and processing offline transactions");
-    info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
+    info!("⚠️  Running in desktop simulation mode. Android SDK provides real BLE (features in development).");
 
     // Initialize fragment buffer for reassembly
     let fragment_buffer: FragmentBuffer = Arc::new(RwLock::new(HashMap::new()));

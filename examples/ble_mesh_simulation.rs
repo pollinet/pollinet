@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=================================");
     info!("Starting real BLE mesh node using platform-agnostic BLE adapter...");
     info!("Platform: Linux (BlueZ)");
-    info!("⚠️  Simulation-only path. Android handles production BLE routing.");
+    info!("⚠️  Simulation-only path. Android SDK provides real BLE routing (features in development).");
 
     // Initialize the PolliNet SDK
     let sdk = PolliNetSDK::new().await?;

@@ -33,12 +33,15 @@ Each additional device increases network coverage, redundancy, and reliability. 
 
 ### Platform Implementation
 
-**Production BLE Implementation:**
-- **Android SDK** – The primary, production-ready implementation
-  - Full BLE GATT support
+**Android SDK (In Development):**
+- **Primary implementation path** for real BLE mesh networking
+  - Basic BLE GATT support implemented
   - Foreground service for reliable operation
-  - Optimized for battery efficiency
-  - Production-hardened for real-world deployment
+  - Diagnostics UI available
+  - **Features still in development:**
+    - Background relay (automatic relay when app is in background)
+    - Auto relay (automatic transaction forwarding)
+    - Additional optimizations for battery efficiency
 
 **Development & Testing:**
 - **Linux/macOS Simulation** – For development and testing only
@@ -47,7 +50,7 @@ Each additional device increases network coverage, redundancy, and reliability. 
   - **Not intended for production use**
   - Examples demonstrate concepts but use simulated BLE
 
-**Important:** The examples in this guide run on Linux/macOS using simulation mode. For production deployments, the Android SDK provides the full BLE mesh networking capabilities.
+**Important:** The examples in this guide run on Linux/macOS using simulation mode. The Android SDK provides real BLE mesh networking capabilities, though some features are still under active development.
 
 ---
 
@@ -127,7 +130,7 @@ Session 3 (Online):
 
 ### Prerequisites
 
-**⚠️ Important Note:** The examples in this guide run in **simulation mode** on Linux/macOS. They demonstrate PolliNet concepts but use simulated BLE mesh networking. For production deployments with real BLE mesh networking, use the **Android SDK**.
+**⚠️ Important Note:** The examples in this guide run in **simulation mode** on Linux/macOS. They demonstrate PolliNet concepts but use simulated BLE mesh networking. The **Android SDK** provides real BLE mesh networking (with some features still in development).
 
 1. **Environment Setup:**
    ```bash
@@ -251,7 +254,7 @@ cargo run --example offline_transaction_sender
 - Real-time transaction relay
 - Multi-device coordination
 
-**Note:** These examples use simulated BLE mesh networking. For production BLE mesh networking, use the Android SDK which provides full GATT-based BLE mesh capabilities.
+**Note:** These examples use simulated BLE mesh networking. The Android SDK provides real GATT-based BLE mesh capabilities (with some features still in development).
 
 ###### **Option D: Specific Transaction Types**
 
@@ -441,7 +444,7 @@ Number of Nonce Accounts = Number of Offline Transactions Before Internet Needed
 
 For wallet developers interested in integrating PolliNet:
 
-- **Android SDK** – Production-ready BLE implementation
+- **Android SDK** – BLE implementation (in development, basic features working)
 - **Rust Core Library** – Cross-platform transaction handling
 - **Example Implementations** – Reference implementations for common use cases
 - **API Documentation** – Comprehensive SDK documentation
