@@ -21,8 +21,8 @@ use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signer::Signer;
 use tracing::{info, warn};
 
-const REQUIRED_TRANSACTIONS: usize = 5;
-const AIRDROP_AMOUNT_SOL: f64 = 2.0; // Enough for 50 nonce accounts (~0.075 SOL) + fees
+const REQUIRED_TRANSACTIONS: usize = 50;
+const AIRDROP_AMOUNT_SOL: f64 = 10.0; // Enough for 50 nonce accounts (~0.075 SOL) + fees + buffer
 const OFFLINE_TX_FILE: &str = ".offline_transaction.json";
 const OFFLINE_SUBMISSION_FILE: &str = ".offline_submission.json";
 

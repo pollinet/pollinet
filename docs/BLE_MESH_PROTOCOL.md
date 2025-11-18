@@ -4,6 +4,19 @@
 
 PolliNet uses a BLE mesh network to enable offline Solana transaction broadcasting. Devices form an ad-hoc mesh where transactions propagate peer-to-peer without requiring internet connectivity.
 
+## Implementation Status
+
+**This document describes the BLE mesh protocol specification.** Implementation status:
+
+- **Android SDK** – Implements this protocol using real BLE GATT (in development, basic features working)
+- **Linux/macOS** – Simulation mode only, for development and testing purposes
+
+The protocol specification applies to both implementations, but:
+- **Android SDK**: Real BLE hardware, actual GATT characteristics, production path
+- **Linux/macOS**: Simulated BLE behavior, useful for development and CI/CD testing
+
+For production deployments, use the Android SDK which provides real BLE mesh networking capabilities.
+
 ## Network Architecture
 
 ### Topology
@@ -225,6 +238,12 @@ Use topology responses to estimate network size and diameter:
 1. **Adaptive TTL**: Adjust TTL based on network density
 2. **Directional Routing**: Use RSSI gradients to route toward internet-connected peers
 3. **Priority Queuing**: Prioritize small transactions, votes, critical messages
-4. **Compression**: LZ4 compression for transaction data
+4. **Compression**: LZ4 compression for transaction data (✅ implemented in SDK)
 5. **Erasure Coding**: Add redundancy for lossy environments
+
+## Platform Notes
+
+- **Android SDK**: Full protocol implementation with real BLE hardware (features in development)
+- **Linux/macOS**: Protocol simulation for development and testing only
+- **Protocol Spec**: This document describes the protocol that both implementations follow
 
