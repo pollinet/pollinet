@@ -23,10 +23,12 @@
 //! - Internet connection to submit transaction
 
 mod wallet_utils;
-use wallet_utils::create_and_fund_wallet;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
+
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
 
 use chrono;
-use pollinet::nonce;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -43,10 +45,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Nonce Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://api.devnet.solana.com";
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
     // 2. Create new wallet and request airdrop
@@ -55,45 +57,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
     info!("   Sender will be both the funder and nonce authority");
 
-    // 4. Search for existing nonce accounts or create new one
-    info!("\n=== Setting Up Nonce Account ===");
+    // 4. Load nonce from bundle
+    info!("\n=== Loading Nonce from Bundle ===");
+    let mut bundle = load_bundle()?;
+    let (nonce_account, cached_nonce, nonce_index) = get_next_nonce(&mut bundle)?;
 
-    // Search for existing nonce accounts where sender is the authority
-    info!("Searching for existing nonce accounts...");
-    // let found_nonce_accounts = match nonce::find_nonce_accounts_by_authority(&rpc_client, &sender_keypair.pubkey()).await {
-    //     Ok(accounts) => accounts,
-    //     Err(e) => {
-    //         info!("⚠️  Failed to search for nonce accounts: {}", e);
-    //         info!("   This may be due to network issues or RPC rate limits");
-    //         info!("   Will create a new nonce account instead");
-    //         Vec::new()
-    //     }
-    // };
-
-    // let nonce_account = if let Some((nonce_pubkey, blockhash)) = found_nonce_accounts.first() {
-    //     info!("✅ Found existing nonce account: {}", nonce_pubkey);
-    //     info!("   Current blockhash: {}", blockhash);
-    //     info!("   Using existing nonce account");
-    //     info!("   No wait needed - account already confirmed on-chain");
-
-    //     nonce_pubkey.to_string()
-    // } else {
-    //     info!("No existing nonce accounts found");
-    //     info!("Creating new nonce account...");
-    //     let nonce_keypair = nonce::create_nonce_account(&rpc_client, &sender_keypair).await?;
-    //     let nonce_account_str = nonce_keypair.pubkey().to_string();
-
-    //     info!("✅ Nonce account created: {}", nonce_account_str);
-    //     info!("   Waiting for confirmation...");
-    //     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-    //     nonce_account_str
-    // };
-
-    let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-
-    info!("✅ Nonce account ready: {}", nonce_account);
-    info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
+    info!("✅ Loaded nonce from bundle: {}", nonce_account);
+    info!("   Nonce authority: {}", cached_nonce.authority);
+    info!("   Blockhash: {}", cached_nonce.blockhash);
 
     // 5. Set transaction parameters
     let sender = sender_keypair.pubkey().to_string();
@@ -124,6 +95,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &sender_keypair, // Sender is the nonce authority
         )
         .await?;
+
+    // Mark nonce as used after creating transaction
+    save_bundle_after_use(&mut bundle, nonce_index)?;
 
     info!("✅ Transaction created and signed");
     info!("✅ Transaction serialized");

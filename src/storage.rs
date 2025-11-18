@@ -2,13 +2,21 @@
 //!
 //! Provides encrypted persistence for sensitive nonce account data
 
-use crate::transaction::{CachedNonceData, OfflineTransactionBundle};
+use crate::transaction::OfflineTransactionBundle;
+use aes_gcm::{
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+    Aes256Gcm, Key, Nonce,
+};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::env;
 use thiserror::Error;
 
 const BUNDLE_FILENAME: &str = "pollinet_nonce_bundle.json";
-const BUNDLE_VERSION: u32 = 1;
+const NONCE_SIZE: usize = 12; // AES-GCM nonce size
+const MAGIC_HEADER: &[u8] = b"PNET"; // Magic header to identify encrypted files
+const MAGIC_HEADER_SIZE: usize = 4;
 
 /// Secure storage manager for nonce bundles
 pub struct SecureStorage {
@@ -40,6 +48,72 @@ impl SecureStorage {
         self.storage_dir.join(BUNDLE_FILENAME)
     }
 
+    /// Derive encryption key from environment variable or use default
+    fn get_encryption_key() -> Key<Aes256Gcm> {
+        let key_str = env::var("POLLINET_ENCRYPTION_KEY")
+            .unwrap_or_else(|_| "pollinet-default-encryption-key".to_string());
+        
+        // Derive 256-bit key from the string using SHA-256
+        // This ensures we always have exactly 32 bytes for AES-256-GCM
+        let mut hasher = Sha256::new();
+        hasher.update(key_str.as_bytes());
+        let key_bytes = hasher.finalize();
+        *Key::<Aes256Gcm>::from_slice(&key_bytes)
+    }
+
+    /// Encrypt data using AES-256-GCM
+    fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>, StorageError> {
+        let key = Self::get_encryption_key();
+        let cipher = Aes256Gcm::new(&key);
+        
+        // Generate random nonce
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        
+        // Encrypt the data
+        let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref())
+            .map_err(|e| StorageError::Encryption(format!("Encryption failed: {}", e)))?;
+        
+        // Format: [MAGIC_HEADER][NONCE][CIPHERTEXT]
+        let mut encrypted = Vec::with_capacity(MAGIC_HEADER_SIZE + NONCE_SIZE + ciphertext.len());
+        encrypted.extend_from_slice(MAGIC_HEADER);
+        encrypted.extend_from_slice(&nonce);
+        encrypted.extend_from_slice(&ciphertext);
+        
+        Ok(encrypted)
+    }
+
+    /// Decrypt data using AES-256-GCM
+    fn decrypt_data(&self, encrypted: &[u8]) -> Result<Vec<u8>, StorageError> {
+        // Check minimum size
+        if encrypted.len() < MAGIC_HEADER_SIZE + NONCE_SIZE {
+            return Err(StorageError::Decryption(
+                "Encrypted data too short".to_string()
+            ));
+        }
+        
+        // Check magic header
+        if &encrypted[..MAGIC_HEADER_SIZE] != MAGIC_HEADER {
+            return Err(StorageError::Decryption(
+                "Invalid magic header - file may not be encrypted".to_string()
+            ));
+        }
+        
+        let key = Self::get_encryption_key();
+        let cipher = Aes256Gcm::new(&key);
+        
+        // Extract nonce and ciphertext
+        let nonce_start = MAGIC_HEADER_SIZE;
+        let nonce_end = nonce_start + NONCE_SIZE;
+        let nonce = Nonce::from_slice(&encrypted[nonce_start..nonce_end]);
+        let ciphertext = &encrypted[nonce_end..];
+        
+        // Decrypt the data
+        let plaintext = cipher.decrypt(nonce, ciphertext.as_ref())
+            .map_err(|e| StorageError::Decryption(format!("Decryption failed: {}", e)))?;
+        
+        Ok(plaintext)
+    }
+
     /// Save nonce bundle to secure storage
     pub fn save_bundle(&self, bundle: &OfflineTransactionBundle) -> Result<(), StorageError> {
         let path = self.bundle_path();
@@ -49,15 +123,14 @@ impl SecureStorage {
             StorageError::Serialization(format!("Failed to serialize bundle: {}", e))
         })?;
 
-        // TODO: Add encryption here for production use
-        // For now, we'll save as plain JSON for demo purposes
-        // In production, use platform keystore to encrypt the data
+        // Encrypt the JSON data
+        let encrypted_data = self.encrypt_data(json.as_bytes())?;
 
-        // Write to file
-        fs::write(&path, json)
+        // Write encrypted data to file
+        fs::write(&path, encrypted_data)
             .map_err(|e| StorageError::Io(format!("Failed to write bundle: {}", e)))?;
 
-        tracing::info!("💾 Saved nonce bundle to: {}", path.display());
+        tracing::info!("💾 Saved encrypted nonce bundle to: {}", path.display());
         tracing::debug!(
             "   Total nonces: {}, Available: {}",
             bundle.nonce_caches.len(),
@@ -76,11 +149,23 @@ impl SecureStorage {
             return Ok(None);
         }
 
-        // Read from file
-        let json = fs::read_to_string(&path)
+        // Read encrypted data from file
+        let encrypted_data = fs::read(&path)
             .map_err(|e| StorageError::Io(format!("Failed to read bundle: {}", e)))?;
 
-        // TODO: Add decryption here for production use
+        // Check if file is encrypted (has magic header) or plain JSON (backward compatibility)
+        let json = if encrypted_data.len() >= MAGIC_HEADER_SIZE 
+            && &encrypted_data[..MAGIC_HEADER_SIZE] == MAGIC_HEADER {
+            // File is encrypted, decrypt it
+            let decrypted_bytes = self.decrypt_data(&encrypted_data)?;
+            String::from_utf8(decrypted_bytes)
+                .map_err(|e| StorageError::Decryption(format!("Invalid UTF-8 after decryption: {}", e)))?
+        } else {
+            // File is plain JSON (backward compatibility with old unencrypted files)
+            tracing::warn!("⚠️  Loading unencrypted bundle file (backward compatibility mode)");
+            String::from_utf8(encrypted_data)
+                .map_err(|e| StorageError::Io(format!("Failed to read bundle as UTF-8: {}", e)))?
+        };
 
         // Deserialize bundle
         let bundle: OfflineTransactionBundle = serde_json::from_str(&json).map_err(|e| {
@@ -162,6 +247,7 @@ pub enum StorageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transaction::CachedNonceData;
     use tempfile::TempDir;
 
     #[test]

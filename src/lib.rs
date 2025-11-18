@@ -797,7 +797,7 @@ pub enum PolliNetError {
 pub const SERVICE_UUID: &str = "7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a7";
 
 /// BLE MTU size for safe packet transmission
-pub const BLE_MTU_SIZE: usize = 480;
+pub const BLE_MTU_SIZE: usize = 360;
 
 /// Compression threshold in bytes
 pub const COMPRESSION_THRESHOLD: usize = 100;

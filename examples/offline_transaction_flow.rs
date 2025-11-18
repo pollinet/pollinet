@@ -20,9 +20,11 @@
 //! This demonstrates true offline capability for PolliNet
 
 mod wallet_utils;
-use wallet_utils::create_and_fund_wallet;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 
-use pollinet::transaction::OfflineTransactionBundle;
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use, BUNDLE_FILE};
+
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -40,9 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("This example demonstrates creating transactions COMPLETELY OFFLINE");
     info!("No internet connection is required for transaction creation!");
 
-    let rpc_url = "https://api.devnet.solana.com";
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
 
     // Create new wallet and request airdrop
     info!("\n=== Creating New Wallet ===");
@@ -56,58 +58,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("║  PHASE 1: ONLINE - Prepare for Offline Use           ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
 
-    // Create multiple nonce accounts for multiple offline transactions
-    info!("\n=== Creating Nonce Accounts for Offline Use ===");
-    let num_nonces = 3; // Prepare 3 nonce accounts = 3 offline transactions
-    info!("Creating {} nonce accounts...", num_nonces);
+    // Load bundle from .offline_bundle.json
+    info!("\n=== Loading Nonce Bundle ===");
+    info!("Loading nonce accounts from {}", BUNDLE_FILE);
 
-    let mut offline_bundle = OfflineTransactionBundle::new();
-
-    // For this example, we'll use an existing nonce account
-    // In production, you would create new ones like this:
-    /*
-    for i in 0..num_nonces {
-        info!("Creating nonce account {}/{}...", i + 1, num_nonces);
-        let nonce_keypair = nonce::create_nonce_account(&rpc_client, &sender_keypair).await?;
-
-        // Wait for confirmation
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-        // Fetch and cache nonce data
-        let cached_nonce = sdk
-            .prepare_offline_nonce_data(&nonce_keypair.pubkey().to_string())
-            .await?;
-
-        offline_bundle.add_nonce(cached_nonce);
-        info!("  ✅ Nonce {}/{} ready", i + 1, num_nonces);
-    }
-    */
-
-    // For demo purposes, use existing nonce account
-    info!("Using existing nonce account for demonstration...");
-    let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-
-    let cached_nonce = sdk.prepare_offline_nonce_data(nonce_account).await?;
-    offline_bundle.add_nonce(cached_nonce.clone());
-    offline_bundle.add_nonce(cached_nonce.clone());
-    offline_bundle.add_nonce(cached_nonce);
-
+    let mut bundle = load_bundle()?;
     info!(
-        "✅ Prepared {} nonce accounts for offline use",
-        offline_bundle.available_nonces()
-    );
-
-    // Save to file
-    info!("\n=== Saving Nonce Data for Offline Use ===");
-    let cache_file = "offline_nonces.json";
-    offline_bundle.save_to_file(cache_file)?;
-    info!("✅ Saved offline nonce data to: {}", cache_file);
-    info!("   This file can now be used to create transactions offline");
-    info!(
-        "   File size: {} bytes",
-        std::fs::metadata(cache_file)?.len()
+        "✅ Loaded {} nonce accounts for offline use",
+        bundle.available_nonces()
     );
 
     info!("\n╔═══════════════════════════════════════════════════════╗");
@@ -129,12 +89,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load cached nonce data from file
     info!("\n=== Loading Cached Nonce Data ===");
-    let loaded_bundle = OfflineTransactionBundle::load_from_file(cache_file)?;
+    let mut loaded_bundle = load_bundle()?;
     info!(
         "✅ Loaded {} cached nonce accounts",
         loaded_bundle.available_nonces()
     );
     info!("   Bundle age: {} hours", loaded_bundle.age_hours());
+    info!("   Bundle file: {}", BUNDLE_FILE);
 
     // Create multiple transactions offline
     info!("\n=== Creating Transactions OFFLINE ===");
@@ -147,11 +108,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut offline_txs = Vec::new();
 
-    for (i, (recipient, amount)) in recipients.iter().zip(amounts.iter()).enumerate() {
-        if let Some(cached_nonce) = loaded_bundle.get_nonce(i) {
+    let mut transaction_count = 0;
+    for (recipient, amount) in recipients.iter().zip(amounts.iter()) {
+        if let Some((index, cached_nonce)) = loaded_bundle.get_next_available_nonce() {
+            transaction_count += 1;
             info!(
                 "Creating offline transaction {}/{}...",
-                i + 1,
+                transaction_count,
                 recipients.len()
             );
             info!("  Recipient: {}", recipient);
@@ -166,10 +129,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
 
             offline_txs.push(tx);
-            info!("  ✅ Transaction created: {} bytes", offline_txs[i].len());
+            info!(
+                "  ✅ Transaction created: {} bytes",
+                offline_txs[transaction_count - 1].len()
+            );
             info!("     NO INTERNET REQUIRED!");
+
+            // Mark nonce as used
+            loaded_bundle.mark_used(index)?;
+        } else {
+            info!("⚠️  No more available nonces!");
+            break;
         }
     }
+
+    // Save updated bundle
+    loaded_bundle.save_to_file(BUNDLE_FILE)?;
+    info!("✅ Saved updated bundle to {}", BUNDLE_FILE);
 
     info!(
         "\n✅ Created {} transactions completely OFFLINE",
@@ -205,7 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Reconnect to internet
     info!("\n🌐 Reconnecting to internet...");
-    let sdk_online = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    let sdk_online = PolliNetSDK::new_with_rpc(&rpc_url).await?;
 
     // Load offline transactions
     info!("\n=== Loading Offline Transactions ===");
@@ -249,11 +225,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("\n✅ PHASE 1 (ONLINE):");
     info!(
-        "   • Created {} nonce accounts",
-        loaded_bundle.available_nonces()
+        "   • Loaded {} nonce accounts from bundle",
+        loaded_bundle.total_nonces()
     );
-    info!("   • Cached nonce data to file");
-    info!("   • File: {}", cache_file);
+    info!("   • Bundle file: {}", BUNDLE_FILE);
 
     info!("\n✅ PHASE 2 (OFFLINE):");
     info!("   • Loaded cached nonce data");
@@ -302,7 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("╚═══════════════════════════════════════════════════════╝");
 
     // Cleanup
-    std::fs::remove_file(cache_file).ok();
+    // Bundle file persists for future use
     std::fs::remove_file(tx_file).ok();
 
     Ok(())

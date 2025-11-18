@@ -29,3 +29,10 @@ Thumbs.db
 
 # Optional: if you use Clippy lints cache
 .clippy/
+
+
+.offline_bundle.json
+.offline_submission.json
+.offline_transaction.json
+
+.env

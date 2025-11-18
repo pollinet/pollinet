@@ -17,16 +17,18 @@
 //! • Automatically removes used nonces from file
 
 mod wallet_utils;
-use wallet_utils::create_and_fund_wallet;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 
-use pollinet::transaction::OfflineTransactionBundle;
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use, BUNDLE_FILE};
+
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,9 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("=== PolliNet Offline Bundle Management Example ===\n");
 
-    let rpc_url = "https://api.devnet.solana.com";
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
 
     // Create new wallet and request airdrop
     info!("\n=== Creating New Wallet ===");
@@ -51,26 +53,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("║  PHASE 1: ONLINE - Prepare Nonce Bundle              ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
 
     // Prepare bundle with multiple nonce accounts
     info!("\n=== Preparing Offline Bundle ===");
 
     // SMART BUNDLE MANAGEMENT:
-    // - If bundle file exists: loads it, removes used nonces, adds more if needed
+    // - Check if .offline_bundle.json exists first
+    // - If bundle file exists: uses prepare_offline_bundle to refresh/create as needed
     // - If bundle file doesn't exist: creates new bundle with 5 nonces
     // - Only creates NEW nonce accounts when necessary
 
-    let cache_file = "offline_bundle.json";
-
     info!("Preparing bundle for 5 transactions...");
-    info!("   Checking for existing bundle: {}", cache_file);
+    info!("   Checking for existing bundle: {}", BUNDLE_FILE);
     info!("   Will reuse unused nonces if available");
     info!("   Will create new nonces only if needed");
 
+    // Check if bundle exists first
+    let bundle_exists = std::path::Path::new(BUNDLE_FILE).exists();
+    if bundle_exists {
+        info!("   ✅ Found existing bundle: {}", BUNDLE_FILE);
+        match load_bundle() {
+            Ok(existing_bundle) => {
+                info!("   📊 Current bundle stats:");
+                info!("      Total nonces: {}", existing_bundle.total_nonces());
+                info!("      Available: {}", existing_bundle.available_nonces());
+                info!("      Used: {}", existing_bundle.used_nonces());
+            }
+            Err(e) => {
+                warn!("   ⚠️  Could not load existing bundle: {}", e);
+                info!("   Will create new bundle instead");
+            }
+        }
+    } else {
+        info!("   📝 No existing bundle found, will create new one");
+    }
+
     // ✅ SMART PREPARATION: Reuses existing, creates only what's needed
     let bundle = sdk
-        .prepare_offline_bundle(5, &sender_keypair, Some(cache_file))
+        .prepare_offline_bundle(5, &sender_keypair, Some(BUNDLE_FILE))
         .await?;
 
     info!(
@@ -89,9 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Used: {}", bundle.used_nonces());
     info!("Bundle age: {} hours", bundle.age_hours());
 
-    // Save to file
-    bundle.save_to_file(cache_file)?;
-    info!("\n✅ Saved bundle to: {}", cache_file);
+    // Save to file (using BUNDLE_FILE from helper)
+    bundle.save_to_file(BUNDLE_FILE)?;
+    info!("\n✅ Saved bundle to: {}", BUNDLE_FILE);
     info!("   File only contains UNUSED nonces");
 
     // ================================================================
@@ -109,13 +130,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n🔌 Simulating OFFLINE mode...");
     let sdk_offline = PolliNetSDK::new().await?;
 
-    // Load bundle
+    // Load bundle using helper
     info!("\n=== Loading Bundle ===");
-    let mut loaded_bundle = OfflineTransactionBundle::load_from_file(cache_file)?;
+    let mut loaded_bundle = load_bundle()?;
     info!(
         "✅ Loaded bundle with {} available nonces",
         loaded_bundle.available_nonces()
     );
+    info!("   Bundle file: {}", BUNDLE_FILE);
 
     // Create transactions using get_next_available_nonce()
     info!("\n=== Creating Offline Transactions ===");
@@ -129,68 +151,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut offline_txs = Vec::new();
 
     for (tx_num, (recipient, amount)) in recipients.iter().zip(amounts.iter()).enumerate() {
-        // Get next available nonce
-        if let Some((index, cached_nonce)) = loaded_bundle.get_next_available_nonce() {
-            info!("\nTransaction {}/{}:", tx_num + 1, recipients.len());
-            info!("  Using nonce index: {}", index);
-            info!("  Nonce account: {}", cached_nonce.nonce_account);
-            info!("  Recipient: {}", recipient);
-            info!("  Amount: {} lamports", amount);
+        // Get next available nonce using helper
+        match get_next_nonce(&mut loaded_bundle) {
+            Ok((nonce_account, cached_nonce, nonce_index)) => {
+                info!("\nTransaction {}/{}:", tx_num + 1, recipients.len());
+                info!("  Using nonce index: {}", nonce_index);
+                info!("  Nonce account: {}", nonce_account);
+                info!("  Recipient: {}", recipient);
+                info!("  Amount: {} lamports", amount);
 
-            // Create transaction offline
-            let tx = sdk_offline.create_offline_transaction(
-                &sender_keypair,
-                recipient,
-                *amount,
-                &sender_keypair,
-                cached_nonce,
-            )?;
+                // Create transaction offline
+                let tx = sdk_offline.create_offline_transaction(
+                    &sender_keypair,
+                    recipient,
+                    *amount,
+                    &sender_keypair,
+                    &cached_nonce,
+                )?;
 
-            info!("  ✅ Transaction created: {} bytes", tx.len());
+                info!("  ✅ Transaction created: {} bytes", tx.len());
 
-            // Fragment for BLE transmission
-            info!("  📡 Fragmenting for BLE transmission...");
-            let fragments = sdk_offline.fragment_transaction(&tx);
-            info!(
-                "     Created {} fragments (BLE MTU: {} bytes)",
-                fragments.len(),
-                pollinet::BLE_MTU_SIZE
-            );
-
-            for (frag_idx, fragment) in fragments.iter().enumerate() {
+                // Fragment for BLE transmission
+                info!("  📡 Fragmenting for BLE transmission...");
+                let fragments = sdk_offline.fragment_transaction(&tx);
                 info!(
-                    "       Fragment {}/{}: {} bytes",
-                    frag_idx + 1,
+                    "     Created {} fragments (BLE MTU: {} bytes)",
                     fragments.len(),
-                    fragment.data.len()
+                    pollinet::BLE_MTU_SIZE
+                );
+
+                for (frag_idx, fragment) in fragments.iter().enumerate() {
+                    info!(
+                        "       Fragment {}/{}: {} bytes",
+                        frag_idx + 1,
+                        fragments.len(),
+                        fragment.data.len()
+                    );
+                }
+
+                // Store both transaction and fragments
+                offline_txs.push(tx);
+
+                // Mark nonce as used using helper
+                save_bundle_after_use(&mut loaded_bundle, nonce_index)?;
+                info!("  ✅ Transaction ready for BLE transmission");
+                info!(
+                    "     Remaining nonces: {}",
+                    loaded_bundle.available_nonces()
                 );
             }
-
-            // Store both transaction and fragments
-            offline_txs.push(tx);
-
-            // Mark nonce as used
-            loaded_bundle.mark_used(index)?;
-            info!("  ✅ Transaction ready for BLE transmission");
-            info!(
-                "     Remaining nonces: {}",
-                loaded_bundle.available_nonces()
-            );
-        } else {
-            info!("⚠️  No more available nonces!");
-            break;
+            Err(e) => {
+                info!("⚠️  No more available nonces: {}", e);
+                break;
+            }
         }
     }
 
-    // Save updated bundle (only saves unused nonces)
-    info!("\n=== Saving Updated Bundle ===");
-    loaded_bundle.save_to_file(cache_file)?;
-    info!("✅ Saved bundle (only unused nonces)");
-    info!("   Before: {} total nonces", loaded_bundle.total_nonces());
-    info!(
-        "   After save: only {} unused nonces in file",
-        loaded_bundle.available_nonces()
-    );
+    // Bundle already saved by save_bundle_after_use helper
+    info!("\n=== Bundle Status ===");
+    info!("✅ Bundle already saved (via helper after each use)");
+    info!("   Bundle file: {}", BUNDLE_FILE);
+    info!("   Total nonces: {}", loaded_bundle.total_nonces());
+    info!("   Available nonces: {}", loaded_bundle.available_nonces());
 
     // Demonstrate bundle statistics
     info!("\n=== Bundle Statistics After Transactions ===");
@@ -285,7 +307,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("╚═══════════════════════════════════════════════════════╝");
 
     info!("\n🌐 Reconnecting to internet...");
-    let sdk_online = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    let sdk_online = PolliNetSDK::new_with_rpc(&rpc_url).await?;
 
     info!("\n=== Submitting Reassembled Transactions ===");
     info!("Submitting transactions that were fragmented and reassembled...");
@@ -335,12 +357,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   Same nonce accounts, just with new blockhashes");
     info!("   This is FREE - no new accounts needed!");
 
-    // Save bundle with used nonces (they'll be refreshed next time)
-    loaded_bundle.save_to_file(cache_file)?;
+    // Bundle already saved by save_bundle_after_use helper
+    // But ensure final state is saved
+    loaded_bundle.save_to_file(BUNDLE_FILE)?;
     info!("\n✅ Saved bundle (includes used nonces for refresh)");
+    info!("   Bundle file: {}", BUNDLE_FILE);
 
+    // Refresh used nonces for next session
+    info!("\n=== Refreshing Bundle for Next Session ===");
     let bundle = sdk
-        .prepare_offline_bundle(5, &sender_keypair, Some(cache_file))
+        .prepare_offline_bundle(5, &sender_keypair, Some(BUNDLE_FILE))
         .await?;
 
     info!(
@@ -430,8 +456,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loaded_bundle.total_nonces()
     );
 
-    // Cleanup
-    std::fs::remove_file(cache_file).ok();
+    // Don't remove bundle file - it persists for future use
+    info!(
+        "\n💾 Bundle file {} persists for future sessions",
+        BUNDLE_FILE
+    );
 
     Ok(())
 }

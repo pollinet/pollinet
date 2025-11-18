@@ -13,7 +13,10 @@
 //! Use Case: Multi-party governance voting where voter and fee payer are different
 
 mod wallet_utils;
-use wallet_utils::create_and_fund_wallet;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
+
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
 
 use chrono;
 use pollinet::PolliNetSDK;
@@ -32,10 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Unsigned Governance Vote Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://api.devnet.solana.com";
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
     // 2. Create new wallet and request airdrop
@@ -44,11 +47,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Voter loaded: {}", voter_keypair.pubkey());
     info!("   Voter will be the nonce authority");
 
-    // 3. Set up nonce account
-    info!("\n=== Setting Up Nonce Account ===");
-    let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-    info!("Using nonce account: {}", nonce_account);
-    info!("   Nonce authority: {} (voter)", voter_keypair.pubkey());
+    // 3. Load nonce from bundle
+    info!("\n=== Loading Nonce from Bundle ===");
+    let mut bundle = load_bundle()?;
+    let (nonce_account, cached_nonce, nonce_index) = get_next_nonce(&mut bundle)?;
+
+    info!("✅ Loaded nonce from bundle: {}", nonce_account);
+    info!("   Nonce authority: {}", cached_nonce.authority);
+    info!("   Blockhash: {}", cached_nonce.blockhash);
 
     // 4. Set governance vote parameters
     info!("\n=== Governance Vote Parameters ===");
@@ -75,9 +81,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &vote_account,
             vote_choice,
             &fee_payer,
-            nonce_account,
+            &nonce_account,
         )
         .await?;
+
+    // Mark nonce as used after creating transaction
+    save_bundle_after_use(&mut bundle, nonce_index)?;
 
     info!("✅ Unsigned vote transaction created");
     info!("   Base64 length: {} characters", unsigned_tx_base64.len());

@@ -12,6 +12,9 @@
 //!
 //! Run with: cargo run --example offline_transaction_receiver
 
+mod wallet_utils;
+use wallet_utils::get_rpc_url;
+
 use base64;
 use pollinet::PolliNetSDK;
 use std::collections::HashMap;
@@ -40,8 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ================================================================
     info!("\n📡 STEP 1: Initializing PolliNet SDK...");
 
-    let rpc_url = "https://api.devnet.solana.com";
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
     info!("✅ PolliNet SDK initialized with RPC: {}", rpc_url);
 
     // Reset any previous BLE connections and state

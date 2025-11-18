@@ -51,9 +51,6 @@ impl Lz4Compressor {
             return Ok(Vec::new());
         }
 
-        // Use real LZ4 decompression
-        // Note: LZ4 block compression doesn't store original size, so we need to estimate
-        // In production, you might want to store the original size in a header
         let decompressed = lz4::block::decompress(compressed_data, None)
             .map_err(|e| Lz4Error::DecompressionFailed(e.to_string()))?;
 
@@ -72,9 +69,6 @@ impl Lz4Compressor {
 
     /// Check if data is compressed
     pub fn is_compressed(&self, data: &[u8]) -> bool {
-        // For LZ4 block compression, we can't easily detect if data is compressed
-        // In production, you might want to add a header or use a different approach
-        // For now, we'll assume any non-empty data could be compressed
         !data.is_empty()
     }
 

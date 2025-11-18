@@ -12,7 +12,7 @@
 //! Run with: cargo run --example offline_transaction_sender
 
 mod wallet_utils;
-use wallet_utils::create_and_fund_wallet;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
@@ -23,7 +23,9 @@ use solana_sdk::signer::Signer;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
-const BUNDLE_FILE: &str = "./offline_bundle.json";
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use, BUNDLE_FILE};
+
 const RECIPIENT_ADDRESS: &str = "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX"; // System Program
 
 #[tokio::main]
@@ -36,7 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
 
     // Create new wallet and request airdrop
-    let rpc_url = "https://api.devnet.solana.com";
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
     let rpc_client =
         RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
 
@@ -49,32 +52,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ================================================================
     info!("\n📦 STEP 1: Checking offline bundle availability...");
 
-    // Use SDK method to prepare or load bundle
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-
+    // Initialize SDK
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
     info!("🌐 Connecting to Solana RPC: {}", rpc_url);
 
-    // Prepare bundle (will load existing or create new one)
-    let mut bundle = sdk
-        .prepare_offline_bundle(2, &sender_keypair, Some(BUNDLE_FILE))
-        .await?;
-
-    info!(
-        "✅ Bundle ready with {} nonce accounts",
-        bundle.available_nonces()
-    );
-
     // ================================================================
-    // STEP 2: Fetch unused bundle and create compressed presigned transaction
+    // STEP 2: Load bundle and get nonce
     // ================================================================
-    info!("\n🔧 STEP 2: Creating compressed presigned transaction...");
+    info!("\n🔧 STEP 2: Loading bundle and getting nonce...");
 
-    // Get next available nonce using SDK method
-    let (index, nonce_info) = bundle
-        .get_next_available_nonce()
-        .ok_or("No available nonces in bundle")?;
+    // Load bundle from .offline_bundle.json
+    let mut bundle = load_bundle()?;
+    let (nonce_account, nonce_info, nonce_index) = get_next_nonce(&mut bundle)?;
 
-    info!("📋 Using nonce account: {}", nonce_info.nonce_account);
+    info!("📋 Using nonce account: {}", nonce_account);
     info!("🔑 Blockhash: {}", nonce_info.blockhash);
 
     // Create offline transaction using SDK method
@@ -88,6 +79,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &nonce_info,
         )
         .map_err(|e| format!("Failed to create offline transaction: {}", e))?;
+
+    // Mark nonce as used after creating transaction
+    save_bundle_after_use(&mut bundle, nonce_index)?;
 
     info!("✅ Transaction created and compressed using SDK method");
     info!("   Amount: {} lamports", amount);
@@ -261,17 +255,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("✅ Transaction fragments sent successfully!");
             info!("   Sent {} bytes to receiver", compressed_data.len());
 
-            // Mark nonce as used using SDK method
-            bundle
-                .mark_used(index)
-                .map_err(|e| format!("Failed to mark nonce as used: {}", e))?;
-
-            // Save updated bundle using SDK method
-            bundle
-                .save_to_file(BUNDLE_FILE)
-                .map_err(|e| format!("Failed to save updated bundle: {}", e))?;
-
-            info!("💾 Updated bundle saved (nonce marked as used)");
+            // Note: Nonce already marked as used at line 84 via save_bundle_after_use
+            info!("💾 Bundle already updated (nonce marked as used earlier)");
 
             // Wait a bit for transmission to complete
             sleep(Duration::from_secs(2)).await;

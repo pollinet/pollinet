@@ -15,10 +15,12 @@
 //! 5. (Later) Sign and submit when ready
 
 mod wallet_utils;
-use wallet_utils::create_and_fund_wallet;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
+
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
 
 use base64;
-use pollinet::nonce;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -35,10 +37,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Unsigned Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://api.devnet.solana.com";
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
     // 2. Create new wallet and request airdrop
@@ -46,11 +48,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
-    // 3. Set up nonce account
-    info!("\n=== Setting Up Nonce Account ===");
-    let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-    info!("Using nonce account: {}", nonce_account);
-    info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
+    // 3. Load nonce from bundle
+    info!("\n=== Loading Nonce from Bundle ===");
+    let mut bundle = load_bundle()?;
+    let (nonce_account, cached_nonce, nonce_index) = get_next_nonce(&mut bundle)?;
+
+    info!("✅ Loaded nonce from bundle: {}", nonce_account);
+    info!("   Nonce authority: {}", cached_nonce.authority);
+    info!("   Blockhash: {}", cached_nonce.blockhash);
 
     // 4. Set transaction parameters
     info!("\n=== Transaction Parameters ===");
@@ -77,6 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let unsigned_tx = sdk
         .create_unsigned_transaction(&sender, &recipient, &fee_payer, amount, &nonce_account)
         .await?;
+
+    // Mark nonce as used after creating transaction
+    save_bundle_after_use(&mut bundle, nonce_index)?;
 
     info!("✅ Unsigned transaction created");
     info!("   Size: {} characters (base64 encoded)", unsigned_tx.len());
