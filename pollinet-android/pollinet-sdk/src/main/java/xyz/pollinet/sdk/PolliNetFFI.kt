@@ -1,0 +1,304 @@
+package xyz.pollinet.sdk
+
+/**
+ * Low-level JNI interface to the Rust PolliNet core.
+ * 
+ * This object loads the native library and provides direct access to FFI functions.
+ * Most applications should use the higher-level [PolliNetSDK] class instead.
+ */
+object PolliNetFFI {
+    init {
+        System.loadLibrary("pollinet")
+    }
+
+    // =========================================================================
+    // Initialization and lifecycle
+    // =========================================================================
+
+    /**
+     * Initialize the PolliNet SDK with the given configuration.
+     * @param configBytes JSON-encoded SdkConfig
+     * @return Handle to the initialized SDK instance, or -1 on error
+     */
+    external fun init(configBytes: ByteArray): Long
+
+    /**
+     * Get the SDK version string
+     */
+    external fun version(): String
+
+    /**
+     * Shutdown the SDK and release resources
+     */
+    external fun shutdown(handle: Long)
+
+    // =========================================================================
+    // Host-driven transport API
+    // =========================================================================
+
+    /**
+     * Push inbound data received from GATT characteristic
+     * @return JSON FfiResult
+     */
+    external fun pushInbound(handle: Long, data: ByteArray): String
+
+    /**
+     * Get next outbound frame to send via GATT
+     * @param maxLen Maximum frame size (MTU)
+     * @return Frame bytes, or null if queue is empty
+     */
+    external fun nextOutbound(handle: Long, maxLen: Long): ByteArray?
+
+    /**
+     * Periodic tick for retry/timeout handling
+     * @param nowMs Current timestamp in milliseconds
+     * @return JSON FfiResult with array of frames to send
+     */
+    external fun tick(handle: Long, nowMs: Long): String
+
+    /**
+     * Get current transport metrics
+     * @return JSON FfiResult with MetricsSnapshot
+     */
+    external fun metrics(handle: Long): String
+
+    /**
+     * Clear a transaction from reassembly buffers
+     */
+    external fun clearTransaction(handle: Long, txId: String): String
+
+    // =========================================================================
+    // Transaction builders
+    // =========================================================================
+
+    /**
+     * Create an unsigned SOL transfer transaction
+     * @param requestJson JSON-encoded CreateUnsignedTransactionRequest
+     * @return JSON FfiResult with base64-encoded transaction
+     */
+    external fun createUnsignedTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Create an unsigned SPL token transfer transaction
+     * @param requestJson JSON-encoded CreateUnsignedSplTransactionRequest
+     * @return JSON FfiResult with base64-encoded transaction
+     */
+    external fun createUnsignedSplTransaction(handle: Long, requestJson: ByteArray): String
+
+    // =========================================================================
+    // Signature helpers
+    // =========================================================================
+
+    /**
+     * Prepare sign payload - Extract message bytes from transaction
+     * @param base64Tx Base64-encoded unsigned transaction
+     * @return Message bytes to sign, or null on error
+     */
+    external fun prepareSignPayload(handle: Long, base64Tx: String): ByteArray?
+
+    /**
+     * Apply signature to transaction
+     * @param base64Tx Base64-encoded transaction
+     * @param signerPubkey Signer's public key
+     * @param signatureBytes Signature bytes (64 bytes)
+     * @return JSON FfiResult with updated base64 transaction
+     */
+    external fun applySignature(
+        handle: Long,
+        base64Tx: String,
+        signerPubkey: String,
+        signatureBytes: ByteArray
+    ): String
+
+    /**
+     * Verify and serialize transaction for submission/fragmentation
+     * @param base64Tx Base64-encoded signed transaction
+     * @return JSON FfiResult with wire-format base64 transaction
+     */
+    external fun verifyAndSerialize(handle: Long, base64Tx: String): String
+
+    // =========================================================================
+    // Fragmentation API
+    // =========================================================================
+
+    /**
+     * Fragment a transaction for BLE transmission
+     * @param txBytes Transaction bytes to fragment
+     * @return JSON FfiResult with FragmentList
+     */
+    external fun fragment(handle: Long, txBytes: ByteArray): String
+
+    // =========================================================================
+    // Offline Bundle Management (Core PolliNet Features)
+    // =========================================================================
+
+    /**
+     * Prepare offline bundle for creating transactions without internet
+     * This is a CORE PolliNet feature for offline/mesh transaction creation
+     * @param requestJson JSON-encoded PrepareOfflineBundleRequest
+     * @return JSON FfiResult with OfflineTransactionBundle JSON string
+     */
+    external fun prepareOfflineBundle(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Create transaction completely offline using cached nonce data
+     * NO internet required - core PolliNet offline feature
+     * @param requestJson JSON-encoded CreateOfflineTransactionRequest
+     * @return JSON FfiResult with base64-encoded compressed transaction
+     */
+    external fun createOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Submit offline-created transaction to blockchain
+     * @param requestJson JSON-encoded SubmitOfflineTransactionRequest
+     * @return JSON FfiResult with transaction signature
+     */
+    external fun submitOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    // =========================================================================
+    // MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
+    // =========================================================================
+
+    /**
+     * Create UNSIGNED offline transaction for MWA/Seed Vault signing
+     * Takes PUBLIC KEYS only (no private keys) - compatible with Solana Mobile Stack
+     * Returns unsigned transaction that MWA will sign securely
+     * @param requestJson JSON-encoded CreateUnsignedOfflineTransactionRequest
+     * @return JSON FfiResult with base64-encoded unsigned transaction
+     */
+    external fun createUnsignedOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Get transaction message bytes that need to be signed by MWA
+     * Extracts the raw message from unsigned transaction for secure signing
+     * @param requestJson JSON-encoded GetMessageToSignRequest
+     * @return JSON FfiResult with base64-encoded message bytes
+     */
+    external fun getTransactionMessageToSign(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Get list of public keys that need to sign this transaction
+     * Returns signers in the order required by Solana protocol
+     * @param requestJson JSON-encoded GetRequiredSignersRequest
+     * @return JSON FfiResult with array of public key strings
+     */
+    external fun getRequiredSigners(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Create unsigned nonce account creation transactions for MWA signing
+     * Generates N unsigned transactions that create nonce accounts on-chain
+     * Each transaction includes an ephemeral nonce keypair that must be co-signed
+     * 
+     * Workflow:
+     * 1. Call this to get unsigned transactions + nonce keypairs
+     * 2. Sign transactions with nonce keypairs locally
+     * 3. Send to MWA for payer co-signing
+     * 4. Submit fully signed transactions
+     * 5. Cache nonce data for offline transaction creation
+     * 
+     * @param requestJson JSON-encoded CreateUnsignedNonceTransactionsRequest
+     * @return JSON FfiResult with array of UnsignedNonceTransaction
+     */
+    external fun createUnsignedNonceTransactions(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Cache nonce account data from on-chain accounts
+     * Fetches nonce data from blockchain and saves to secure storage
+     * Call this after successfully creating nonce accounts via MWA
+     * 
+     * @param requestJson JSON-encoded CacheNonceAccountsRequest
+     * @return JSON FfiResult with cached count
+     */
+    external fun cacheNonceAccounts(handle: Long, requestJson: ByteArray): String
+    
+    external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
+    
+    // =========================================================================
+    // BLE Mesh Operations
+    // =========================================================================
+    
+    /**
+     * Fragment a signed transaction for BLE transmission
+     * @param transactionBytes Signed transaction bytes
+     * @return JSON FfiResult with array of FragmentData
+     */
+    external fun fragmentTransaction(transactionBytes: ByteArray): String
+    
+    /**
+     * Reconstruct a transaction from fragments
+     * @param fragmentsJson JSON array of FragmentData objects
+     * @return JSON FfiResult with base64-encoded transaction
+     */
+    external fun reconstructTransaction(fragmentsJson: ByteArray): String
+    
+    /**
+     * Get fragmentation statistics for a transaction
+     * @param transactionBytes Transaction bytes to analyze
+     * @return JSON FfiResult with FragmentationStats
+     */
+    external fun getFragmentationStats(transactionBytes: ByteArray): String
+    
+    /**
+     * Prepare a transaction for broadcast over BLE mesh
+     * @param handle SDK handle
+     * @param transactionBytes Signed transaction bytes
+     * @return JSON FfiResult with BroadcastPreparation
+     */
+    external fun prepareBroadcast(handle: Long, transactionBytes: ByteArray): String
+    
+    // =========================================================================
+    // Autonomous Transaction Relay System
+    // =========================================================================
+    
+    /**
+     * Push a received transaction into the auto-submission queue
+     * @param handle SDK handle
+     * @param transactionBytes Received transaction bytes
+     * @return JSON FfiResult with PushResponse (added: boolean, queueSize: int)
+     */
+    external fun pushReceivedTransaction(handle: Long, transactionBytes: ByteArray): String
+    
+    /**
+     * Get next received transaction for auto-submission
+     * @param handle SDK handle
+     * @return JSON FfiResult with ReceivedTransaction (txId, transactionBase64, receivedAt) or null
+     */
+    external fun nextReceivedTransaction(handle: Long): String
+    
+    /**
+     * Get count of transactions waiting for auto-submission
+     * @param handle SDK handle
+     * @return JSON FfiResult with QueueSizeResponse (queueSize: int)
+     */
+    external fun getReceivedQueueSize(handle: Long): String
+    
+    /**
+     * Mark a transaction as successfully submitted (for deduplication)
+     * @param handle SDK handle
+     * @param transactionBytes Submitted transaction bytes
+     * @return JSON FfiResult with success status
+     */
+    external fun markTransactionSubmitted(handle: Long, transactionBytes: ByteArray): String
+    
+    /**
+     * Clean up old submitted transaction hashes (older than 24 hours)
+     * @param handle SDK handle
+     * @return JSON FfiResult with success status
+     */
+    external fun cleanupOldSubmissions(handle: Long): String
+    
+    /**
+     * Get outbound queue size (non-destructive peek)
+     * @param handle SDK handle
+     * @return JSON FfiResult with queue size
+     */
+    external fun getOutboundQueueSize(handle: Long): String
+    
+    /**
+     * Debug outbound queue (non-destructive peek)
+     * @param handle SDK handle
+     * @return JSON FfiResult with queue debug info
+     */
+    external fun debugOutboundQueue(handle: Long): String
+}
+

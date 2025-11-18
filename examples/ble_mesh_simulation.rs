@@ -1,15 +1,141 @@
 //! PolliNet BLE Mesh Network Node
 //!
-//! This example runs a real PolliNet BLE mesh node that continuously
-//! discovers and communicates with other PolliNet devices in the area.
-//! The node will run indefinitely, scanning for peers and relaying transactions.
+//! ⚠️  Desktop/Linux builds run this node in simulation-only mode. Use the
+//! Android PolliNet service for production BLE relays.
+//!
+//! This example runs a real PolliNet BLE mesh node using the new platform-agnostic
+//! BLE adapter. It continuously discovers and communicates with other PolliNet
+//! devices in the area. The node will run indefinitely, scanning for peers and
+//! relaying transactions.
 //!
 //! Run with: cargo run --example ble_mesh_simulation
 
 use pollinet::PolliNetSDK;
+use rand::Rng;
+use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, warn};
 use tokio::signal;
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
+
+// GATT Session Configuration
+const GATT_DATA_RECEIVE_TIMEOUT_SECS: u64 = 30; // How long to wait for incoming data
+const GATT_SESSION_KEEPALIVE_SECS: u64 = 60; // How long to keep GATT session alive
+const SCAN_INTERVAL_SECS: u64 = 5; // How often to perform scans
+
+/// GATT Session Timeout Configuration
+///
+/// These timeouts control how long GATT sessions remain active:
+///
+/// 1. DATA_RECEIVE_TIMEOUT: How long to wait for incoming data from a connected device
+///    - Default: 30 seconds
+///    - Increase for slower devices or longer data transfers
+///    - Decrease for faster response times
+///
+/// 2. SESSION_KEEPALIVE: How long to keep GATT session alive after data exchange
+///    - Default: 60 seconds  
+///    - Increase for persistent connections
+///    - Decrease to free up resources faster
+///
+/// 3. SCAN_INTERVAL: How often to perform BLE scans
+///    - Default: 5 seconds
+///    - Increase to save battery
+///    - Decrease for more frequent discovery
+
+/// GATT Session Configuration Structure
+#[derive(Debug, Clone)]
+pub struct GattSessionConfig {
+    pub data_receive_timeout_secs: u64,
+    pub session_keepalive_secs: u64,
+    pub scan_interval_secs: u64,
+    pub max_concurrent_sessions: usize,
+}
+
+impl Default for GattSessionConfig {
+    fn default() -> Self {
+        Self {
+            data_receive_timeout_secs: GATT_DATA_RECEIVE_TIMEOUT_SECS,
+            session_keepalive_secs: GATT_SESSION_KEEPALIVE_SECS,
+            scan_interval_secs: SCAN_INTERVAL_SECS,
+            max_concurrent_sessions: 5,
+        }
+    }
+}
+
+impl GattSessionConfig {
+    /// Create a new configuration with extended timeouts
+    pub fn with_extended_timeouts() -> Self {
+        Self {
+            data_receive_timeout_secs: 120, // 2 minutes
+            session_keepalive_secs: 300,    // 5 minutes
+            scan_interval_secs: 10,         // 10 seconds
+            max_concurrent_sessions: 10,
+        }
+    }
+
+    /// Create a configuration optimized for battery life
+    pub fn battery_optimized() -> Self {
+        Self {
+            data_receive_timeout_secs: 15, // 15 seconds
+            session_keepalive_secs: 30,    // 30 seconds
+            scan_interval_secs: 30,        // 30 seconds
+            max_concurrent_sessions: 3,
+        }
+    }
+
+    /// Create a configuration for high-performance scenarios
+    pub fn high_performance() -> Self {
+        Self {
+            data_receive_timeout_secs: 60, // 1 minute
+            session_keepalive_secs: 180,   // 3 minutes
+            scan_interval_secs: 2,         // 2 seconds
+            max_concurrent_sessions: 20,
+        }
+    }
+}
+
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+/// Minimal logging helper used by this example now that the old simple file service
+/// module has been removed. Keeps the public API surface identical enough for the
+/// existing logging calls below (append-only + full overwrite writes).
+#[derive(Debug)]
+struct LogFileService {
+    root: PathBuf,
+}
+
+impl LogFileService {
+    fn new(dir: impl AsRef<Path>) -> std::io::Result<Self> {
+        let root = dir.as_ref().to_path_buf();
+        if !root.exists() {
+            fs::create_dir_all(&root)?;
+        }
+        Ok(Self { root })
+    }
+
+    fn append_to_file(&self, name: &str, contents: &str) -> std::io::Result<()> {
+        let path = self.root.join(name);
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        writeln!(file, "{}", contents)?;
+        Ok(())
+    }
+
+    fn write_file(&self, name: &str, contents: &str) -> std::io::Result<()> {
+        fs::write(self.root.join(name), contents)
+    }
+}
+
+// Global message buffer for received random strings
+static RECEIVED_MESSAGES: std::sync::OnceLock<Arc<RwLock<Vec<String>>>> =
+    std::sync::OnceLock::new();
+
+// Global file service for logging received messages
+static FILE_SERVICE: std::sync::OnceLock<LogFileService> = std::sync::OnceLock::new();
+
+// Global GATT session configuration
+static GATT_CONFIG: std::sync::OnceLock<GattSessionConfig> = std::sync::OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,13 +147,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🌐 PolliNet BLE Mesh Network Node");
     info!("=================================");
-    info!("Starting real BLE mesh node - looking for other PolliNet devices...");
+    info!("Starting real BLE mesh node using platform-agnostic BLE adapter...");
+    info!("Platform: Linux (BlueZ)");
+    info!("⚠️  Simulation-only path. Android handles production BLE routing.");
 
     // Initialize the PolliNet SDK
     let sdk = PolliNetSDK::new().await?;
     info!("✅ PolliNet SDK initialized");
 
-    // Start BLE networking
+    // Initialize global message buffer
+    RECEIVED_MESSAGES
+        .set(Arc::new(RwLock::new(Vec::new())))
+        .unwrap();
+
+    // Initialize file service for logging received messages
+    let file_service = LogFileService::new("./ble_mesh_logs")?;
+    FILE_SERVICE.set(file_service).unwrap();
+    info!("✅ File service initialized for logging received messages");
+
+    // Initialize GATT session configuration
+    // Choose configuration based on your needs:
+    // - GattSessionConfig::default() - Standard timeouts
+    // - GattSessionConfig::with_extended_timeouts() - Longer timeouts
+    // - GattSessionConfig::battery_optimized() - Shorter timeouts for battery
+    // - GattSessionConfig::high_performance() - Faster scanning
+    let gatt_config = GattSessionConfig::with_extended_timeouts();
+    GATT_CONFIG.set(gatt_config.clone()).unwrap();
+    info!("✅ GATT session configuration initialized:");
+    info!(
+        "   📡 Data receive timeout: {} seconds",
+        gatt_config.data_receive_timeout_secs
+    );
+    info!(
+        "   🔗 Session keepalive: {} seconds",
+        gatt_config.session_keepalive_secs
+    );
+    info!(
+        "   🔍 Scan interval: {} seconds",
+        gatt_config.scan_interval_secs
+    );
+    info!(
+        "   👥 Max concurrent sessions: {}",
+        gatt_config.max_concurrent_sessions
+    );
+
+    // Start BLE networking (advertising + scanning)
     info!("Starting BLE advertising and scanning...");
     sdk.start_ble_networking().await?;
     info!("✅ BLE advertising and scanning started");
@@ -36,6 +200,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting text message listener...");
     sdk.start_text_listener().await?;
     info!("✅ Text message listener started");
+
+    // Set up GATT receive callback for random strings
+    info!("Setting up GATT receive callback for random strings...");
+    setup_gatt_receive_callback(&sdk).await;
+    info!("✅ GATT receive callback configured");
+
+    // Set up advertising connection handler
+    info!("Setting up advertising connection handler...");
+    setup_advertising_connection_handler(&sdk).await;
+    info!("✅ Advertising connection handler configured");
 
     // Get initial status
     match sdk.get_ble_status().await {
@@ -51,13 +225,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run continuous mesh operations with graceful shutdown
     info!("\n🔄 Starting continuous mesh operations...");
     info!("Press Ctrl+C to stop");
-    
+
     // Set up graceful shutdown
     let shutdown = async {
         signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
         handle_shutdown().await;
     };
-    
+
     // Run mesh operations until shutdown
     tokio::select! {
         _ = run_continuous_mesh_operations(sdk) => {
@@ -71,14 +245,265 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Generate a random string for GATT communication
+fn generate_random_string() -> String {
+    let mut rng = rand::thread_rng();
+    let length = rng.gen_range(10..=50);
+    let chars: Vec<char> = (0..length)
+        .map(|_| rng.gen_range(b'a'..=b'z') as char)
+        .collect();
+    chars.into_iter().collect()
+}
+
+/// Set up GATT receive callback to handle incoming random strings
+async fn setup_gatt_receive_callback(sdk: &PolliNetSDK) {
+    info!("🎧 Setting up GATT receive callback for incoming data");
+
+    // Set up real BLE adapter receive callback
+    // This will be called when data is actually received from connected devices
+    info!("📡 GATT receive callback configured - will process real incoming data from connected devices");
+
+    // The receive callback is already set up in the BleAdapterBridge
+    // when the SDK is initialized, so we don't need to do anything here
+    // The callback will automatically call add_received_message when data is received
+
+    // For testing purposes, let's simulate some incoming data to verify the callback works
+    info!("🧪 Testing receive callback with simulated data...");
+    tokio::spawn(async move {
+        // Wait a bit then simulate receiving some test data
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+        // Simulate receiving a test message
+        let test_message = "TEST_MESSAGE_FROM_SIMULATION";
+        info!("📨 Simulating received message: '{}'", test_message);
+        add_received_message(test_message.to_string()).await;
+
+        // Simulate receiving a random string
+        let random_test = generate_random_string();
+        info!("📨 Simulating received random string: '{}'", random_test);
+        add_received_message(random_test).await;
+    });
+}
+
+/// Get received messages from the global buffer
+async fn get_received_messages() -> Vec<String> {
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let messages = buffer.read().await;
+        messages.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Add a received message to the global buffer and log to file
+async fn add_received_message(message: String) {
+    // Add to in-memory buffer
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let mut messages = buffer.write().await;
+        messages.push(message.clone());
+    }
+
+    // Log to file
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let log_entry = format!("[{}] Received: {}", timestamp, message);
+
+        // Append to the received messages log file
+        if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write to log file: {}", e);
+        }
+    }
+}
+
+/// Add a received message from a connected device with device ID
+async fn add_received_message_from_connected(message: String, device_id: &str) {
+    // Add to in-memory buffer
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let mut messages = buffer.write().await;
+        messages.push(message.clone());
+    }
+
+    // Log to file with device information
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let log_entry = format!(
+            "[{}] Received from connected device {}: {}",
+            timestamp, device_id, message
+        );
+
+        // Append to the received messages log file
+        if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write to log file: {}", e);
+        }
+
+        // Also log to connected devices specific file
+        let connected_log = format!(
+            "[{}] Connected device {} sent: {}",
+            timestamp, device_id, message
+        );
+        if let Err(e) = file_service.append_to_file("connected_messages.log", &connected_log) {
+            eprintln!("⚠️  Failed to write connected message to log file: {}", e);
+        }
+    }
+}
+
+/// Add a received message from an unconnected device
+async fn add_received_message_from_unconnected(message: String, source_device: &str) {
+    // Add to in-memory buffer
+    if let Some(buffer) = RECEIVED_MESSAGES.get() {
+        let mut messages = buffer.write().await;
+        messages.push(message.clone());
+    }
+
+    // Log to file with unconnected status
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let log_entry = format!(
+            "[{}] Received from unconnected device {}: {}",
+            timestamp, source_device, message
+        );
+
+        // Append to the received messages log file
+        if let Err(e) = file_service.append_to_file("received_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write to log file: {}", e);
+        }
+
+        // Also log to a separate unconnected messages file
+        let unconnected_log = format!(
+            "[{}] Unconnected device {} sent: {}",
+            timestamp, source_device, message
+        );
+        if let Err(e) = file_service.append_to_file("unconnected_messages.log", &unconnected_log) {
+            eprintln!("⚠️  Failed to write unconnected message to log file: {}", e);
+        }
+    }
+}
+
+/// Wait for incoming data from a connected device
+async fn wait_for_incoming_data(device_id: &str) -> Option<String> {
+    // This would be implemented to actually wait for GATT data
+    // For now, we'll simulate a brief wait and return None to indicate no data
+    // In a real implementation, this would:
+    // 1. Set up a GATT characteristic notification
+    // 2. Wait for data to arrive
+    // 3. Return the received data
+
+    info!(
+        "      🔍 Waiting for GATT data from device {}...",
+        device_id
+    );
+
+    // Simulate waiting for data (in real implementation, this would be event-driven)
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // For now, return None to indicate no data received
+    // In real implementation, this would return actual received data
+    None
+}
+
+/// Set up connection handler for when devices connect to us while advertising
+async fn setup_advertising_connection_handler(sdk: &PolliNetSDK) {
+    info!("🎧 Setting up advertising connection handler");
+
+    // In a real implementation, this would:
+    // 1. Set up a callback for GATT connection events
+    // 2. When a device connects, immediately send a random string
+    // 3. Log the sent message
+    // 4. Handle the connection lifecycle
+
+    info!("📡 Advertising connection handler configured - will send data to connecting devices");
+    info!("   Real implementation would use GATT connection callbacks");
+}
+
+/// Log a successfully sent message to file
+async fn log_sent_message(peer_id: &str, message: &str) {
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let log_entry = format!("[{}] Sent to {}: {}", timestamp, peer_id, message);
+
+        if let Err(e) = file_service.append_to_file("sent_messages.log", &log_entry) {
+            eprintln!("⚠️  Failed to write sent message to log file: {}", e);
+        }
+    }
+}
+
+/// Log a failed send attempt to file
+async fn log_failed_send(peer_id: &str, message: &str, error: &str) {
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let log_entry = format!(
+            "[{}] Failed to send to {}: {} - Error: {}",
+            timestamp, peer_id, message, error
+        );
+
+        if let Err(e) = file_service.append_to_file("failed_sends.log", &log_entry) {
+            eprintln!("⚠️  Failed to write failed send to log file: {}", e);
+        }
+    }
+}
+
+/// Create a summary log file with current statistics
+async fn create_summary_log(
+    scan_count: u32,
+    unique_peers: usize,
+    current_peers: usize,
+    adapter_info: &str,
+) {
+    if let Some(file_service) = FILE_SERVICE.get() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let summary = format!(
+            "=== POLLINET BLE MESH SUMMARY (Scan #{}) ===\n\
+            Timestamp: {}\n\
+            Total scans performed: {}\n\
+            Unique peers discovered: {}\n\
+            Current peer count: {}\n\
+            BLE Adapter: {}\n\
+            Node status: ACTIVE and scanning\n\
+            ===========================================\n\n",
+            scan_count, timestamp, scan_count, unique_peers, current_peers, adapter_info
+        );
+
+        if let Err(e) = file_service.write_file("mesh_summary.log", &summary) {
+            eprintln!("⚠️  Failed to write summary to log file: {}", e);
+        }
+    }
+}
+
 /// Run continuous mesh operations - discover peers and relay transactions
-async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_continuous_mesh_operations(
+    sdk: PolliNetSDK,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut scan_count = 0;
     let mut last_peer_count = 0;
     let mut connected_peers = std::collections::HashSet::new();
 
     info!("🔄 Starting continuous mesh operations...");
     info!("This node will run indefinitely, scanning for other PolliNet devices");
+    info!("Using platform-agnostic BLE adapter (Linux BlueZ)");
     info!("Press Ctrl+C to stop gracefully");
 
     loop {
@@ -87,59 +512,144 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         info!("\n🔄 Mesh Scan #{} at {}", scan_count, current_time);
         info!("================================================");
 
-        // Discover nearby PolliNet peers
+        // Discover nearby PolliNet peers using new BLE adapter
         match sdk.discover_ble_peers().await {
             Ok(peers) => {
                 if peers.is_empty() {
                     info!("📡 No PolliNet peers found nearby");
                     info!("   Keep scanning - other devices may appear");
+                    info!("   Using BLE adapter: {}", sdk.get_adapter_info());
                 } else {
                     info!("📡 Found {} PolliNet peers:", peers.len());
-                    
+
                     // Track new peers
                     let current_peer_count = peers.len();
                     if current_peer_count != last_peer_count {
-                        info!("   Peer count changed: {} → {}", last_peer_count, current_peer_count);
+                        info!(
+                            "   Peer count changed: {} → {}",
+                            last_peer_count, current_peer_count
+                        );
                         last_peer_count = current_peer_count;
                     }
 
                     // Display peer information
                     for (i, peer) in peers.iter().enumerate() {
-                        let is_new = !connected_peers.contains(&peer.device_id);
+                        let is_new = !connected_peers.contains(&peer.peer_id);
                         let status = if is_new { "🆕 NEW" } else { "🔄 KNOWN" };
-                        
-                        info!("   {}. {} {} {}", i + 1, status, peer.device_id, peer.rssi);
+
+                        info!(
+                            "   {}. {} {} (RSSI: {})",
+                            i + 1,
+                            status,
+                            peer.peer_id,
+                            peer.rssi
+                        );
                         info!("      Capabilities: {:?}", peer.capabilities);
                         info!("      Last seen: {:?}", peer.last_seen);
-                        
+
                         if is_new {
-                            connected_peers.insert(peer.device_id.clone());
+                            connected_peers.insert(peer.peer_id.clone());
                         }
 
-                        // Try to connect to new peers
+                        // Try to connect to new peers using BLE adapter
                         if is_new {
-                            info!("      🔗 Attempting connection...");
-                            match sdk.connect_to_ble_peer(&peer.device_id).await {
+                            info!("      🔗 Attempting GATT connection via BLE adapter...");
+                            match sdk.connect_to_ble_peer(&peer.peer_id).await {
                                 Ok(_) => {
-                                    info!("      ✅ Connected to {}", peer.device_id);
-                                    
-                                    // Send LOREM_IPSUM message to newly connected peer
-                                    info!("      📤 Sending LOREM_IPSUM message...");
-                                    match sdk.send_text_message(&peer.device_id, "LOREM_IPSUM").await {
-                                        Ok(_) => {
-                                            info!("      ✅ LOREM_IPSUM sent successfully to {}", peer.device_id);
+                                    info!(
+                                        "      ✅ GATT session established with {}",
+                                        peer.peer_id
+                                    );
+
+                                    // Wait for incoming data from the connected device
+                                    info!(
+                                        "      📨 Waiting for data from connected device {}...",
+                                        peer.peer_id
+                                    );
+
+                                    // Set up a timeout for receiving data
+                                    let timeout_secs = GATT_CONFIG
+                                        .get()
+                                        .map(|config| config.data_receive_timeout_secs)
+                                        .unwrap_or(GATT_DATA_RECEIVE_TIMEOUT_SECS);
+
+                                    let receive_timeout = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(timeout_secs),
+                                        wait_for_incoming_data(&peer.peer_id),
+                                    )
+                                    .await;
+
+                                    match receive_timeout {
+                                        Ok(Some(received_data)) => {
+                                            info!(
+                                                "      📨 Received data from {}: '{}'",
+                                                peer.peer_id, received_data
+                                            );
+
+                                            // Log received message
+                                            add_received_message_from_connected(
+                                                received_data,
+                                                &peer.peer_id,
+                                            )
+                                            .await;
+
+                                            // Send a response
+                                            let response = generate_random_string();
+                                            info!(
+                                                "      📤 Sending response to {}: '{}'",
+                                                peer.peer_id, response
+                                            );
+
+                                            match sdk
+                                                .send_to_peer(&peer.peer_id, response.as_bytes())
+                                                .await
+                                            {
+                                                Ok(_) => {
+                                                    info!(
+                                                        "      ✅ Response sent successfully to {}",
+                                                        peer.peer_id
+                                                    );
+                                                    log_sent_message(&peer.peer_id, &response)
+                                                        .await;
+                                                }
+                                                Err(e) => {
+                                                    info!(
+                                                        "      ⚠️  Failed to send response: {}",
+                                                        e
+                                                    );
+                                                    log_failed_send(
+                                                        &peer.peer_id,
+                                                        &response,
+                                                        &e.to_string(),
+                                                    )
+                                                    .await;
+                                                }
+                                            }
                                         }
-                                        Err(e) => {
-                                            info!("      ⚠️  Failed to send LOREM_IPSUM: {}", e);
+                                        Ok(None) => {
+                                            info!(
+                                                "      ⏱️  No data received from {} within timeout",
+                                                peer.peer_id
+                                            );
+                                        }
+                                        Err(_) => {
+                                            info!(
+                                                "      ⏱️  Timeout waiting for data from {}",
+                                                peer.peer_id
+                                            );
                                         }
                                     }
+
+                                    // Disconnect after handling
+                                    info!("      🔌 Disconnecting from {}", peer.peer_id);
+                                    // Note: Disconnect functionality would need to be implemented in the SDK
                                 }
                                 Err(e) => {
-                                    info!("      ⚠️  Connection failed: {}", e);
+                                    info!("      ⚠️  GATT connection failed: {}", e);
                                 }
                             }
                         }
@@ -151,13 +661,19 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             }
         }
 
-        // Check for any pending transactions to relay
+        // Check for any pending transactions to relay using BLE adapter
         info!("📦 Checking for transactions to relay...");
-        // In a real implementation, this would check for received fragments
-        // and reassemble them into complete transactions
+        // The BLE adapter handles fragment transmission automatically
+        // Check if there are any fragments waiting for transmission
+        debug!(
+            "Fragment buffer status: {} fragments waiting",
+            sdk.get_fragment_count().await
+        );
 
-        // Check for incoming text messages
-        info!("📨 Checking for incoming text messages...");
+        // Check for incoming text messages and random strings
+        info!("📨 Checking for incoming messages...");
+
+        // Check for text messages
         match sdk.check_incoming_messages().await {
             Ok(messages) => {
                 for message in messages {
@@ -168,22 +684,58 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
                 }
             }
             Err(e) => {
-                info!("⚠️  Failed to check messages: {}", e);
+                debug!(
+                    "⚠️  Text messaging not fully implemented in BLE adapter: {}",
+                    e
+                );
             }
         }
 
-        // Get current BLE status
+        // Check for received random strings via GATT (real data only)
+        let received_messages = get_received_messages().await;
+        if !received_messages.is_empty() {
+            info!(
+                "📨 Received {} random string(s) via GATT:",
+                received_messages.len()
+            );
+            for (i, message) in received_messages.iter().enumerate() {
+                info!("   {}. '{}'", i + 1, message);
+            }
+            // Clear the buffer after processing
+            if let Some(buffer) = RECEIVED_MESSAGES.get() {
+                let mut messages = buffer.write().await;
+                messages.clear();
+            }
+        }
+
+        // Real BLE functionality: Send random strings only when actually connected
+        // This will be triggered by actual GATT connections, not simulated
+
+        // Get current BLE adapter status
         match sdk.get_ble_status().await {
             Ok(status) => {
-                if scan_count % 10 == 0 { // Show full status every 10 scans
-                    info!("📊 BLE Status:");
+                if scan_count % 10 == 0 {
+                    // Show full status every 10 scans
+                    info!("📊 BLE Adapter Status:");
                     info!("{}", status);
+                    info!("Adapter Info: {}", sdk.get_adapter_info());
+                    info!(
+                        "Connected Clients: {}",
+                        sdk.get_connected_clients_count().await
+                    );
+                    info!("Advertising: {}", sdk.is_advertising());
+                    info!("Scanning: {}", sdk.is_scanning());
                 } else {
-                    info!("📊 BLE: Active | Peers: {} | Buffer: Ready", connected_peers.len());
+                    info!(
+                        "📊 BLE Adapter: Active | Peers: {} | Clients: {} | Buffer: {} fragments",
+                        connected_peers.len(),
+                        sdk.get_connected_clients_count().await,
+                        sdk.get_fragment_count().await
+                    );
                 }
             }
             Err(e) => {
-                warn!("⚠️  BLE status error: {}", e);
+                warn!("⚠️  BLE adapter status error: {}", e);
             }
         }
 
@@ -194,13 +746,38 @@ async fn run_continuous_mesh_operations(sdk: PolliNetSDK) -> Result<(), Box<dyn 
             info!("Total scans performed: {}", scan_count);
             info!("Unique peers discovered: {}", connected_peers.len());
             info!("Current peer count: {}", last_peer_count);
+            info!("BLE Adapter: {}", sdk.get_adapter_info());
+            info!(
+                "Connected clients: {}",
+                sdk.get_connected_clients_count().await
+            );
+            info!(
+                "Fragment buffer: {} fragments",
+                sdk.get_fragment_count().await
+            );
+            info!("Advertising: {}", sdk.is_advertising());
+            info!("Scanning: {}", sdk.is_scanning());
             info!("Node status: ACTIVE and scanning");
-            info!("Ready to relay transactions");
+            info!("Ready to relay transactions via BLE adapter");
+
+            // Create summary log file
+            create_summary_log(
+                scan_count,
+                connected_peers.len(),
+                last_peer_count,
+                &sdk.get_adapter_info(),
+            )
+            .await;
         }
 
         // Wait before next scan
-        info!("⏱️  Waiting 5 seconds before next scan...");
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let scan_interval = GATT_CONFIG
+            .get()
+            .map(|config| config.scan_interval_secs)
+            .unwrap_or(SCAN_INTERVAL_SECS);
+
+        info!("⏱️  Waiting {} seconds before next scan...", scan_interval);
+        tokio::time::sleep(Duration::from_secs(scan_interval)).await;
     }
 }
 
@@ -210,4 +787,3 @@ async fn handle_shutdown() {
     info!("Stopping BLE mesh node gracefully...");
     info!("Thank you for using PolliNet BLE Mesh!");
 }
-

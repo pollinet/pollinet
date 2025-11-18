@@ -1,7 +1,11 @@
 [package]
 name = "pollinet"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+name = "pollinet"
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
 anyhow = "1.0"
@@ -10,7 +14,7 @@ bincode = "2.0.1"
 bincode1 = { package = "bincode", version = "1.3" }
 bs58 = "0.5"
 btleplug = "0.11.8"
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 config = "0.15.13"
 dotenv = "0.15.0"
 hex = "0.4"
@@ -19,14 +23,41 @@ serde_json = "1.0"
 lz4 = "1.24"
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+aes-gcm = "0.10"
 solana-account-decoder = "2.3.0"
 solana-client = "2.3.0"
 solana-sdk = "2.3.0"
 solana-program = "2.3.0"
-spl-associated-token-account = "4.0"
-spl-token = "4.0"
+spl-associated-token-account = { version = "4.0", features = ["no-entrypoint"] }
+spl-token = { version = "4.0", features = ["no-entrypoint"] }
 thiserror = "2.0.12"
 tokio = { version = "1.46.1", features = ["full", "signal"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3"
 rand = "0.8"
+bluer = { version = "0.16", optional = true, features = ["bluetoothd"] }
+async-trait = "0.1"
+futures = "0.3"
+tokio-stream = "0.1"
+
+# FFI dependencies for Android
+jni = { version = "0.21", optional = true }
+once_cell = "1.19"
+parking_lot = "0.12"
+lazy_static = "1.4"
+log = "0.4"
+android_logger = { version = "0.14", optional = true }
+
+# OpenSSL for Android (vendored to avoid system dependency issues)
+openssl = { version = "0.10", features = ["vendored"], optional = true }
+tempfile = "3.23.0"
+
+[features]
+default = ["linux"]
+linux = ["bluer"]
+macos = []  # Uses btleplug (already in dependencies, Central role only)
+windows = []
+android = ["jni", "openssl", "android_logger"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Android-specific dependencies are already in main dependencies with jni feature flag

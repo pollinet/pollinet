@@ -1,5 +1,8 @@
 //! Simple BLE Testing Example for PolliNet SDK
 //!
+//! ⚠️  Desktop/Linux builds run in simulation-only mode. For production BLE
+//! mesh relays use the Android PolliNet service.
+//!
 //! This is a simplified example that demonstrates the core BLE functionality
 //! without requiring complex setup or multiple devices.
 //!
@@ -19,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 PolliNet Simple BLE Test");
     info!("==========================");
+    info!("⚠️  Running in desktop simulation mode. Android handles production BLE.");
 
     // Initialize the SDK
     info!("\n1️⃣  Initializing PolliNet SDK...");
@@ -85,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 info!("✅ Found {} PolliNet peers:", peers.len());
                 for (i, peer) in peers.iter().enumerate() {
-                    info!("   {}. Device ID: {}", i + 1, peer.device_id);
+                    info!("   {}. Peer ID: {}", i + 1, peer.peer_id);
                     info!("      RSSI: {}", peer.rssi);
                     info!("      Capabilities: {:?}", peer.capabilities);
                 }
@@ -105,9 +109,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Transaction fragmented into {} pieces", fragments.len());
 
     for (i, fragment) in fragments.iter().enumerate() {
-        info!("   Fragment {}/{}: {} bytes (MTU: {})", 
-              i + 1, fragments.len(), fragment.data.len(), pollinet::BLE_MTU_SIZE);
-        
+        info!(
+            "   Fragment {}/{}: {} bytes (MTU: {})",
+            i + 1,
+            fragments.len(),
+            fragment.data.len(),
+            pollinet::BLE_MTU_SIZE
+        );
+
         if fragment.data.len() <= pollinet::BLE_MTU_SIZE {
             info!("      ✅ Size within BLE MTU limit");
         } else {
@@ -122,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("✅ Fragments reassembled successfully");
             info!("   Original size: {} bytes", mock_tx.len());
             info!("   Reassembled size: {} bytes", reassembled.len());
-            
+
             if reassembled == mock_tx {
                 info!("✅ Integrity verification passed");
             } else {
@@ -170,12 +179,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn create_mock_transaction() -> Vec<u8> {
     // Create a realistic-sized mock transaction
     let base_data = b"Mock Solana transaction data for BLE testing - this simulates a real transaction that would be fragmented and transmitted over the BLE mesh network. The data includes various components like instructions, accounts, and signatures that would be present in a real Solana transaction.";
-    
+
     // Repeat to create a larger transaction for better fragmentation testing
     let mut mock_tx = Vec::new();
     for _ in 0..5 {
         mock_tx.extend_from_slice(base_data);
     }
-    
+
     mock_tx
 }
