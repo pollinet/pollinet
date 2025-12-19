@@ -284,10 +284,18 @@ impl HostBleTransport {
     }
 
     /// Queue transaction fragments for sending
-    pub fn queue_transaction(&self, tx_bytes: Vec<u8>) -> Result<Vec<Fragment>, String> {
-        // Use BLE mesh fragmenter for optimal fragment size (52 bytes data)
-        use crate::ble::fragmenter::fragment_transaction as mesh_fragment;
-        let mesh_fragments = mesh_fragment(&tx_bytes);
+    /// 
+    /// # Arguments
+    /// * `tx_bytes` - Complete signed transaction bytes
+    /// * `max_payload` - Optional maximum payload size (typically MTU - 10). If None, uses default MAX_FRAGMENT_DATA
+    pub fn queue_transaction(&self, tx_bytes: Vec<u8>, max_payload: Option<usize>) -> Result<Vec<Fragment>, String> {
+        // Use BLE mesh fragmenter with MTU-aware payload size
+        use crate::ble::fragmenter;
+        let mesh_fragments = if let Some(max_payload) = max_payload {
+            fragmenter::fragment_transaction_with_max_payload(&tx_bytes, max_payload)
+        } else {
+            fragmenter::fragment_transaction(&tx_bytes)
+        };
         
         tracing::info!(
             "📦 Mesh fragmenter created {} fragments for {} byte transaction",

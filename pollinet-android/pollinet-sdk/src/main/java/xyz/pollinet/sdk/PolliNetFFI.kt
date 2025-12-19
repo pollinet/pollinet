@@ -124,9 +124,10 @@ object PolliNetFFI {
     /**
      * Fragment a transaction for BLE transmission
      * @param txBytes Transaction bytes to fragment
+     * @param maxPayload Optional maximum payload size (MTU - 10). Pass 0 to use default
      * @return JSON FfiResult with FragmentList
      */
-    external fun fragment(handle: Long, txBytes: ByteArray): String
+    external fun fragment(handle: Long, txBytes: ByteArray, maxPayload: Long = 0): String
 
     // =========================================================================
     // Offline Bundle Management (Core PolliNet Features)

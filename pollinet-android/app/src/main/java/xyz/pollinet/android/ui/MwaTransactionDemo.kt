@@ -687,14 +687,13 @@ fun MwaTransactionDemo(
                                         val txBytes = android.util.Base64.decode(signedTxBase64, android.util.Base64.NO_WRAP)
                                         addBleLog("Transaction size: ${txBytes.size} bytes")
                                         
-                                        // Fragment the transaction
-                                        bleService?.sdk?.fragment(txBytes)?.onSuccess { result ->
-                                            addBleLog("✅ Fragmented into ${result.fragments.size} fragments")
-                                            addBleLog("Transmitting fragments over BLE...")
-                                            // Fragments are automatically queued for transmission
-                                            addBleLog("✅ Fragments queued for transmission")
+                                        // Queue the signed transaction with MTU-aware fragmentation
+                                        bleService?.queueSignedTransaction(txBytes)?.onSuccess { fragmentCount ->
+                                            addBleLog("✅ Fragmented into $fragmentCount MTU-optimized fragments")
+                                            addBleLog("Transmitting fragments over BLE mesh...")
+                                            addBleLog("✅ Fragments queued and sending (supports auto re-fragmentation)")
                                         }?.onFailure { error ->
-                                            addBleLog("❌ Fragmentation failed: ${error.message}")
+                                            addBleLog("❌ Failed to queue transaction: ${error.message}")
                                         }
                                     } catch (e: Exception) {
                                         addBleLog("❌ Error: ${e.message}")

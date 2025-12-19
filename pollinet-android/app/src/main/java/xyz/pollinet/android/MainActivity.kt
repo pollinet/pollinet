@@ -154,13 +154,24 @@ fun PolliNetApp(mwaActivityResultSender: ActivityResultSender) {
         scope.launch {
             PolliNetSDK.initialize(
                 SdkConfig(
-                    rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6", // Use devnet for testing
+                    // Try multiple RPC endpoints for reliability
+                    // Option 1: Alchemy (requires valid API key)
+                    // rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
+                    
+                    // Option 2: Public Helius endpoint (free, no API key)
+                    rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
+                    
+                    // Option 3: Solana public devnet (can be slow)
+                    // rpcUrl = "https://api.devnet.solana.com",
+                    
                     enableLogging = true,
                     logLevel = "info",
                     storageDirectory = context.filesDir.absolutePath
                 )
             ).onSuccess {
                 sdk = it
+            }.onFailure { e ->
+                android.util.Log.e("PolliNet", "Failed to initialize SDK with RPC", e)
             }
         }
     }

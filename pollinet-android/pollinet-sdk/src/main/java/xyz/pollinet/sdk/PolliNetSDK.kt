@@ -191,10 +191,13 @@ class PolliNetSDK private constructor(
 
     /**
      * Fragment a transaction for BLE transmission
+     * @param txBytes Transaction bytes to fragment
+     * @param maxPayload Optional maximum payload size (typically MTU - 10). If null, uses default
      */
-    suspend fun fragment(txBytes: ByteArray): Result<FragmentList> = withContext(Dispatchers.IO) {
+    suspend fun fragment(txBytes: ByteArray, maxPayload: Int? = null): Result<FragmentList> = withContext(Dispatchers.IO) {
         try {
-            val resultJson = PolliNetFFI.fragment(handle, txBytes)
+            val maxPayloadLong = maxPayload?.toLong() ?: 0L
+            val resultJson = PolliNetFFI.fragment(handle, txBytes, maxPayloadLong)
             parseResult<FragmentList>(resultJson)
         } catch (e: Exception) {
             Result.failure(e)

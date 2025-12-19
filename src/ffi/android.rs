@@ -574,6 +574,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_verifyAndSerialize(
 // =============================================================================
 
 /// Fragment a transaction for BLE transmission
+/// 
+/// Optionally accepts max_payload (MTU - 10) for MTU-aware fragmentation
 #[cfg(feature = "android")]
 #[no_mangle]
 pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
@@ -581,6 +583,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
     _class: JClass,
     handle: jlong,
     tx_bytes: JByteArray,
+    max_payload: jlong,
 ) -> jstring {
     let result = (|| {
         let transport = get_transport(handle)?;
@@ -588,7 +591,14 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
             .convert_byte_array(&tx_bytes)
             .map_err(|e| format!("Failed to read tx bytes: {}", e))?;
 
-        let fragments = transport.queue_transaction(tx_data)?;
+        // Use max_payload if provided (> 0), otherwise use default
+        let max_payload_opt = if max_payload > 0 {
+            Some(max_payload as usize)
+        } else {
+            None
+        };
+
+        let fragments = transport.queue_transaction(tx_data, max_payload_opt)?;
         
         let fragment_list = FragmentList { fragments };
         let response: FfiResult<FragmentList> = FfiResult::success(fragment_list);

@@ -1463,7 +1463,13 @@ impl TransactionService {
         // Get rent exemption amount
         let rent_exemption = client
             .get_minimum_balance_for_rent_exemption(solana_sdk::nonce::State::size())
-            .map_err(|e| TransactionError::RpcClient(format!("Failed to get rent exemption: {}", e)))?;
+            .map_err(|e| {
+                tracing::error!("RPC error getting rent exemption: {:?}", e);
+                TransactionError::RpcClient(format!(
+                    "Failed to get rent exemption: {}. Check internet connection and RPC endpoint availability.", 
+                    e
+                ))
+            })?;
         
         tracing::info!("Rent exemption for nonce account: {} lamports", rent_exemption);
 
