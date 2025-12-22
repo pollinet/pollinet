@@ -848,6 +848,7 @@ class BleService : Service() {
                         appendLog("✅ All fragments delivered successfully, clearing pending transaction")
                         pendingTransactionBytes = null
                         fragmentsQueuedWithMtu = 0
+                        // Connection is already ready for next transaction - no refresh needed
                     } else {
                         appendLog("⚠️ Connection lost, keeping transaction for potential retry")
                     }
@@ -1371,13 +1372,21 @@ class BleService : Service() {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
+            appendLog("🔔 NOTIFICATION RECEIVED (Client): char=${characteristic.uuid}, device=${gatt.device.address}, size=${value.size} bytes")
+            appendLog("   📦 Raw data: ${value.joinToString(" ") { "%02X".format(it) }}")
+            appendLog("   📋 Base64: ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+            appendLog("   📝 Preview: ${previewFragment(value)}")
+            
             // Forward to Rust FFI
             serviceScope.launch {
                 if (sdk == null) {
                     appendLog("⚠️ SDK not initialized; inbound dropped")
                     return@launch
                 }
-                appendLog("⬅️ Received: ${previewFragment(value)}")
+                
+                // Log received data in detail for receiver
+                appendLog("⬅️ Processing notification data...")
+                
                 handleReceivedData(value)
             }
         }
@@ -1387,6 +1396,7 @@ class BleService : Service() {
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
+            appendLog("📝 Characteristic WRITE (Client): char=${characteristic.uuid}, status=$status")
             if (characteristic.uuid == RX_CHAR_UUID) {
                 operationInProgress = false
                 
@@ -1405,6 +1415,40 @@ class BleService : Service() {
                         processOperationQueue()
                     }
                 }
+            } else {
+                appendLog("   ⚠️ Write to unexpected characteristic: ${characteristic.uuid}")
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            appendLog("📖 Characteristic READ (Client): char=${characteristic.uuid}, status=$status")
+            characteristic.value?.let { value ->
+                appendLog("   Value size: ${value.size} bytes")
+                appendLog("   Value: ${value.joinToString(" ") { "%02X".format(it) }}")
+                appendLog("   Value (base64): ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+            } ?: run {
+                appendLog("   Value: null or empty")
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onDescriptorRead(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
+            appendLog("📖 Descriptor READ (Client): descriptor=${descriptor.uuid}, status=$status")
+            descriptor.value?.let { value ->
+                appendLog("   Value size: ${value.size} bytes")
+                appendLog("   Value: ${value.joinToString(" ") { "%02X".format(it) }}")
+                appendLog("   Value (base64): ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+            } ?: run {
+                appendLog("   Value: null or empty")
             }
         }
 
@@ -1414,7 +1458,25 @@ class BleService : Service() {
             descriptor: BluetoothGattDescriptor,
             status: Int
         ) {
-            appendLog("📝 Descriptor write: status=$status")
+            appendLog("📝 Descriptor write: status=$status, connection=${_connectionState.value}")
+            
+            // Ignore stale callbacks - check if connection is still active
+            if (_connectionState.value != ConnectionState.CONNECTED) {
+                appendLog("⚠️ Ignoring descriptor write callback - connection is ${_connectionState.value}")
+                return
+            }
+            
+            // Ignore if descriptor write already completed successfully
+            if (descriptorWriteComplete && status != BluetoothGatt.GATT_SUCCESS) {
+                appendLog("⚠️ Ignoring failed descriptor write callback - already completed successfully")
+                return
+            }
+            
+            // Verify this is for the current GATT connection
+            if (gatt != clientGatt) {
+                appendLog("⚠️ Ignoring descriptor write callback - GATT mismatch (stale callback)")
+                return
+            }
             
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 appendLog("✅ Notifications enabled - ready to transfer data!")
@@ -1429,6 +1491,13 @@ class BleService : Service() {
                 ensureSendingLoopStarted()
             } else {
                 appendLog("❌ Failed to enable notifications: status=$status")
+                
+                // Double-check connection is still active before retrying
+                if (_connectionState.value != ConnectionState.CONNECTED) {
+                    appendLog("⚠️ Connection lost, aborting descriptor write retry")
+                    descriptorWriteRetries = 0
+                    return
+                }
                 
                 // Handle status 133 with retry logic
                 if (status == 133) {
@@ -1445,7 +1514,21 @@ class BleService : Service() {
                         
                         // Exponential backoff: wait longer between retries
                         val retryDelay = 1000L * descriptorWriteRetries // 1s, 2s, 3s
-                        mainHandler.postDelayed({
+                        mainHandler.postDelayed(retry@ {
+                            // Check connection state again before retrying
+                            if (_connectionState.value != ConnectionState.CONNECTED) {
+                                appendLog("⚠️ Connection lost during retry delay, aborting")
+                                descriptorWriteRetries = 0
+                                return@retry
+                            }
+                            
+                            // Verify GATT is still valid
+                            if (gatt != clientGatt) {
+                                appendLog("⚠️ GATT connection changed during retry delay, aborting")
+                                descriptorWriteRetries = 0
+                                return@retry
+                            }
+                            
                             try {
                                 // Re-enable notifications and write descriptor
                                 gatt.setCharacteristicNotification(remoteTxCharacteristic, true)
@@ -1467,8 +1550,10 @@ class BleService : Service() {
                     } else {
                         appendLog("❌ Max descriptor write retries reached. Giving up.")
                         descriptorWriteRetries = 0
-                        // Try to recover by refreshing cache and reconnecting
-                        handleStatus133(gatt)
+                        // Only try to recover if still connected
+                        if (_connectionState.value == ConnectionState.CONNECTED) {
+                            handleStatus133(gatt)
+                        }
                     }
                 } else if (status == 5 || status == 15) {
                     // Authentication/Encryption required
@@ -1501,6 +1586,8 @@ class BleService : Service() {
                     connectedDevice = device
                     appendLog("🤝 (Server) connected ${device.address}")
                     appendLog("   Server mode: Can send notifications immediately")
+                    appendLog("   ✅ Ready to receive writes on RX characteristic: $RX_CHAR_UUID")
+                    appendLog("   ✅ GATT server: ${gattServer != null}, RX char: ${gattCharacteristicRx != null}")
                     // In server mode, we can SEND immediately (don't need descriptor write for TX)
                     // But descriptor write is still needed on client side to RECEIVE
                     // Only set flag if we don't have a client connection active
@@ -1539,21 +1626,143 @@ class BleService : Service() {
             offset: Int,
             value: ByteArray
         ) {
+            appendLog("📥 Write request: char=${characteristic.uuid}, size=${value.size}, responseNeeded=$responseNeeded, offset=$offset")
+            
             if (characteristic.uuid == RX_CHAR_UUID) {
-                // Forward to Rust FFI
+                appendLog("✅ Matched RX characteristic - processing data")
+                
+                // Send response FIRST (synchronously) before processing data
+                // This is critical - response must be sent in the callback thread
+                if (responseNeeded) {
+                    val responseSent = gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null) ?: false
+                    appendLog("📤 Sent write response: $responseSent")
+                }
+                
+                // Forward to Rust FFI (async processing)
                 serviceScope.launch {
                     if (sdk == null) {
                         appendLog("⚠️ SDK not initialized; write dropped")
                         return@launch
                     }
+                    // Log received data in detail for receiver
                     appendLog("⬅️ RX from ${device.address}: ${previewFragment(value)}")
+                    appendLog("   📦 Raw data (${value.size} bytes): ${value.joinToString(" ") { "%02X".format(it) }}")
+                    appendLog("   📋 Base64: ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+                    
                     handleReceivedData(value)
                 }
-                
+            } else {
+                appendLog("⚠️ Write to unknown characteristic: ${characteristic.uuid} (expected: $RX_CHAR_UUID)")
+                // Still send response for unknown characteristics to avoid client timeout
                 if (responseNeeded) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
                 }
             }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onCharacteristicReadRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            offset: Int,
+            characteristic: BluetoothGattCharacteristic
+        ) {
+            appendLog("📖 READ request: char=${characteristic.uuid}, offset=$offset, from=${device.address}")
+            appendLog("   Characteristic value: ${characteristic.value?.size ?: 0} bytes")
+            
+            // Log the actual value if present
+            characteristic.value?.let { value ->
+                appendLog("   Value: ${value.joinToString(" ") { "%02X".format(it) }}")
+                appendLog("   Value (base64): ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+            }
+            
+            // Send response (default: not supported for our use case)
+            val status = if (characteristic.uuid == TX_CHAR_UUID || characteristic.uuid == RX_CHAR_UUID) {
+                appendLog("   ✅ Allowing read for PolliNet characteristic")
+                BluetoothGatt.GATT_SUCCESS
+            } else {
+                appendLog("   ⚠️ Read not supported for this characteristic")
+                BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+            }
+            
+            gattServer?.sendResponse(device, requestId, status, offset, characteristic.value)
+            appendLog("   📤 Sent read response: status=$status")
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onDescriptorReadRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            offset: Int,
+            descriptor: BluetoothGattDescriptor
+        ) {
+            appendLog("📖 DESCRIPTOR READ request: descriptor=${descriptor.uuid}, offset=$offset, from=${device.address}")
+            appendLog("   Descriptor value: ${descriptor.value?.size ?: 0} bytes")
+            
+            // Log the actual value if present
+            descriptor.value?.let { value ->
+                appendLog("   Value: ${value.joinToString(" ") { "%02X".format(it) }}")
+                appendLog("   Value (base64): ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+            }
+            
+            // Send response
+            val status = BluetoothGatt.GATT_SUCCESS
+            gattServer?.sendResponse(device, requestId, status, offset, descriptor.value)
+            appendLog("   📤 Sent descriptor read response: status=$status")
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onDescriptorWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            descriptor: BluetoothGattDescriptor,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray
+        ) {
+            appendLog("📝 DESCRIPTOR WRITE request: descriptor=${descriptor.uuid}, size=${value.size}, responseNeeded=$responseNeeded, offset=$offset, from=${device.address}")
+            appendLog("   Value: ${value.joinToString(" ") { "%02X".format(it) }}")
+            appendLog("   Value (base64): ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
+            
+            // Handle CCCD descriptor writes (for enabling notifications)
+            if (descriptor.uuid == cccdUuid) {
+                appendLog("   ✅ CCCD descriptor write - notifications ${if (value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) "ENABLED" else "DISABLED"}")
+            }
+            
+            // Send response
+            if (responseNeeded) {
+                val responseSent = gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null) ?: false
+                appendLog("   📤 Sent descriptor write response: $responseSent")
+            }
+        }
+
+        override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
+            appendLog("📋 EXECUTE WRITE: device=${device.address}, requestId=$requestId, execute=$execute")
+            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            appendLog("📬 NOTIFICATION SENT: device=${device.address}, status=$status")
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                appendLog("   ❌ Notification send failed with status: $status")
+            }
+        }
+
+        override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+            appendLog("📏 MTU CHANGED (Server): device=${device.address}, mtu=$mtu")
+            val oldMtu = currentMtu
+            currentMtu = mtu
+            val maxPayload = (mtu - 10).coerceAtLeast(20)
+            appendLog("   MTU: $oldMtu → $mtu bytes, maxPayload=$maxPayload bytes")
+        }
+
+        override fun onPhyUpdate(device: BluetoothDevice, txPhy: Int, rxPhy: Int, status: Int) {
+            appendLog("📡 PHY UPDATE: device=${device.address}, txPhy=$txPhy, rxPhy=$rxPhy, status=$status")
+        }
+
+        override fun onPhyRead(device: BluetoothDevice, txPhy: Int, rxPhy: Int, status: Int) {
+            appendLog("📡 PHY READ: device=${device.address}, txPhy=$txPhy, rxPhy=$rxPhy, status=$status")
         }
     }
 
