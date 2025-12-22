@@ -873,14 +873,61 @@ class BleService : Service() {
         appendLog("   Server path: server=${gattServer != null}, txChar=${gattCharacteristicTx != null}, device=${connectedDevice?.address}")
         appendLog("   Client path: gatt=${clientGatt != null}, remoteRx=${remoteRxCharacteristic != null}")
         
-        // Based on official Android sample (lines 184-202)
-        // Try server/peripheral path first
+        // CRITICAL FIX: Prioritize client path when we have an active client connection
+        // This prevents dual-role confusion where device tries to notify AND write
+        val gatt = clientGatt
+        val remoteRx = remoteRxCharacteristic
+        
+        // If we have a client connection, ALWAYS use client path (write to remote RX)
+        if (gatt != null && remoteRx != null) {
+            appendLog("   → Using CLIENT path (write to remote RX)")
+            appendLog("   Writing to device: ${gatt.device.address}")
+            appendLog("   RX characteristic UUID: ${remoteRx.uuid}")
+            appendLog("   Data preview: ${data.take(20).joinToString(" ") { "%02X".format(it) }}...")
+
+            // Mark operation in progress for client writes
+            if (operationInProgress) {
+                appendLog("⚠️ Operation in progress, queuing fragment")
+                operationQueue.offer(data)
+                return
+            }
+            
+            operationInProgress = true
+            
+            // Use official sample's write pattern (Android 13+ vs older)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val result = gatt.writeCharacteristic(
+                    remoteRx,
+                    data,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+                appendLog("✅ Wrote ${data.size}B (result=$result) to ${gatt.device.address}")
+                if (result != BluetoothGatt.GATT_SUCCESS) {
+                    appendLog("   ⚠️ Write result indicates failure: $result")
+                    operationInProgress = false
+                }
+            } else {
+                remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                remoteRx.value = data
+                @Suppress("DEPRECATION")
+                val success = gatt.writeCharacteristic(remoteRx)
+                appendLog(if (success) "✅ Wrote ${data.size}B to ${gatt.device.address}" else "❌ Write failed to ${gatt.device.address}")
+                if (!success) {
+                    operationInProgress = false
+                }
+            }
+            return
+        }
+        
+        // Fallback: Use server path only if no client connection exists
+        // This is for when we're purely acting as a server (peripheral)
         val server = gattServer
         val txChar = gattCharacteristicTx
         val device = connectedDevice
         
         if (server != null && txChar != null && device != null) {
-            appendLog("   → Using SERVER path (notify)")
+            appendLog("   → Using SERVER path (notify) - no client connection")
             // Add flow control for server path (critical fix)
             // Android docs: notifyCharacteristicChanged() returns when queued, not when delivered
             if (operationInProgress) {
@@ -911,47 +958,10 @@ class BleService : Service() {
             return
         }
 
-        // Try client/central path
-        val gatt = clientGatt
-        val remoteRx = remoteRxCharacteristic
-        
-        if (gatt == null || remoteRx == null) {
-            appendLog("⚠️ GATT or RX characteristic not available")
-            appendLog("   clientGatt: ${gatt != null}, remoteRxCharacteristic: ${remoteRx != null}")
-            return
-        }
-
-        appendLog("   → Using CLIENT path (write)")
-        appendLog("   Writing to device: ${gatt.device.address}")
-        appendLog("   RX characteristic UUID: ${remoteRx.uuid}")
-        appendLog("   Data preview: ${data.take(20).joinToString(" ") { "%02X".format(it) }}...")
-
-        // Mark operation in progress for client writes
-        operationInProgress = true
-        
-        // Use official sample's write pattern (Android 13+ vs older)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val result = gatt.writeCharacteristic(
-                remoteRx,
-                data,
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            )
-            appendLog("✅ Wrote ${data.size}B (result=$result) to ${gatt.device.address}")
-            if (result != BluetoothGatt.GATT_SUCCESS) {
-                appendLog("   ⚠️ Write result indicates failure: $result")
-                operationInProgress = false
-            }
-        } else {
-            remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            @Suppress("DEPRECATION")
-            remoteRx.value = data
-            @Suppress("DEPRECATION")
-            val success = gatt.writeCharacteristic(remoteRx)
-            appendLog(if (success) "✅ Wrote ${data.size}B to ${gatt.device.address}" else "❌ Write failed to ${gatt.device.address}")
-            if (!success) {
-                operationInProgress = false
-            }
-        }
+        // No valid path available
+        appendLog("⚠️ No valid GATT path available for sending")
+        appendLog("   clientGatt: ${clientGatt != null}, remoteRxCharacteristic: ${remoteRx != null}")
+        appendLog("   gattServer: ${server != null}, gattCharacteristicTx: ${txChar != null}, connectedDevice: ${device != null}")
     }
 
     private fun completeRemoteWrite() {
