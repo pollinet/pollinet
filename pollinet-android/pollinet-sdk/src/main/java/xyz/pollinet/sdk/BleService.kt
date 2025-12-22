@@ -546,25 +546,37 @@ class BleService : Service() {
      */
     private suspend fun handleReceivedData(data: ByteArray) {
         try {
-            appendLog("📥 Received data: ${data.size} bytes")
+            appendLog("📥 ===== PROCESSING RECEIVED DATA =====")
+            appendLog("📥 Data size: ${data.size} bytes")
+            appendLog("📥 Data preview: ${data.take(32).joinToString(" ") { "%02X".format(it) }}...")
             
             // Push to SDK for reassembly
             // The pushInbound call will handle fragmentation internally
             // Completed transactions will be picked up by the auto-submit loop
             val result = sdk?.pushInbound(data)
             result?.onSuccess {
-                appendLog("✅ Fragment processed and added to reassembly buffer")
+                appendLog("✅ ✅ ✅ Fragment processed successfully ✅ ✅ ✅")
+                appendLog("✅ Fragment added to reassembly buffer")
                 
                 // Check if we have completed transactions
                 val queueSize = sdk?.getReceivedQueueSize()?.getOrNull() ?: 0
+                appendLog("📊 Received queue size: $queueSize")
                 if (queueSize > 0) {
-                    appendLog("🎉 Transaction reassembly complete! Queue size: $queueSize")
+                    appendLog("🎉 🎉 🎉 Transaction reassembly complete! Queue size: $queueSize")
+                    appendLog("🎉 Transaction ready for auto-submission")
                 }
             }?.onFailure { e ->
-                appendLog("⚠️ Error processing fragment: ${e.message}")
+                appendLog("❌ ❌ ❌ Error processing fragment ❌ ❌ ❌")
+                appendLog("❌ Error: ${e.message}")
+                if (e is PolliNetException) {
+                    appendLog("❌ Code: ${e.code}")
+                }
             }
+            appendLog("📥 ===== END PROCESSING =====\n")
         } catch (e: Exception) {
-            appendLog("❌ Error in handleReceivedData: ${e.message}")
+            appendLog("❌ ❌ ❌ Exception in handleReceivedData ❌ ❌ ❌")
+            appendLog("❌ Error: ${e.message}")
+            appendLog("❌ Stack trace: ${e.stackTraceToString()}")
         }
     }
 

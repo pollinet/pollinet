@@ -672,7 +672,10 @@ class PolliNetSDK private constructor(
             // Try to parse as success first
             val successResult = this.json.decodeFromString<FfiResultSuccess<T>>(json)
             if (successResult.ok) {
-                Result.success(successResult.data)
+                // Handle nullable data field (for Unit return types)
+                @Suppress("UNCHECKED_CAST")
+                val data = successResult.data ?: (Unit as T)
+                Result.success(data)
             } else {
                 // Shouldn't happen, but handle gracefully
                 Result.failure(Exception("Unexpected result format"))
@@ -683,7 +686,7 @@ class PolliNetSDK private constructor(
                 val errorResult = this.json.decodeFromString<FfiResultError>(json)
                 Result.failure(PolliNetException(errorResult.code, errorResult.message))
             } catch (e2: Exception) {
-                Result.failure(Exception("Failed to parse FFI result: ${e.message}"))
+                Result.failure(Exception("Failed to parse FFI result: ${e.message}\nJSON input: $json"))
             }
         }
     }
@@ -713,7 +716,7 @@ data class SdkConfig(
 @Serializable
 private data class FfiResultSuccess<T>(
     val ok: Boolean,
-    val data: T
+    val data: T?  // Nullable to handle Unit return types where Rust returns null
 )
 
 @Serializable
