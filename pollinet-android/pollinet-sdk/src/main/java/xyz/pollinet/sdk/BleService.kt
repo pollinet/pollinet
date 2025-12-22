@@ -869,6 +869,10 @@ class BleService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun sendToGatt(data: ByteArray) {
+        appendLog("📤 sendToGatt: Attempting to send ${data.size} bytes")
+        appendLog("   Server path: server=${gattServer != null}, txChar=${gattCharacteristicTx != null}, device=${connectedDevice?.address}")
+        appendLog("   Client path: gatt=${clientGatt != null}, remoteRx=${remoteRxCharacteristic != null}")
+        
         // Based on official Android sample (lines 184-202)
         // Try server/peripheral path first
         val server = gattServer
@@ -876,6 +880,7 @@ class BleService : Service() {
         val device = connectedDevice
         
         if (server != null && txChar != null && device != null) {
+            appendLog("   → Using SERVER path (notify)")
             // Add flow control for server path (critical fix)
             // Android docs: notifyCharacteristicChanged() returns when queued, not when delivered
             if (operationInProgress) {
@@ -889,7 +894,8 @@ class BleService : Service() {
             val success = server.notifyCharacteristicChanged(device, txChar, false)
             
             if (success) {
-                appendLog("✅ Sent ${data.size}B via notify (queued)")
+                appendLog("✅ Sent ${data.size}B via notify (queued) to ${device.address}")
+                appendLog("   Data preview: ${data.take(20).joinToString(" ") { "%02X".format(it) }}...")
                 // Clear flag after delay to allow notification queue processing
                 // Android BLE best practice: space out notifications to avoid overwhelming connection
                 // Increased from 150ms to 300ms for better reliability
@@ -911,8 +917,14 @@ class BleService : Service() {
         
         if (gatt == null || remoteRx == null) {
             appendLog("⚠️ GATT or RX characteristic not available")
+            appendLog("   clientGatt: ${gatt != null}, remoteRxCharacteristic: ${remoteRx != null}")
             return
         }
+
+        appendLog("   → Using CLIENT path (write)")
+        appendLog("   Writing to device: ${gatt.device.address}")
+        appendLog("   RX characteristic UUID: ${remoteRx.uuid}")
+        appendLog("   Data preview: ${data.take(20).joinToString(" ") { "%02X".format(it) }}...")
 
         // Mark operation in progress for client writes
         operationInProgress = true
@@ -924,8 +936,9 @@ class BleService : Service() {
                 data,
                 BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             )
-            appendLog("✅ Wrote ${data.size}B (result=$result)")
+            appendLog("✅ Wrote ${data.size}B (result=$result) to ${gatt.device.address}")
             if (result != BluetoothGatt.GATT_SUCCESS) {
+                appendLog("   ⚠️ Write result indicates failure: $result")
                 operationInProgress = false
             }
         } else {
@@ -934,7 +947,7 @@ class BleService : Service() {
             remoteRx.value = data
             @Suppress("DEPRECATION")
             val success = gatt.writeCharacteristic(remoteRx)
-            appendLog(if (success) "✅ Wrote ${data.size}B" else "❌ Write failed")
+            appendLog(if (success) "✅ Wrote ${data.size}B to ${gatt.device.address}" else "❌ Write failed to ${gatt.device.address}")
             if (!success) {
                 operationInProgress = false
             }
@@ -1584,10 +1597,26 @@ class BleService : Service() {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = device
-                    appendLog("🤝 (Server) connected ${device.address}")
+                    appendLog("🤝 🤝 🤝 (SERVER) CONNECTED ${device.address} 🤝 🤝 🤝")
                     appendLog("   Server mode: Can send notifications immediately")
+                    appendLog("   ✅ GATT server: ${gattServer != null}")
+                    appendLog("   ✅ TX characteristic: ${gattCharacteristicTx != null} (UUID: $TX_CHAR_UUID)")
+                    appendLog("   ✅ RX characteristic: ${gattCharacteristicRx != null} (UUID: $RX_CHAR_UUID)")
                     appendLog("   ✅ Ready to receive writes on RX characteristic: $RX_CHAR_UUID")
-                    appendLog("   ✅ GATT server: ${gattServer != null}, RX char: ${gattCharacteristicRx != null}")
+                    
+                    // Log characteristic properties
+                    gattCharacteristicRx?.let { rx ->
+                        appendLog("   RX Properties: ${rx.properties}")
+                        appendLog("   RX Permissions: ${rx.permissions}")
+                        appendLog("   RX UUID: ${rx.uuid}")
+                    }
+                    
+                    gattCharacteristicTx?.let { tx ->
+                        appendLog("   TX Properties: ${tx.properties}")
+                        appendLog("   TX Permissions: ${tx.permissions}")
+                        appendLog("   TX UUID: ${tx.uuid}")
+                    }
+                    
                     // In server mode, we can SEND immediately (don't need descriptor write for TX)
                     // But descriptor write is still needed on client side to RECEIVE
                     // Only set flag if we don't have a client connection active
@@ -1626,25 +1655,43 @@ class BleService : Service() {
             offset: Int,
             value: ByteArray
         ) {
-            appendLog("📥 Write request: char=${characteristic.uuid}, size=${value.size}, responseNeeded=$responseNeeded, offset=$offset")
+            appendLog("🎯 ===== WRITE REQUEST RECEIVED (SERVER) =====")
+            appendLog("📥 Device: ${device.address}")
+            appendLog("📥 Characteristic UUID: ${characteristic.uuid}")
+            appendLog("📥 Expected RX UUID: $RX_CHAR_UUID")
+            appendLog("📥 Data size: ${value.size} bytes")
+            appendLog("📥 Response needed: $responseNeeded")
+            appendLog("📥 Offset: $offset")
+            appendLog("📥 Prepared write: $preparedWrite")
+            appendLog("📥 Data preview (first 50 bytes): ${value.take(50).joinToString(" ") { "%02X".format(it) }}")
+            appendLog("📥 Data (base64): ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
             
-            if (characteristic.uuid == RX_CHAR_UUID) {
-                appendLog("✅ Matched RX characteristic - processing data")
+            val uuidMatches = characteristic.uuid == RX_CHAR_UUID
+            appendLog("📥 UUID match: $uuidMatches")
+            
+            if (uuidMatches) {
+                appendLog("✅ ✅ ✅ MATCHED RX CHARACTERISTIC - PROCESSING DATA ✅ ✅ ✅")
                 
                 // Send response FIRST (synchronously) before processing data
                 // This is critical - response must be sent in the callback thread
                 if (responseNeeded) {
                     val responseSent = gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null) ?: false
                     appendLog("📤 Sent write response: $responseSent")
+                    if (!responseSent) {
+                        appendLog("❌ ❌ ❌ FAILED TO SEND WRITE RESPONSE ❌ ❌ ❌")
+                    }
+                } else {
+                    appendLog("ℹ️ No response needed for this write")
                 }
                 
                 // Forward to Rust FFI (async processing)
                 serviceScope.launch {
                     if (sdk == null) {
-                        appendLog("⚠️ SDK not initialized; write dropped")
+                        appendLog("❌ SDK not initialized; write dropped")
                         return@launch
                     }
                     // Log received data in detail for receiver
+                    appendLog("⬅️ ⬅️ ⬅️ PROCESSING RECEIVED DATA ⬅️ ⬅️ ⬅️")
                     appendLog("⬅️ RX from ${device.address}: ${previewFragment(value)}")
                     appendLog("   📦 Raw data (${value.size} bytes): ${value.joinToString(" ") { "%02X".format(it) }}")
                     appendLog("   📋 Base64: ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
@@ -1652,12 +1699,16 @@ class BleService : Service() {
                     handleReceivedData(value)
                 }
             } else {
-                appendLog("⚠️ Write to unknown characteristic: ${characteristic.uuid} (expected: $RX_CHAR_UUID)")
+                appendLog("⚠️ ⚠️ ⚠️ Write to UNKNOWN characteristic ⚠️ ⚠️ ⚠️")
+                appendLog("⚠️ Expected: $RX_CHAR_UUID")
+                appendLog("⚠️ Received: ${characteristic.uuid}")
                 // Still send response for unknown characteristics to avoid client timeout
                 if (responseNeeded) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
+                    val responseSent = gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null) ?: false
+                    appendLog("📤 Sent error response: $responseSent")
                 }
             }
+            appendLog("🎯 ===== END WRITE REQUEST =====\n")
         }
 
         @SuppressLint("MissingPermission")
