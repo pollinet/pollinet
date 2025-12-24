@@ -14,6 +14,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.BatteryManager
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -365,43 +366,59 @@ class BleService : Service() {
             appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment")
             
             // Fragment transaction
-            sdkInstance.fragment(txBytes, maxPayload).flatMap { fragmentList ->
-                val count = fragmentList.fragments.size
-                val txId = fragmentList.fragments.firstOrNull()?.id ?: "unknown"
-                
-                appendLog("📤 Fragmenting into $count fragments for tx ${txId.take(12)}…")
-                
-                // Convert to FragmentFFI format
-                val fragmentsFFI = fragmentList.fragments.map { frag ->
-                    FragmentFFI(
-                        transactionId = frag.id, // Already a hex string
-                        fragmentIndex = frag.index,
-                        totalFragments = frag.total,
-                        dataBase64 = frag.data
+            val fragmentResult = sdkInstance.fragment(txBytes, maxPayload)
+            
+            fragmentResult.fold(
+                onSuccess = { fragmentList ->
+                    val count = fragmentList.fragments.size
+                    val txId = fragmentList.fragments.firstOrNull()?.id ?: "unknown"
+                    
+                    appendLog("📤 Fragmenting into $count fragments for tx ${txId.take(12)}…")
+                    
+                    // Convert to FragmentFFI format
+                    val fragmentsFFI = fragmentList.fragments.map { frag ->
+                        FragmentFFI(
+                            transactionId = frag.id, // Already a hex string
+                            fragmentIndex = frag.index,
+                            totalFragments = frag.total,
+                            dataBase64 = frag.data
+                        )
+                    }
+                    
+                    // Push to new outbound queue (Phase 2)
+                    appendLog("📥 Pushing to outbound queue...")
+                    val pushResult = sdkInstance.pushOutboundTransaction(
+                        txBytes = txBytes,
+                        txId = txId,
+                        fragments = fragmentsFFI,
+                        priority = priority
                     )
+                    
+                    pushResult.fold(
+                        onSuccess = {
+                            appendLog("✅ Added to outbound queue ($count fragments, priority: $priority)")
+                            
+                            // Phase 4: Trigger event for immediate processing (no polling delay!)
+                            workChannel.trySend(WorkEvent.OutboundReady)
+                            appendLog("📡 Event triggered - unified worker will process")
+                            
+                            // Store for potential MTU re-fragmentation
+                            pendingTransactionBytes = txBytes
+                            fragmentsQueuedWithMtu = currentMtu
+                            
+                            Result.success(count)
+                        },
+                        onFailure = { error ->
+                            appendLog("❌ Failed to push to queue: ${error.message}")
+                            Result.failure(error)
+                        }
+                    )
+                },
+                onFailure = { error ->
+                    appendLog("❌ Failed to fragment transaction: ${error.message}")
+                    Result.failure(error)
                 }
-                
-                // Push to new outbound queue (Phase 2)
-                appendLog("📥 Pushing to outbound queue...")
-                sdkInstance.pushOutboundTransaction(
-                    txBytes = txBytes,
-                    txId = txId,
-                    fragments = fragmentsFFI,
-                    priority = priority
-                ).map {
-                    appendLog("✅ Added to outbound queue ($count fragments, priority: $priority)")
-                    
-                    // Phase 4: Trigger event for immediate processing (no polling delay!)
-                    workChannel.trySend(WorkEvent.OutboundReady)
-                    appendLog("📡 Event triggered - unified worker will process")
-                    
-                    // Store for potential MTU re-fragmentation
-                    pendingTransactionBytes = txBytes
-                    fragmentsQueuedWithMtu = currentMtu
-                    
-                    count
-                }
-            }
+            )
         } catch (e: Exception) {
             appendLog("❌ Failed to queue signed transaction: ${e.message}")
             Result.failure(e)

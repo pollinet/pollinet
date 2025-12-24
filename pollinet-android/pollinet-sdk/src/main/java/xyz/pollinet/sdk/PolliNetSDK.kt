@@ -639,19 +639,6 @@ class PolliNetSDK private constructor(
     }
     
     /**
-     * Get outbound queue size (non-destructive peek for debugging)
-     */
-    suspend fun getOutboundQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.getOutboundQueueSize(handle)
-            val response = parseResult<QueueSizeResponse>(resultJson)
-            response.map { it.queueSize }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-    
-    /**
      * Debug outbound queue (non-destructive peek)
      */
     suspend fun debugOutboundQueue(): Result<OutboundQueueDebug> = withContext(Dispatchers.IO) {
@@ -1280,6 +1267,17 @@ data class QueueMetrics(
 )
 
 /**
+ * Fragment for FFI (public for use in BleService)
+ */
+@Serializable
+data class FragmentFFI(
+    @SerialName("transactionId") val transactionId: String, // hex
+    @SerialName("fragmentIndex") val fragmentIndex: Int,
+    @SerialName("totalFragments") val totalFragments: Int,
+    @SerialName("dataBase64") val dataBase64: String
+)
+
+/**
  * Internal request types for FFI
  */
 @Serializable
@@ -1289,14 +1287,6 @@ internal data class PushOutboundRequest(
     @SerialName("txId") val txId: String,
     val fragments: List<FragmentFFI>,
     val priority: Priority
-)
-
-@Serializable
-internal data class FragmentFFI(
-    @SerialName("transactionId") val transactionId: String, // hex
-    @SerialName("fragmentIndex") val fragmentIndex: Int,
-    @SerialName("totalFragments") val totalFragments: Int,
-    @SerialName("dataBase64") val dataBase64: String
 )
 
 @Serializable

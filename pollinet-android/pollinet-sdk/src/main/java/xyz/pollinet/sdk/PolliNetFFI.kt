@@ -288,12 +288,6 @@ object PolliNetFFI {
      */
     external fun cleanupOldSubmissions(handle: Long): String
     
-    /**
-     * Get outbound queue size (non-destructive peek)
-     * @param handle SDK handle
-     * @return JSON FfiResult with queue size
-     */
-    external fun getOutboundQueueSize(handle: Long): String
     
     /**
      * Debug outbound queue (non-destructive peek)

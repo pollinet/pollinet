@@ -1828,30 +1828,6 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupOldSubmissions(
     create_result_string(&mut env, result)
 }
 
-/// Get outbound queue size (non-destructive peek for debugging)
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getOutboundQueueSize(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-) -> jstring {
-    let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
-        let queue_size = transport.outbound_queue_size();
-        
-        #[derive(serde::Serialize)]
-        struct QueueSizeResponse {
-            #[serde(rename = "queueSize")]
-            queue_size: usize,
-        }
-        
-        let response: FfiResult<QueueSizeResponse> = FfiResult::success(QueueSizeResponse { queue_size });
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-    
-    create_result_string(&mut env, result)
-}
-
 /// Get outbound queue debug info (non-destructive peek)
 #[no_mangle]
 pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_debugOutboundQueue(
@@ -2154,9 +2130,9 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popReadyRetry(
         if let Some(retry) = retry_opt {
             let retry_ffi = RetryItemFFI {
                 tx_bytes: base64::encode(&retry.tx_bytes),
-                tx_id: retry.tx_id,
+                tx_id: retry.tx_id.clone(),
                 attempt_count: retry.attempt_count,
-                last_error: retry.last_error,
+                last_error: retry.last_error.clone(),
                 next_retry_in_secs: retry.time_until_retry().as_secs(),
                 age_seconds: retry.age().as_secs(),
             };

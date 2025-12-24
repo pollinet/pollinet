@@ -146,6 +146,10 @@ impl OutboundQueue {
         // Add to deduplication set
         self.deduplication_set.insert(tx.tx_id.clone());
         
+        // Capture values before move
+        let tx_id = tx.tx_id.clone();
+        let priority = tx.priority;
+        
         // Add to appropriate priority queue
         match tx.priority {
             Priority::High => self.high_priority.push_back(tx),
@@ -155,8 +159,8 @@ impl OutboundQueue {
         
         tracing::debug!(
             "Queued transaction {} with priority {:?} (queue size: {})",
-            tx.tx_id,
-            tx.priority,
+            tx_id,
+            priority,
             self.len()
         );
         

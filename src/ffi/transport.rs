@@ -45,6 +45,9 @@ pub struct HostBleTransport {
 
     /// Mesh health monitor for tracking peer/network quality
     health_monitor: Arc<MeshHealthMonitor>,
+    
+    /// PolliNet SDK instance (Phase 2 - for queue access)
+    pub sdk: Arc<crate::PolliNetSDK>,
 }
 
 impl HostBleTransport {
@@ -70,24 +73,9 @@ impl HostBleTransport {
             .await
             .map_err(|e| format!("Failed to create transaction service: {}", e))?;
         
-        Ok(Self {
-            outbound_queue: Arc::new(Mutex::new(VecDeque::new())),
-            inbound_buffers: Arc::new(Mutex::new(HashMap::new())),
-            completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
-            received_tx_queue: Arc::new(Mutex::new(VecDeque::new())),
-            submitted_tx_hashes: Arc::new(Mutex::new(HashMap::new())),
-            metrics: Arc::new(Mutex::new(TransportMetrics::default())),
-            transaction_service: Arc::new(transaction_service),
-            secure_storage: None,
-            health_monitor: Arc::new(MeshHealthMonitor::default()),
-        })
-    }
-    
-    /// Create with an RPC client and optional secure storage
-    pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, String> {
-        let transaction_service = TransactionService::new_with_rpc(rpc_url)
+        let sdk = crate::PolliNetSDK::new()
             .await
-            .map_err(|e| format!("Failed to create transaction service: {}", e))?;
+            .map_err(|e| format!("Failed to create SDK: {}", e))?;
         
         Ok(Self {
             outbound_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -99,6 +87,31 @@ impl HostBleTransport {
             transaction_service: Arc::new(transaction_service),
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
+            sdk: Arc::new(sdk),
+        })
+    }
+    
+    /// Create with an RPC client and optional secure storage
+    pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, String> {
+        let transaction_service = TransactionService::new_with_rpc(rpc_url)
+            .await
+            .map_err(|e| format!("Failed to create transaction service: {}", e))?;
+        
+        let sdk = crate::PolliNetSDK::new_with_rpc(rpc_url)
+            .await
+            .map_err(|e| format!("Failed to create SDK: {}", e))?;
+        
+        Ok(Self {
+            outbound_queue: Arc::new(Mutex::new(VecDeque::new())),
+            inbound_buffers: Arc::new(Mutex::new(HashMap::new())),
+            completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
+            received_tx_queue: Arc::new(Mutex::new(VecDeque::new())),
+            submitted_tx_hashes: Arc::new(Mutex::new(HashMap::new())),
+            metrics: Arc::new(Mutex::new(TransportMetrics::default())),
+            transaction_service: Arc::new(transaction_service),
+            secure_storage: None,
+            health_monitor: Arc::new(MeshHealthMonitor::default()),
+            sdk: Arc::new(sdk),
         })
     }
     
