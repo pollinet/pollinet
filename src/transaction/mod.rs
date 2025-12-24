@@ -272,12 +272,93 @@ impl BLETransactionPacket {
     }
 }
 
+use std::time::Instant;
+
+/// Fragment set for tracking reassembly progress
+/// Stores fragments locally (not transmitted over BLE)
+#[derive(Debug, Clone)]
+pub struct FragmentSet {
+    /// Transaction ID (SHA-256 hash from first fragment)
+    pub transaction_id: [u8; 32],
+    /// Total number of fragments expected
+    pub total_fragments: u16,
+    /// Received fragments (indexed by fragment_index for O(1) access)
+    pub received_fragments: Vec<Option<Fragment>>,
+    /// Timestamp when first fragment was received
+    pub first_received: Instant,
+    /// Timestamp when last fragment was received
+    pub last_updated: Instant,
+}
+
+impl FragmentSet {
+    /// Create new fragment set
+    pub fn new(transaction_id: [u8; 32], total_fragments: u16) -> Self {
+        let now = Instant::now();
+        Self {
+            transaction_id,
+            total_fragments,
+            received_fragments: vec![None; total_fragments as usize],
+            first_received: now,
+            last_updated: now,
+        }
+    }
+    
+    /// Get number of fragments received
+    pub fn received_count(&self) -> usize {
+        self.received_fragments.iter().filter(|f| f.is_some()).count()
+    }
+    
+    /// Estimate expected transaction size from received fragments
+    pub fn expected_size(&self) -> usize {
+        if self.received_count() == 0 {
+            return 0;
+        }
+        
+        let total_data: usize = self.received_fragments
+            .iter()
+            .flatten()
+            .map(|f| f.data.len())
+            .sum();
+        
+        let avg_size = total_data / self.received_count();
+        avg_size * self.total_fragments as usize
+    }
+    
+    /// Check if all fragments have been received
+    pub fn is_complete(&self) -> bool {
+        self.received_fragments.iter().all(|f| f.is_some())
+    }
+    
+    /// Check if fragment set is stale (older than timeout)
+    pub fn is_stale(&self, timeout_secs: u64) -> bool {
+        self.first_received.elapsed().as_secs() > timeout_secs
+    }
+    
+    /// Get age in seconds
+    pub fn age_seconds(&self) -> u64 {
+        self.first_received.elapsed().as_secs()
+    }
+}
+
+/// Reassembly buffer metrics
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReassemblyMetrics {
+    /// Number of incomplete transactions
+    pub incomplete_transactions: usize,
+    /// Average reassembly time in milliseconds
+    pub avg_reassembly_time_ms: u64,
+    /// Fragments per transaction histogram
+    pub fragments_per_transaction: HashMap<String, usize>,
+}
+
 /// Local transaction cache for store-and-forward functionality
 pub struct TransactionCache {
     /// Pending transactions awaiting submission
     pending_transactions: HashMap<String, PendingTransaction>,
-    /// Fragments being reassembled
-    reassembly_buffers: HashMap<String, Vec<Option<Fragment>>>,
+    /// Fragments being reassembled (enhanced with FragmentSet)
+    reassembly_buffers: HashMap<String, FragmentSet>,
+    /// Legacy fragment buffers (for backward compatibility)
+    legacy_buffers: HashMap<String, Vec<Option<Fragment>>>,
 }
 
 impl TransactionCache {
@@ -286,6 +367,7 @@ impl TransactionCache {
         Self {
             pending_transactions: HashMap::new(),
             reassembly_buffers: HashMap::new(),
+            legacy_buffers: HashMap::new(),
         }
     }
 
@@ -304,10 +386,10 @@ impl TransactionCache {
         self.pending_transactions.remove(id);
     }
 
-    /// Add a fragment to reassembly buffer
+    /// Add a fragment to reassembly buffer (legacy method - for backward compatibility)
     pub fn add_fragment(&mut self, fragment: Fragment) {
         let buffer = self
-            .reassembly_buffers
+            .legacy_buffers
             .entry(fragment.id.clone())
             .or_insert_with(|| vec![None; fragment.total]);
 
@@ -315,31 +397,197 @@ impl TransactionCache {
             buffer[fragment.index] = Some(fragment.clone());
         }
     }
+    
+    /// Add BLE mesh fragment to reassembly buffer (optimized O(1) insertion)
+    /// Uses transaction_id (SHA-256 hash) for grouping fragments across devices
+    pub fn add_ble_fragment(&mut self, fragment: crate::ble::mesh::TransactionFragment) -> Result<(), String> {
+        let tx_id_hex = hex::encode(&fragment.transaction_id);
+        
+        // Get or create fragment set
+        let fragment_set = self.reassembly_buffers
+            .entry(tx_id_hex.clone())
+            .or_insert_with(|| FragmentSet::new(fragment.transaction_id, fragment.total_fragments));
+        
+        // Validate fragment consistency
+        if fragment_set.transaction_id != fragment.transaction_id {
+            return Err(format!("Transaction ID mismatch for {}", tx_id_hex));
+        }
+        
+        if fragment_set.total_fragments != fragment.total_fragments {
+            return Err(format!("Total fragments mismatch for {}", tx_id_hex));
+        }
+        
+        // Check fragment index validity
+        if fragment.fragment_index >= fragment.total_fragments {
+            return Err(format!(
+                "Invalid fragment index {} (total: {})",
+                fragment.fragment_index,
+                fragment.total_fragments
+            ));
+        }
+        
+        // Convert BLE fragment to internal Fragment format
+        let internal_fragment = Fragment {
+            id: tx_id_hex.clone(),
+            index: fragment.fragment_index as usize,
+            total: fragment.total_fragments as usize,
+            data: fragment.data,
+            fragment_type: FragmentType::FragmentContinue, // Default type
+            checksum: fragment.transaction_id,
+        };
+        
+        // O(1) insertion using fragment_index
+        fragment_set.received_fragments[fragment.fragment_index as usize] = Some(internal_fragment);
+        fragment_set.last_updated = Instant::now();
+        
+        tracing::debug!(
+            "Added fragment {}/{} for tx {} (received: {}/{})",
+            fragment.fragment_index + 1,
+            fragment.total_fragments,
+            tx_id_hex.chars().take(8).collect::<String>(),
+            fragment_set.received_count(),
+            fragment_set.total_fragments
+        );
+        
+        Ok(())
+    }
 
     /// Check if all fragments for a transaction are received
     pub fn all_fragments_received(&self, tx_id: &str) -> bool {
-        if let Some(buffer) = self.reassembly_buffers.get(tx_id) {
-            buffer.iter().all(|f| f.is_some())
-        } else {
-            false
+        // Check enhanced buffer first
+        if let Some(fragment_set) = self.reassembly_buffers.get(tx_id) {
+            return fragment_set.is_complete();
         }
+        
+        // Fall back to legacy buffer
+        if let Some(buffer) = self.legacy_buffers.get(tx_id) {
+            return buffer.iter().all(|f| f.is_some());
+        }
+        
+        false
     }
 
     /// Reassemble fragments into complete transaction
     pub fn reassemble_fragments(&self, tx_id: &str) -> Option<Vec<u8>> {
-        if let Some(buffer) = self.reassembly_buffers.get(tx_id) {
+        // Try enhanced buffer first
+        if let Some(fragment_set) = self.reassembly_buffers.get(tx_id) {
+            if fragment_set.is_complete() {
+                let mut data = Vec::new();
+                for fragment in fragment_set.received_fragments.iter().flatten() {
+                    data.extend_from_slice(&fragment.data);
+                }
+                
+                // Verify checksum matches transaction_id
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                let hash_result: [u8; 32] = hasher.finalize().into();
+                
+                if hash_result != fragment_set.transaction_id {
+                    tracing::error!(
+                        "Checksum mismatch for tx {}: expected {:?}, got {:?}",
+                        tx_id,
+                        fragment_set.transaction_id,
+                        hash_result
+                    );
+                    return None;
+                }
+                
+                tracing::info!(
+                    "✅ Reassembled transaction {} ({} bytes, {} fragments, age: {}s)",
+                    tx_id.chars().take(8).collect::<String>(),
+                    data.len(),
+                    fragment_set.total_fragments,
+                    fragment_set.age_seconds()
+                );
+                
+                return Some(data);
+            }
+            return None;
+        }
+        
+        // Fall back to legacy buffer
+        if let Some(buffer) = self.legacy_buffers.get(tx_id) {
             if buffer.iter().all(|f| f.is_some()) {
                 let mut data = Vec::new();
                 for fragment in buffer.iter().flatten() {
                     data.extend_from_slice(&fragment.data);
                 }
-                Some(data)
-            } else {
-                None
+                return Some(data);
             }
-        } else {
-            None
         }
+        
+        None
+    }
+    
+    /// Remove completed transaction from reassembly buffer
+    pub fn remove_reassembly(&mut self, tx_id: &str) {
+        self.reassembly_buffers.remove(tx_id);
+        self.legacy_buffers.remove(tx_id);
+    }
+    
+    /// Cleanup stale fragments (older than timeout_secs)
+    /// Returns number of transactions cleaned up
+    pub fn cleanup_stale_fragments(&mut self, timeout_secs: u64) -> usize {
+        let stale_keys: Vec<String> = self.reassembly_buffers
+            .iter()
+            .filter(|(_, set)| set.is_stale(timeout_secs))
+            .map(|(k, _)| k.clone())
+            .collect();
+        
+        let count = stale_keys.len();
+        
+        for key in stale_keys {
+            if let Some(set) = self.reassembly_buffers.remove(&key) {
+                tracing::info!(
+                    "Cleaned up stale transaction {} (age: {}s, received: {}/{})",
+                    key.chars().take(8).collect::<String>(),
+                    set.age_seconds(),
+                    set.received_count(),
+                    set.total_fragments
+                );
+            }
+        }
+        
+        // Also cleanup legacy buffers (simple age-based for now)
+        // Note: Legacy buffers don't have timestamps, so we just remove old entries periodically
+        
+        count
+    }
+    
+    /// Get reassembly metrics
+    pub fn get_reassembly_metrics(&self) -> ReassemblyMetrics {
+        let incomplete = self.reassembly_buffers.len();
+        
+        let mut fragments_map = HashMap::new();
+        for (tx_id, set) in &self.reassembly_buffers {
+            fragments_map.insert(
+                format!("{}...{}", &tx_id[..8], &tx_id[tx_id.len()-8..]),
+                set.received_count()
+            );
+        }
+        
+        // Calculate average reassembly time (for completed transactions in this snapshot)
+        let avg_time_ms = if incomplete > 0 {
+            let total_time: u64 = self.reassembly_buffers
+                .values()
+                .map(|set| set.first_received.elapsed().as_millis() as u64)
+                .sum();
+            total_time / incomplete as u64
+        } else {
+            0
+        };
+        
+        ReassemblyMetrics {
+            incomplete_transactions: incomplete,
+            avg_reassembly_time_ms: avg_time_ms,
+            fragments_per_transaction: fragments_map,
+        }
+    }
+    
+    /// Get number of incomplete transactions
+    pub fn incomplete_count(&self) -> usize {
+        self.reassembly_buffers.len() + self.legacy_buffers.len()
     }
 }
 

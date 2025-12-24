@@ -139,6 +139,11 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
                     e
                 })?;
             info!("✅ Secure storage configured");
+            
+            // Phase 5: Set queue storage directory (queues will persist to subdirectory)
+            let queue_storage_dir = format!("{}/queues", storage_dir);
+            std::env::set_var("POLLINET_QUEUE_STORAGE", &queue_storage_dir);
+            info!("✅ Queue persistence enabled at: {}", queue_storage_dir);
         } else {
             info!("ℹ️  No storage directory provided - bundle persistence disabled");
         }
@@ -1886,6 +1891,342 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_debugOutboundQueue(
         
         let ffi_response: FfiResult<QueueDebugResponse> = FfiResult::success(response);
         serde_json::to_string(&ffi_response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Queue Persistence FFI Functions (Phase 5)
+// =============================================================================
+
+/// Save all queues to disk
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_saveQueues(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        runtime::block_on(async {
+            transport.sdk.queue_manager().force_save().await
+                .map_err(|e| format!("Failed to save queues: {}", e))?;
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Trigger auto-save if needed (debounced)
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_autoSaveQueues(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        runtime::block_on(async {
+            transport.sdk.queue_manager().save_if_needed().await
+                .map_err(|e| format!("Failed to auto-save queues: {}", e))?;
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Queue Management FFI Functions (Phase 2)
+// =============================================================================
+
+/// Push transaction to outbound queue
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushOutboundTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let request_str: String = env
+            .get_string(&request_json)
+            .map_err(|e| format!("Failed to get request string: {}", e))?
+            .into();
+        
+        let request: PushOutboundRequest = serde_json::from_str(&request_str)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+        
+        // Convert FFI fragments to mesh fragments
+        let fragments: Result<Vec<crate::ble::mesh::TransactionFragment>, String> = request.fragments
+            .iter()
+            .map(|f| {
+                let tx_id = hex::decode(&f.transaction_id)
+                    .map_err(|e| format!("Invalid transaction ID: {}", e))?;
+                if tx_id.len() != 32 {
+                    return Err("Transaction ID must be 32 bytes".to_string());
+                }
+                let mut tx_id_array = [0u8; 32];
+                tx_id_array.copy_from_slice(&tx_id);
+                
+                let data = base64::decode(&f.data_base64)
+                    .map_err(|e| format!("Invalid fragment data: {}", e))?;
+                
+                Ok(crate::ble::mesh::TransactionFragment {
+                    transaction_id: tx_id_array,
+                    fragment_index: f.fragment_index,
+                    total_fragments: f.total_fragments,
+                    data,
+                })
+            })
+            .collect();
+        
+        let fragments = fragments?;
+        let tx_bytes = base64::decode(&request.tx_bytes)
+            .map_err(|e| format!("Invalid transaction bytes: {}", e))?;
+        
+        // Convert priority
+        let priority = match request.priority {
+            PriorityFFI::High => crate::queue::Priority::High,
+            PriorityFFI::Normal => crate::queue::Priority::Normal,
+            PriorityFFI::Low => crate::queue::Priority::Low,
+        };
+        
+        // Create outbound transaction
+        let outbound_tx = crate::queue::OutboundTransaction::new(
+            request.tx_id,
+            tx_bytes,
+            fragments,
+            priority,
+        );
+        
+        // Push to queue
+        runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.push(outbound_tx)
+                .map_err(|e| format!("Failed to push to queue: {}", e))?;
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Pop next transaction from outbound queue
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popOutboundTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        let tx_opt = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.pop()
+        });
+        
+        if let Some(tx) = tx_opt {
+            let tx_ffi = OutboundTransactionFFI {
+                tx_id: tx.tx_id,
+                original_bytes: base64::encode(&tx.original_bytes),
+                fragment_count: tx.fragments.len(),
+                priority: match tx.priority {
+                    crate::queue::Priority::High => PriorityFFI::High,
+                    crate::queue::Priority::Normal => PriorityFFI::Normal,
+                    crate::queue::Priority::Low => PriorityFFI::Low,
+                },
+                created_at: tx.created_at,
+                retry_count: tx.retry_count,
+            };
+            
+            let response: FfiResult<Option<OutboundTransactionFFI>> = FfiResult::success(Some(tx_ffi));
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        } else {
+            let response: FfiResult<Option<OutboundTransactionFFI>> = FfiResult::success(None);
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        }
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get outbound queue size
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getOutboundQueueSize(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        let size = runtime::block_on(async {
+            let queue = transport.sdk.queue_manager().outbound.read().await;
+            queue.len()
+        });
+        
+        let response: FfiResult<QueueSizeResponse> = FfiResult::success(QueueSizeResponse { queue_size: size });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Add transaction to retry queue
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addToRetryQueue(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let request_str: String = env
+            .get_string(&request_json)
+            .map_err(|e| format!("Failed to get request string: {}", e))?
+            .into();
+        
+        let request: AddToRetryRequest = serde_json::from_str(&request_str)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+        
+        let tx_bytes = base64::decode(&request.tx_bytes)
+            .map_err(|e| format!("Invalid transaction bytes: {}", e))?;
+        
+        let retry_item = crate::queue::RetryItem::new(
+            tx_bytes,
+            request.tx_id,
+            request.error,
+        );
+        
+        runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().retries.write().await;
+            queue.push(retry_item)
+                .map_err(|e| format!("Failed to push to retry queue: {}", e))?;
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Pop next ready retry item
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popReadyRetry(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        let retry_opt = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().retries.write().await;
+            queue.pop_ready()
+        });
+        
+        if let Some(retry) = retry_opt {
+            let retry_ffi = RetryItemFFI {
+                tx_bytes: base64::encode(&retry.tx_bytes),
+                tx_id: retry.tx_id,
+                attempt_count: retry.attempt_count,
+                last_error: retry.last_error,
+                next_retry_in_secs: retry.time_until_retry().as_secs(),
+                age_seconds: retry.age().as_secs(),
+            };
+            
+            let response: FfiResult<Option<RetryItemFFI>> = FfiResult::success(Some(retry_ffi));
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        } else {
+            let response: FfiResult<Option<RetryItemFFI>> = FfiResult::success(None);
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        }
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Get retry queue size
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getRetryQueueSize(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        let size = runtime::block_on(async {
+            let queue = transport.sdk.queue_manager().retries.read().await;
+            queue.len()
+        });
+        
+        let response: FfiResult<QueueSizeResponse> = FfiResult::success(QueueSizeResponse { queue_size: size });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Cleanup expired confirmations and retry items
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupExpired(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        let (confirmations_cleaned, retries_cleaned) = runtime::block_on(async {
+            let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
+            let conf_cleaned = conf_queue.cleanup_expired();
+            
+            let mut retry_queue = transport.sdk.queue_manager().retries.write().await;
+            let retry_cleaned = retry_queue.cleanup_expired();
+            
+            (conf_cleaned, retry_cleaned)
+        });
+        
+        #[derive(serde::Serialize)]
+        struct CleanupExpiredResponse {
+            confirmations_cleaned: usize,
+            retries_cleaned: usize,
+        }
+        
+        let response: FfiResult<CleanupExpiredResponse> = FfiResult::success(CleanupExpiredResponse {
+            confirmations_cleaned,
+            retries_cleaned,
+        });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
     
     create_result_string(&mut env, result)

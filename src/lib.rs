@@ -5,6 +5,7 @@
 
 pub mod ble;
 pub mod nonce;
+pub mod queue;
 pub mod storage;
 pub mod transaction;
 pub mod util;
@@ -28,6 +29,8 @@ pub struct PolliNetSDK {
     local_cache: Arc<RwLock<transaction::TransactionCache>>,
     /// Currently connected peer address (for central mode)
     connected_peer: Arc<RwLock<Option<String>>>,
+    /// Queue manager for all queue operations (Phase 2)
+    queue_manager: Arc<queue::QueueManager>,
 }
 
 impl PolliNetSDK {
@@ -45,12 +48,27 @@ impl PolliNetSDK {
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
         
+        // Initialize queue manager with persistence (Phase 5)
+        // Use default app data directory for queue storage
+        let queue_manager = if let Ok(storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+            tracing::info!("Using persistent queue storage: {}", storage_dir);
+            Arc::new(queue::QueueManager::with_storage(storage_dir)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
+                    queue::QueueManager::new()
+                }))
+        } else {
+            tracing::info!("No persistent storage configured, queues will not persist");
+            Arc::new(queue::QueueManager::new())
+        };
+        
         Ok(Self {
             ble_bridge,
             transaction_service,
             nonce_manager: Arc::new(nonce::NonceManager::new().await?),
             local_cache,
             connected_peer: Arc::new(RwLock::new(None)),
+            queue_manager,
         })
     }
 
@@ -70,13 +88,46 @@ impl PolliNetSDK {
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
         
+        // Initialize queue manager with persistence (Phase 5)
+        let queue_manager = if let Ok(storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+            tracing::info!("Using persistent queue storage: {}", storage_dir);
+            Arc::new(queue::QueueManager::with_storage(storage_dir)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
+                    queue::QueueManager::new()
+                }))
+        } else {
+            tracing::info!("No persistent storage configured, queues will not persist");
+            Arc::new(queue::QueueManager::new())
+        };
+        
         Ok(Self {
             ble_bridge,
             transaction_service,
             nonce_manager: Arc::new(nonce::NonceManager::new().await?),
             local_cache,
             connected_peer: Arc::new(RwLock::new(None)),
+            queue_manager,
         })
+    }
+    
+    // =========================================================================
+    // Queue Management Methods (Phase 2)
+    // =========================================================================
+    
+    /// Get queue manager reference
+    pub fn queue_manager(&self) -> &Arc<queue::QueueManager> {
+        &self.queue_manager
+    }
+    
+    /// Get queue metrics
+    pub async fn get_queue_metrics(&self) -> queue::QueueMetrics {
+        self.queue_manager.get_metrics().await
+    }
+    
+    /// Get queue health status
+    pub async fn get_queue_health(&self) -> queue::HealthStatus {
+        self.queue_manager.get_health().await
     }
 
     /// Start BLE advertising and scanning

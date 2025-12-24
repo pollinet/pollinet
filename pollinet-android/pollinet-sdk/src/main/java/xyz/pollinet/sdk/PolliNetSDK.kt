@@ -664,6 +664,247 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
+    // Queue Management (Phase 2)
+    // =========================================================================
+    
+    /**
+     * Push transaction to outbound queue with priority
+     * @param txBytes Signed transaction bytes
+     * @param txId Transaction ID (SHA-256 hash)
+     * @param fragments List of fragments  
+     * @param priority Transaction priority (HIGH, NORMAL, LOW)
+     */
+    suspend fun pushOutboundTransaction(
+        txBytes: ByteArray,
+        txId: String,
+        fragments: List<FragmentFFI>,
+        priority: Priority = Priority.NORMAL
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val request = PushOutboundRequest(
+                txBytes = android.util.Base64.encodeToString(txBytes, android.util.Base64.NO_WRAP),
+                txId = txId,
+                fragments = fragments,
+                priority = priority
+            )
+            val requestJson = json.encodeToString(request)
+            val resultJson = PolliNetFFI.pushOutboundTransaction(handle, requestJson)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Pop next transaction from outbound queue (priority-based)
+     * @return OutboundTransaction or null if queue empty
+     */
+    suspend fun popOutboundTransaction(): Result<OutboundTransaction?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.popOutboundTransaction(handle)
+            parseResult<OutboundTransaction?>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Get outbound queue size
+     * @return Number of transactions in outbound queue
+     */
+    suspend fun getOutboundQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getOutboundQueueSize(handle)
+            val response = parseResult<QueueSizeResponse>(resultJson)
+            response.map { it.queueSize }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Add transaction to retry queue
+     * @param txBytes Transaction bytes
+     * @param txId Transaction ID
+     * @param error Error message from failed submission
+     */
+    suspend fun addToRetryQueue(
+        txBytes: ByteArray,
+        txId: String,
+        error: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val request = AddToRetryRequest(
+                txBytes = android.util.Base64.encodeToString(txBytes, android.util.Base64.NO_WRAP),
+                txId = txId,
+                error = error
+            )
+            val requestJson = json.encodeToString(request)
+            val resultJson = PolliNetFFI.addToRetryQueue(handle, requestJson)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Pop next ready retry item
+     * @return RetryItem or null if no items ready
+     */
+    suspend fun popReadyRetry(): Result<RetryItem?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.popReadyRetry(handle)
+            parseResult<RetryItem?>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Get retry queue size
+     * @return Number of items in retry queue
+     */
+    suspend fun getRetryQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getRetryQueueSize(handle)
+            val response = parseResult<QueueSizeResponse>(resultJson)
+            response.map { it.queueSize }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Queue confirmation for relay back to origin
+     * @param txId Transaction ID (hex string)
+     * @param signature Blockchain signature
+     */
+    suspend fun queueConfirmation(txId: String, signature: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val request = QueueConfirmationRequest(
+                txId = txId,
+                signature = signature
+            )
+            val requestJson = json.encodeToString(request)
+            val resultJson = PolliNetFFI.queueConfirmation(handle, requestJson)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Pop next confirmation from queue
+     * @return Confirmation or null if queue empty
+     */
+    suspend fun popConfirmation(): Result<Confirmation?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.popConfirmation(handle)
+            parseResult<Confirmation?>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Get confirmation queue size
+     * @return Number of confirmations in queue
+     */
+    suspend fun getConfirmationQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getConfirmationQueueSize(handle)
+            val response = parseResult<QueueSizeResponse>(resultJson)
+            response.map { it.queueSize }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Get metrics for all queues
+     * @return QueueMetrics with sizes and statistics
+     */
+    suspend fun getQueueMetrics(): Result<QueueMetrics> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getQueueMetrics(handle)
+            parseResult<QueueMetrics>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Cleanup stale fragments from reassembly buffer
+     * @return Number of fragments cleaned
+     */
+    suspend fun cleanupStaleFragments(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.cleanupStaleFragments(handle)
+            
+            @Serializable
+            data class CleanupResponse(
+                @SerialName("fragments_cleaned") val fragmentsCleaned: Int
+            )
+            
+            val response = parseResult<CleanupResponse>(resultJson)
+            response.map { it.fragmentsCleaned }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Cleanup expired confirmations and retry items
+     * @return Pair of (confirmations cleaned, retries cleaned)
+     */
+    suspend fun cleanupExpired(): Result<Pair<Int, Int>> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.cleanupExpired(handle)
+            
+            @Serializable
+            data class CleanupExpiredResponse(
+                @SerialName("confirmations_cleaned") val confirmationsCleaned: Int,
+                @SerialName("retries_cleaned") val retriesCleaned: Int
+            )
+            
+            val response = parseResult<CleanupExpiredResponse>(resultJson)
+            response.map { Pair(it.confirmationsCleaned, it.retriesCleaned) }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // =========================================================================
+    // Queue Persistence (Phase 5)
+    // =========================================================================
+    
+    /**
+     * Save all queues to disk (force save)
+     * Call this before app shutdown or when user explicitly requests save
+     */
+    suspend fun saveQueues(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.saveQueues(handle)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Auto-save queues if needed (debounced - saves at most every 5 seconds)
+     * Call this after queue operations to enable auto-persistence
+     */
+    suspend fun autoSaveQueues(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.autoSaveQueues(handle)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -958,5 +1199,118 @@ data class OutboundQueueDebug(
 data class FragmentDebugInfo(
     val index: Int,
     val size: Int
+)
+
+// =============================================================================
+// Queue Management Types (Phase 2)
+// =============================================================================
+
+/**
+ * Transaction priority levels
+ */
+enum class Priority {
+    HIGH,
+    NORMAL,
+    LOW
+}
+
+/**
+ * Outbound transaction awaiting BLE transmission
+ */
+@Serializable
+data class OutboundTransaction(
+    @SerialName("txId") val txId: String,
+    @SerialName("originalBytes") val originalBytes: String, // base64
+    @SerialName("fragmentCount") val fragmentCount: Int,
+    val priority: Priority,
+    @SerialName("createdAt") val createdAt: Long,
+    @SerialName("retryCount") val retryCount: Int
+)
+
+/**
+ * Retry item with backoff scheduling
+ */
+@Serializable
+data class RetryItem(
+    @SerialName("txBytes") val txBytes: String, // base64
+    @SerialName("txId") val txId: String,
+    @SerialName("attemptCount") val attemptCount: Int,
+    @SerialName("lastError") val lastError: String,
+    @SerialName("nextRetryInSecs") val nextRetryInSecs: Long,
+    @SerialName("ageSeconds") val ageSeconds: Long
+)
+
+/**
+ * Confirmation status
+ */
+@Serializable
+sealed class ConfirmationStatus {
+    @Serializable
+    @SerialName("SUCCESS")
+    data class Success(val signature: String) : ConfirmationStatus()
+    
+    @Serializable
+    @SerialName("FAILED")
+    data class Failed(val error: String) : ConfirmationStatus()
+}
+
+/**
+ * Transaction confirmation for relay
+ */
+@Serializable
+data class Confirmation(
+    @SerialName("txId") val txId: String, // hex
+    val status: ConfirmationStatus,
+    val timestamp: Long,
+    @SerialName("relayCount") val relayCount: Int
+)
+
+/**
+ * Queue metrics for all queues
+ */
+@Serializable
+data class QueueMetrics(
+    @SerialName("outboundSize") val outboundSize: Int,
+    @SerialName("outboundHighPriority") val outboundHighPriority: Int,
+    @SerialName("outboundNormalPriority") val outboundNormalPriority: Int,
+    @SerialName("outboundLowPriority") val outboundLowPriority: Int,
+    @SerialName("confirmationSize") val confirmationSize: Int,
+    @SerialName("retrySize") val retrySize: Int,
+    @SerialName("retryAvgAttempts") val retryAvgAttempts: Float
+)
+
+/**
+ * Internal request types for FFI
+ */
+@Serializable
+internal data class PushOutboundRequest(
+    val version: Int = 1,
+    @SerialName("txBytes") val txBytes: String,
+    @SerialName("txId") val txId: String,
+    val fragments: List<FragmentFFI>,
+    val priority: Priority
+)
+
+@Serializable
+internal data class FragmentFFI(
+    @SerialName("transactionId") val transactionId: String, // hex
+    @SerialName("fragmentIndex") val fragmentIndex: Int,
+    @SerialName("totalFragments") val totalFragments: Int,
+    @SerialName("dataBase64") val dataBase64: String
+)
+
+@Serializable
+internal data class AddToRetryRequest(
+    val version: Int = 1,
+    @SerialName("txBytes") val txBytes: String,
+    @SerialName("txId") val txId: String,
+    val error: String
+)
+
+@Serializable
+internal data class QueueConfirmationRequest(
+    val version: Int = 1,
+    @SerialName("txId") val txId: String,
+    val signature: String
 )
 

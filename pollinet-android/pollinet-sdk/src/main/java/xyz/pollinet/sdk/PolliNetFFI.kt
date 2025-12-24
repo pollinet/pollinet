@@ -301,5 +301,114 @@ object PolliNetFFI {
      * @return JSON FfiResult with queue debug info
      */
     external fun debugOutboundQueue(handle: Long): String
+    
+    // =========================================================================
+    // Queue Management (Phase 2)
+    // =========================================================================
+    
+    /**
+     * Push transaction to outbound queue
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded PushOutboundRequest
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun pushOutboundTransaction(handle: Long, requestJson: String): String
+    
+    /**
+     * Pop next transaction from outbound queue
+     * @param handle SDK handle
+     * @return JSON FfiResult<OutboundTransactionFFI?>
+     */
+    external fun popOutboundTransaction(handle: Long): String
+    
+    /**
+     * Get outbound queue size
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueSizeResponse>
+     */
+    external fun getOutboundQueueSize(handle: Long): String
+    
+    /**
+     * Add transaction to retry queue
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded AddToRetryRequest
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun addToRetryQueue(handle: Long, requestJson: String): String
+    
+    /**
+     * Pop next ready retry item
+     * @param handle SDK handle
+     * @return JSON FfiResult<RetryItemFFI?>
+     */
+    external fun popReadyRetry(handle: Long): String
+    
+    /**
+     * Get retry queue size
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueSizeResponse>
+     */
+    external fun getRetryQueueSize(handle: Long): String
+    
+    /**
+     * Queue confirmation for relay
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded QueueConfirmationRequest
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun queueConfirmation(handle: Long, requestJson: String): String
+    
+    /**
+     * Pop next confirmation from queue
+     * @param handle SDK handle
+     * @return JSON FfiResult<ConfirmationFFI?>
+     */
+    external fun popConfirmation(handle: Long): String
+    
+    /**
+     * Get confirmation queue size
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueSizeResponse>
+     */
+    external fun getConfirmationQueueSize(handle: Long): String
+    
+    /**
+     * Get metrics for all queues
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueMetricsFFI>
+     */
+    external fun getQueueMetrics(handle: Long): String
+    
+    /**
+     * Cleanup stale fragments from reassembly buffer
+     * @param handle SDK handle
+     * @return JSON FfiResult with cleanup stats
+     */
+    external fun cleanupStaleFragments(handle: Long): String
+    
+    /**
+     * Cleanup expired confirmations and retry items
+     * @param handle SDK handle
+     * @return JSON FfiResult with cleanup stats
+     */
+    external fun cleanupExpired(handle: Long): String
+    
+    // =========================================================================
+    // Queue Persistence (Phase 5)
+    // =========================================================================
+    
+    /**
+     * Save all queues to disk (force save, bypass debouncing)
+     * @param handle SDK handle
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun saveQueues(handle: Long): String
+    
+    /**
+     * Auto-save queues if needed (with debouncing)
+     * @param handle SDK handle
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun autoSaveQueues(handle: Long): String
 }
 

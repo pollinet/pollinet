@@ -321,3 +321,153 @@ pub struct CacheNonceAccountsRequest {
     pub nonce_accounts: Vec<String>,
 }
 
+// ============================================================================
+// Queue Management Types (Phase 2)
+// ============================================================================
+
+/// Priority levels for outbound queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PriorityFFI {
+    #[serde(rename = "HIGH")]
+    High,
+    #[serde(rename = "NORMAL")]
+    Normal,
+    #[serde(rename = "LOW")]
+    Low,
+}
+
+/// Outbound transaction for FFI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutboundTransactionFFI {
+    #[serde(rename = "txId")]
+    pub tx_id: String,
+    #[serde(rename = "originalBytes")]
+    pub original_bytes: String, // base64
+    #[serde(rename = "fragmentCount")]
+    pub fragment_count: usize,
+    pub priority: PriorityFFI,
+    #[serde(rename = "createdAt")]
+    pub created_at: u64,
+    #[serde(rename = "retryCount")]
+    pub retry_count: u8,
+}
+
+/// Retry item for FFI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryItemFFI {
+    #[serde(rename = "txBytes")]
+    pub tx_bytes: String, // base64
+    #[serde(rename = "txId")]
+    pub tx_id: String,
+    #[serde(rename = "attemptCount")]
+    pub attempt_count: usize,
+    #[serde(rename = "lastError")]
+    pub last_error: String,
+    #[serde(rename = "nextRetryInSecs")]
+    pub next_retry_in_secs: u64,
+    #[serde(rename = "ageSeconds")]
+    pub age_seconds: u64,
+}
+
+/// Confirmation status for FFI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ConfirmationStatusFFI {
+    #[serde(rename = "SUCCESS")]
+    Success { signature: String },
+    #[serde(rename = "FAILED")]
+    Failed { error: String },
+}
+
+/// Confirmation for FFI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmationFFI {
+    #[serde(rename = "txId")]
+    pub tx_id: String, // hex string
+    pub status: ConfirmationStatusFFI,
+    pub timestamp: u64,
+    #[serde(rename = "relayCount")]
+    pub relay_count: u8,
+}
+
+/// Queue metrics for FFI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueMetricsFFI {
+    #[serde(rename = "outboundSize")]
+    pub outbound_size: usize,
+    #[serde(rename = "outboundHighPriority")]
+    pub outbound_high_priority: usize,
+    #[serde(rename = "outboundNormalPriority")]
+    pub outbound_normal_priority: usize,
+    #[serde(rename = "outboundLowPriority")]
+    pub outbound_low_priority: usize,
+    #[serde(rename = "confirmationSize")]
+    pub confirmation_size: usize,
+    #[serde(rename = "retrySize")]
+    pub retry_size: usize,
+    #[serde(rename = "retryAvgAttempts")]
+    pub retry_avg_attempts: f32,
+}
+
+/// Request to push outbound transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushOutboundRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "txBytes")]
+    pub tx_bytes: String, // base64
+    #[serde(rename = "txId")]
+    pub tx_id: String,
+    #[serde(rename = "fragments")]
+    pub fragments: Vec<FragmentFFI>,
+    pub priority: PriorityFFI,
+}
+
+/// Fragment for FFI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FragmentFFI {
+    #[serde(rename = "transactionId")]
+    pub transaction_id: String, // hex
+    #[serde(rename = "fragmentIndex")]
+    pub fragment_index: u16,
+    #[serde(rename = "totalFragments")]
+    pub total_fragments: u16,
+    #[serde(rename = "dataBase64")]
+    pub data_base64: String,
+}
+
+/// Request to add to retry queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddToRetryRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "txBytes")]
+    pub tx_bytes: String, // base64
+    #[serde(rename = "txId")]
+    pub tx_id: String,
+    pub error: String,
+}
+
+/// Request to queue confirmation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueConfirmationRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "txId")]
+    pub tx_id: String, // hex
+    pub signature: String,
+}
+
+/// Simple success response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuccessResponse {
+    pub success: bool,
+}
+
+/// Queue size response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueSizeResponse {
+    #[serde(rename = "queueSize")]
+    pub queue_size: usize,
+}
+
