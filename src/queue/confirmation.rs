@@ -464,7 +464,11 @@ mod tests {
     
     #[test]
     fn test_tx_id_hex() {
-        let conf = Confirmation::success([0xAB, 0xCD, 0xEF], "sig".to_string());
+        let mut tx_id = [0u8; 32];
+        tx_id[0] = 0xAB;
+        tx_id[1] = 0xCD;
+        tx_id[2] = 0xEF;
+        let conf = Confirmation::success(tx_id, "sig".to_string());
         let hex = conf.tx_id_hex();
         assert!(hex.starts_with("abcdef"));
     }

@@ -136,16 +136,21 @@ impl HostBleTransport {
 
     /// Push inbound data from GATT characteristic
     pub fn push_inbound(&self, data: Vec<u8>) -> Result<(), String> {
+        tracing::info!("📥 push_inbound() called with {} bytes", data.len());
+        
         // Deserialize the mesh fragment using bincode1 (matching outbound serialization)
         use crate::ble::mesh::TransactionFragment;
         use crate::ble::fragmenter::reconstruct_transaction;
         
+        tracing::debug!("🔓 Deserializing fragment from binary data...");
         let fragment: TransactionFragment = bincode1::deserialize(&data)
             .map_err(|e| {
                 let error_msg = format!("Failed to deserialize fragment ({} bytes): {}", data.len(), e);
-                tracing::error!("{}", error_msg);
+                tracing::error!("❌ {}", error_msg);
                 error_msg
             })?;
+        
+        tracing::debug!("✅ Fragment deserialized successfully");
 
         // Use transaction_id as tx_id (convert to 64-character hex string to match sender format)
         let tx_id = hex::encode(&fragment.transaction_id);
@@ -179,12 +184,20 @@ impl HostBleTransport {
         };
         
         let buffer = buffers.entry(tx_id.clone()).or_insert_with(Vec::new);
+        let buffer_size_before = buffer.len();
         buffer.push(tx_fragment.clone());
+        let buffer_size_after = buffer.len();
+        
+        tracing::debug!("📦 Added fragment to buffer for tx {} (buffer size: {} → {})", 
+            tx_id, buffer_size_before, buffer_size_after);
         
         // Check if we have all fragments for this transaction
         let total_fragments = fragment.total_fragments as usize;
         let fragments_received = buffer.len();
         let all_received = fragments_received == total_fragments;
+        
+        tracing::debug!("🔢 Fragment count check: {}/{} fragments for tx {}", 
+            fragments_received, total_fragments, tx_id);
         
         tracing::info!(
             "📊 Fragment status for tx {}: {}/{} fragments received",
@@ -213,7 +226,10 @@ impl HostBleTransport {
         drop(metrics); // Release metrics lock
         
         if let Some(fragments) = fragments_to_reassemble {
+            tracing::info!("🔧 Starting reassembly for tx {} with {} fragments", tx_id, fragments.len());
+            
             // Convert TxFragments back to mesh TransactionFragments for reassembly
+            tracing::debug!("🔄 Converting {} TxFragments to mesh TransactionFragments...", fragments.len());
             let mesh_fragments: Vec<TransactionFragment> = fragments.iter().map(|f| TransactionFragment {
                 transaction_id: f.checksum,
                 fragment_index: f.index as u16,
@@ -221,23 +237,33 @@ impl HostBleTransport {
                 data: f.data.clone(),
             }).collect();
             
+            tracing::debug!("✅ Converted to {} mesh fragments, calling reconstruct_transaction()...", mesh_fragments.len());
+            
             // Try to reassemble using mesh fragmenter
             match reconstruct_transaction(&mesh_fragments) {
                 Ok(tx_bytes) => {
                     tracing::info!("✅ Transaction {} reassembled successfully ({} bytes)", tx_id, tx_bytes.len());
                     
                     // Remove from inbound buffers FIRST (before updating metrics)
+                    tracing::debug!("🧹 Removing tx {} from inbound buffers...", tx_id);
                     self.inbound_buffers.lock().remove(&tx_id);
+                    tracing::debug!("✅ Removed from inbound buffers");
                     
                     // Recalculate fragments_buffered after removal
                     let remaining_fragments = self.inbound_buffers.lock().values().map(|v| v.len() as u32).sum();
+                    tracing::debug!("📊 Remaining fragments in buffers: {}", remaining_fragments);
                     
                     // Move to completed queue
+                    tracing::debug!("📋 Adding to completed transactions queue...");
                     let mut completed = self.completed_transactions.lock();
+                    let completed_size_before = completed.len();
                     completed.push_back((tx_id.clone(), tx_bytes.clone()));
+                    let completed_size_after = completed.len();
                     drop(completed);
+                    tracing::debug!("✅ Added to completed queue (size: {} → {})", completed_size_before, completed_size_after);
                     
                     // Also add to received transaction queue for auto-submission
+                    tracing::info!("📥 Calling push_received_transaction() for tx {}...", tx_id);
                     let was_added = self.push_received_transaction(tx_bytes.clone());
                     let queue_size = self.received_queue_size();
                     
@@ -331,13 +357,19 @@ impl HostBleTransport {
     /// * `tx_bytes` - Complete signed transaction bytes
     /// * `max_payload` - Optional maximum payload size (typically MTU - 10). If None, uses default MAX_FRAGMENT_DATA
     pub fn queue_transaction(&self, tx_bytes: Vec<u8>, max_payload: Option<usize>) -> Result<Vec<Fragment>, String> {
+        tracing::info!("📦 queue_transaction() called with {} bytes, max_payload: {:?}", 
+            tx_bytes.len(), max_payload);
+        
         // Use BLE mesh fragmenter with MTU-aware payload size
         use crate::ble::fragmenter;
+        tracing::debug!("🔧 Fragmenting transaction with max_payload: {:?}...", max_payload);
         let mesh_fragments = if let Some(max_payload) = max_payload {
             fragmenter::fragment_transaction_with_max_payload(&tx_bytes, max_payload)
         } else {
             fragmenter::fragment_transaction(&tx_bytes)
         };
+        
+        tracing::debug!("✅ Fragmenter created {} fragments", mesh_fragments.len());
         
         tracing::info!(
             "📦 Mesh fragmenter created {} fragments for {} byte transaction",
@@ -429,50 +461,93 @@ impl HostBleTransport {
     /// Push a received transaction into the auto-submission queue
     /// Returns true if added, false if it's a duplicate
     pub fn push_received_transaction(&self, tx_bytes: Vec<u8>) -> bool {
+        tracing::info!("📥 push_received_transaction() called with {} bytes", tx_bytes.len());
+        
         use sha2::{Sha256, Digest};
         
         // Calculate transaction hash for deduplication
+        tracing::debug!("🔐 Calculating SHA-256 hash for transaction...");
         let mut hasher = Sha256::new();
         hasher.update(&tx_bytes);
         let tx_hash = hasher.finalize().to_vec();
         let tx_hash_hex = hex::encode(&tx_hash);
+        tracing::debug!("✅ Transaction hash calculated: {} ({} bytes)", 
+            tx_hash_hex.chars().take(32).collect::<String>(), 
+            tx_hash.len());
         
         tracing::debug!("🔍 Checking if transaction {} is duplicate...", tx_hash_hex.chars().take(16).collect::<String>());
         
         // COMMENTED OUT: Check if already submitted (duplicate detection disabled for testing)
-        // let mut submitted = self.submitted_tx_hashes.lock();
-        // if submitted.contains_key(&tx_hash) {
-        //     let submitted_at = submitted.get(&tx_hash).copied().unwrap_or(0);
-        //     tracing::warn!("⏩ Skipping duplicate transaction {} (submitted at timestamp {})", 
-        //         tx_hash_hex.chars().take(16).collect::<String>(), submitted_at);
-        //     drop(submitted);
-        //     return false;
-        // }
-        // 
-        // // Add to submitted set with current timestamp
-        // let now = Self::current_timestamp();
-        // submitted.insert(tx_hash.clone(), now);
-        // drop(submitted);
+        let mut submitted = self.submitted_tx_hashes.lock();
+        let submitted_count_before = submitted.len();
+        tracing::debug!("📊 Submitted transactions cache size: {}", submitted_count_before);
+        
+        if submitted.contains_key(&tx_hash) {
+            let submitted_at = submitted.get(&tx_hash).copied().unwrap_or(0);
+            tracing::warn!("⏩ Skipping duplicate transaction {} (submitted at timestamp {})", 
+                tx_hash_hex.chars().take(16).collect::<String>(), submitted_at);
+            drop(submitted);
+            tracing::info!("❌ push_received_transaction() returning false (duplicate detected)");
+            return false;
+        }
+        
+        tracing::debug!("✅ Transaction is not a duplicate, proceeding...");
+        
+        // Add to submitted set with current timestamp
+        let now = Self::current_timestamp();
+        tracing::debug!("⏰ Current timestamp: {}", now);
+        submitted.insert(tx_hash.clone(), now);
+        let submitted_count_after = submitted.len();
+        drop(submitted);
+        tracing::debug!("✅ Added transaction hash to submitted set (cache size: {} -> {})", 
+            submitted_count_before, submitted_count_after);
         
         // Generate transaction ID
-        let now = Self::current_timestamp();
         let tx_id = uuid::Uuid::new_v4().to_string();
+        tracing::debug!("🆔 Generated transaction ID: {}", tx_id);
         
         // Add to received queue
         let mut queue = self.received_tx_queue.lock();
+        let queue_size_before = queue.len();
+        tracing::debug!("📋 Received queue size before adding: {}", queue_size_before);
+        
         queue.push_back((tx_id.clone(), tx_bytes.clone(), now));
         let queue_size = queue.len();
         drop(queue);
         
-        tracing::info!("📥 Queued received transaction {} for auto-submission (queue size: {})", tx_id, queue_size);
-        tracing::info!("   Transaction hash: {} ({} bytes)", tx_hash_hex.chars().take(32).collect::<String>(), tx_bytes.len());
+        tracing::info!("📥 Queued received transaction {} for auto-submission (queue size: {} -> {})", 
+            tx_id, queue_size_before, queue_size);
+        tracing::info!("   Transaction hash: {} ({} bytes)", 
+            tx_hash_hex.chars().take(32).collect::<String>(), 
+            tx_bytes.len());
+        tracing::info!("   Timestamp: {}", now);
+        tracing::info!("✅ push_received_transaction() returning true (successfully queued)");
         true
     }
     
     /// Get next received transaction for auto-submission
     /// Returns (tx_id, tx_bytes, received_at_timestamp)
     pub fn next_received_transaction(&self) -> Option<(String, Vec<u8>, u64)> {
-        self.received_tx_queue.lock().pop_front()
+        tracing::info!("📤 next_received_transaction() called");
+        
+        let mut queue = self.received_tx_queue.lock();
+        let queue_size_before = queue.len();
+        tracing::debug!("📋 Received queue size before pop: {}", queue_size_before);
+        
+        let result = queue.pop_front();
+        
+        if let Some((tx_id, tx_bytes, timestamp)) = &result {
+            let queue_size_after = queue.len();
+            tracing::info!("✅ Retrieved transaction {} from received queue ({} bytes, timestamp: {})", 
+                tx_id, tx_bytes.len(), timestamp);
+            tracing::info!("📊 Received queue: {} → {} transactions remaining", 
+                queue_size_before, queue_size_after);
+        } else {
+            tracing::debug!("📭 Received queue is empty, returning None");
+        }
+        
+        drop(queue);
+        result
     }
     
     /// Get count of transactions waiting for auto-submission

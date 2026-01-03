@@ -9,19 +9,37 @@
 //! 6. Add to received queue
 //! 7. Read from received queue
 //! 8. Queue confirmation
+//!
+//! NOTE: This example requires the 'android' feature to be enabled:
+//!   cargo run --example transaction_flow_test --features android
 
-use pollinet::ffi::transport::HostDrivenBleTransport;
+#[cfg(feature = "android")]
+use pollinet::ffi::transport::HostBleTransport;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(not(feature = "android"))]
+    {
+        eprintln!("This example requires the 'android' feature to be enabled.");
+        eprintln!("Run with: cargo run --example transaction_flow_test --features android");
+        std::process::exit(1);
+    }
+
+    #[cfg(feature = "android")]
+    {
     println!("=== PolliNet Transaction Queue Flow Test ===\n");
 
     // Initialize transport (queue manager)
     println!("Step 1: Initializing Transport (Queue Manager)...");
-    let transport = HostDrivenBleTransport::new();
+    let transport = HostBleTransport::new().await?;
     println!("✅ Transport initialized\n");
 
     // Create a dummy transaction (just random bytes)
-    println!("Step 2: Creating dummy transaction...");
+    // Make it large enough to split into 2 fragments
+    // With MTU=512, max_payload=502, and ~40 bytes bincode overhead,
+    // each fragment can hold ~462 bytes of data
+    // So we need >462 bytes to get 2 fragments
+    println!("Step 2: Creating dummy transaction (large enough for 2 fragments)...");
     let tx_bytes: Vec<u8> = vec![
         0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Header
         0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Data
@@ -29,12 +47,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00, // Even more data
     ];
     
-    // Pad to make it more realistic (typical transaction is ~200-400 bytes)
+    // Pad to ~600 bytes to ensure it splits into 2 fragments
+    // (462 bytes per fragment, so 600 bytes = 2 fragments)
     let mut tx_bytes = tx_bytes;
-    tx_bytes.extend(vec![0x42; 250]); // Pad to 282 bytes total
+    tx_bytes.extend(vec![0x42; 568]); // Pad to 600 bytes total (32 + 568 = 600)
     
     println!("✅ Dummy transaction created: {} bytes", tx_bytes.len());
     println!("   First 16 bytes: {:02X?}", &tx_bytes[..16]);
+    println!("   Last 16 bytes: {:02X?}", &tx_bytes[tx_bytes.len()-16..]);
+    println!("   Expected fragments: 2 (max_data per fragment: ~462 bytes)");
     println!();
 
     // ========================================================================
@@ -69,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Step 4: Reading from outbound queue...");
     let mut transmitted_fragments = Vec::new();
     
-    while let Some(fragment_bytes) = transport.next_outbound() {
+    while let Some(fragment_bytes) = transport.next_outbound(1024) {
         let fragment_num = transmitted_fragments.len() + 1;
         println!("   📤 Dequeued fragment {}/{} ({} bytes)", 
             fragment_num, fragments.len(), fragment_bytes.len());
@@ -157,21 +178,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mock_signature = "5j7s8K9L2m3n4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1g2h3i4j5k6l7m8n9o0p";
             println!("   Mock signature: {}...", &mock_signature[..32]);
             
-            // Queue the confirmation
-            transport.queue_confirmation(&tx_id, mock_signature)?;
+            // Queue the confirmation using SDK's queue manager
+            use pollinet::queue::{Confirmation, ConfirmationStatus};
+            use std::str::FromStr;
+            let tx_id_bytes = hex::decode(&tx_id).unwrap_or_else(|_| vec![]);
+            let tx_id_array: [u8; 32] = if tx_id_bytes.len() == 32 {
+                tx_id_bytes.try_into().unwrap()
+            } else {
+                [0u8; 32] // Fallback for invalid hex
+            };
+            
+            let confirmation = Confirmation::success(tx_id_array, mock_signature.to_string());
+            let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
+            conf_queue.push(confirmation).map_err(|e| format!("Failed to queue confirmation: {:?}", e))?;
+            drop(conf_queue);
             println!("✅ Confirmation queued\n");
             
-            // Check confirmation queue
-            let confirmation_queue_size = transport.confirmation_queue_size();
+            // Check confirmation queue size
+            let conf_queue = transport.sdk.queue_manager().confirmations.read().await;
+            let confirmation_queue_size = conf_queue.len();
+            drop(conf_queue);
             println!("📊 Confirmation queue size: {} confirmations", confirmation_queue_size);
             
             // Get the confirmation
-            if let Some((conf_tx_id, signature, confirmed_at)) = transport.next_confirmation() {
+            let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
+            if let Some(conf) = conf_queue.pop() {
                 println!("✅ Retrieved confirmation:");
-                println!("   Transaction ID: {}", conf_tx_id);
-                println!("   Signature: {}...", &signature[..32]);
-                println!("   Confirmed at: {}", confirmed_at);
+                println!("   Transaction ID: {}", conf.tx_id_hex());
+                match &conf.status {
+                    ConfirmationStatus::Success { signature } => println!("   Signature: {}...", &signature[..32.min(signature.len())]),
+                    ConfirmationStatus::Failed { error } => println!("   Error: {}", error),
+                }
+                println!("   Timestamp: {}", conf.timestamp);
             }
+            drop(conf_queue);
             
         } else {
             eprintln!("❌ Failed to retrieve transaction (queue reported size > 0 but returned None)");
@@ -215,7 +255,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("❌ 7. NOT added to received queue");
     }
     
-    let final_confirmation_size = transport.confirmation_queue_size();
+    let conf_queue = transport.sdk.queue_manager().confirmations.read().await;
+    let final_confirmation_size = conf_queue.len();
+    drop(conf_queue);
     if final_confirmation_size > 0 {
         println!("✅ 8. Confirmation queued");
     } else {
@@ -233,5 +275,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nNo BLE dependencies - just pure queue operations!");
 
     Ok(())
+    } // end #[cfg(feature = "android")]
 }
 

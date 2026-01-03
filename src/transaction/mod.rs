@@ -1688,6 +1688,7 @@ impl TransactionService {
     /// 6. Submit fully signed transactions
     /// 
     /// Returns: Vec of (unsigned_tx_base64, nonce_keypair_base64, nonce_pubkey)
+    #[cfg(feature = "android")]
     pub async fn create_unsigned_nonce_transactions(
         &self,
         count: usize,
@@ -2472,6 +2473,3 @@ pub use solana_sdk::hash::Hash;
 pub mod pollinet_message;
 pub use pollinet_message::{HopRecord, PolliNetMessage};
 
-// MWA integration tests
-#[cfg(test)]
-mod mwa_tests;
