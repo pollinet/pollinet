@@ -1020,7 +1020,7 @@ class BleService : Service() {
                 android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress", e)
                 appendLog("   Exception: ${e.message}")
                 appendLog("   Stack trace: ${e.stackTraceToString()}")
-            }
+        }
         }
         
         // Summary log
