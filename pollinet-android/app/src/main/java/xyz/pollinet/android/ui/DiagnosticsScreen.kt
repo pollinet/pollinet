@@ -82,12 +82,17 @@ fun DiagnosticsScreen(
                 scope.launch {
                     bleService?.initializeSdk(
                         SdkConfig(
-                            rpcUrl = null,
+                            // Use Helius devnet RPC for BLE service operations
+                            rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
                             enableLogging = true,
                             logLevel = "info",
                             storageDirectory = context.filesDir.absolutePath
                         )
-                    )
+                    )?.onSuccess {
+                        addLog("✅ BLE Service SDK initialized successfully")
+                    }?.onFailure { e ->
+                        addLog("❌ Failed to initialize BLE Service SDK: ${e.message}")
+                    }
                 }
             }
 

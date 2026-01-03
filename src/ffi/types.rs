@@ -264,6 +264,27 @@ pub struct MetricsSnapshot {
     pub updated_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FragmentReassemblyInfo {
+    #[serde(rename = "transactionId")]
+    pub transaction_id: String,
+    #[serde(rename = "totalFragments")]
+    pub total_fragments: usize,
+    #[serde(rename = "receivedFragments")]
+    pub received_fragments: usize,
+    #[serde(rename = "receivedIndices")]
+    pub received_indices: Vec<usize>,
+    #[serde(rename = "fragmentSizes")]
+    pub fragment_sizes: Vec<usize>,
+    #[serde(rename = "totalBytesReceived")]
+    pub total_bytes_received: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FragmentReassemblyInfoList {
+    pub transactions: Vec<FragmentReassemblyInfo>,
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================

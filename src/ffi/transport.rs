@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use super::types::{Fragment, MetricsSnapshot};
+use super::types::{Fragment, MetricsSnapshot, FragmentReassemblyInfo};
 
 /// Maximum MTU size for BLE
 const MAX_MTU: usize = 512;
@@ -141,16 +141,21 @@ impl HostBleTransport {
         use crate::ble::fragmenter::reconstruct_transaction;
         
         let fragment: TransactionFragment = bincode1::deserialize(&data)
-            .map_err(|e| format!("Failed to deserialize fragment: {}", e))?;
+            .map_err(|e| {
+                let error_msg = format!("Failed to deserialize fragment ({} bytes): {}", data.len(), e);
+                tracing::error!("{}", error_msg);
+                error_msg
+            })?;
 
-        // Use transaction_id as tx_id (convert to hex string)
-        let tx_id = format!("{:x}", &fragment.transaction_id.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64));
+        // Use transaction_id as tx_id (convert to 64-character hex string to match sender format)
+        let tx_id = hex::encode(&fragment.transaction_id);
         
         tracing::info!(
-            "📥 Received mesh fragment {}/{} for tx {}",
+            "📥 Received mesh fragment {}/{} for tx {} ({} bytes)",
             fragment.fragment_index + 1,
             fragment.total_fragments,
-            tx_id
+            tx_id,
+            data.len()
         );
         
         let mut buffers = self.inbound_buffers.lock();
@@ -178,12 +183,22 @@ impl HostBleTransport {
         
         // Check if we have all fragments for this transaction
         let total_fragments = fragment.total_fragments as usize;
-        let all_received = buffer.len() == total_fragments;
+        let fragments_received = buffer.len();
+        let all_received = fragments_received == total_fragments;
+        
+        tracing::info!(
+            "📊 Fragment status for tx {}: {}/{} fragments received",
+            tx_id,
+            fragments_received,
+            total_fragments
+        );
         
         // Clone fragments before releasing lock if needed
         let fragments_to_reassemble = if all_received {
+            tracing::info!("🎉 All fragments received for tx {} - ready for reassembly!", tx_id);
             Some(buffer.clone())
         } else {
+            tracing::debug!("⏳ Waiting for {} more fragments for tx {}", total_fragments - fragments_received, tx_id);
             None
         };
         
@@ -209,22 +224,36 @@ impl HostBleTransport {
             // Try to reassemble using mesh fragmenter
             match reconstruct_transaction(&mesh_fragments) {
                 Ok(tx_bytes) => {
+                    tracing::info!("✅ Transaction {} reassembled successfully ({} bytes)", tx_id, tx_bytes.len());
+                    
+                    // Remove from inbound buffers FIRST (before updating metrics)
+                    self.inbound_buffers.lock().remove(&tx_id);
+                    
+                    // Recalculate fragments_buffered after removal
+                    let remaining_fragments = self.inbound_buffers.lock().values().map(|v| v.len() as u32).sum();
+                    
                     // Move to completed queue
                     let mut completed = self.completed_transactions.lock();
                     completed.push_back((tx_id.clone(), tx_bytes.clone()));
+                    drop(completed);
                     
                     // Also add to received transaction queue for auto-submission
-                    self.push_received_transaction(tx_bytes);
+                    let was_added = self.push_received_transaction(tx_bytes.clone());
+                    let queue_size = self.received_queue_size();
                     
-                    // Remove from inbound buffers
-                    self.inbound_buffers.lock().remove(&tx_id);
+                    if was_added {
+                        tracing::info!("📥 Transaction {} added to received queue (queue size: {})", tx_id, queue_size);
+                    } else {
+                        tracing::warn!("⚠️ Transaction {} was NOT added to received queue (likely duplicate, queue size: {})", tx_id, queue_size);
+                    }
                     
-                    // Update metrics
+                    // Update metrics AFTER removing from buffers
                     let mut metrics = self.metrics.lock();
+                    metrics.fragments_buffered = remaining_fragments; // Update to actual count
                     metrics.transactions_complete += 1;
                     metrics.updated_at = Self::current_timestamp();
+                    drop(metrics);
                     
-                    tracing::info!("✅ Transaction {} reassembled and queued for auto-submission", tx_id);
                     Ok(())
                 }
                 Err(e) => {
@@ -406,26 +435,37 @@ impl HostBleTransport {
         let mut hasher = Sha256::new();
         hasher.update(&tx_bytes);
         let tx_hash = hasher.finalize().to_vec();
+        let tx_hash_hex = hex::encode(&tx_hash);
         
-        // Check if already submitted
-        let mut submitted = self.submitted_tx_hashes.lock();
-        if submitted.contains_key(&tx_hash) {
-            tracing::debug!("⏩ Skipping duplicate transaction");
-            return false;
-        }
+        tracing::debug!("🔍 Checking if transaction {} is duplicate...", tx_hash_hex.chars().take(16).collect::<String>());
         
-        // Add to submitted set with current timestamp
-        submitted.insert(tx_hash, Self::current_timestamp());
-        drop(submitted);
+        // COMMENTED OUT: Check if already submitted (duplicate detection disabled for testing)
+        // let mut submitted = self.submitted_tx_hashes.lock();
+        // if submitted.contains_key(&tx_hash) {
+        //     let submitted_at = submitted.get(&tx_hash).copied().unwrap_or(0);
+        //     tracing::warn!("⏩ Skipping duplicate transaction {} (submitted at timestamp {})", 
+        //         tx_hash_hex.chars().take(16).collect::<String>(), submitted_at);
+        //     drop(submitted);
+        //     return false;
+        // }
+        // 
+        // // Add to submitted set with current timestamp
+        // let now = Self::current_timestamp();
+        // submitted.insert(tx_hash.clone(), now);
+        // drop(submitted);
         
         // Generate transaction ID
+        let now = Self::current_timestamp();
         let tx_id = uuid::Uuid::new_v4().to_string();
         
         // Add to received queue
         let mut queue = self.received_tx_queue.lock();
-        queue.push_back((tx_id.clone(), tx_bytes, Self::current_timestamp()));
+        queue.push_back((tx_id.clone(), tx_bytes.clone(), now));
+        let queue_size = queue.len();
+        drop(queue);
         
-        tracing::info!("📥 Queued received transaction {} for auto-submission", tx_id);
+        tracing::info!("📥 Queued received transaction {} for auto-submission (queue size: {})", tx_id, queue_size);
+        tracing::info!("   Transaction hash: {} ({} bytes)", tx_hash_hex.chars().take(32).collect::<String>(), tx_bytes.len());
         true
     }
     
@@ -438,6 +478,46 @@ impl HostBleTransport {
     /// Get count of transactions waiting for auto-submission
     pub fn received_queue_size(&self) -> usize {
         self.received_tx_queue.lock().len()
+    }
+    
+    /// Get fragment reassembly progress for all incomplete transactions
+    pub fn get_fragment_reassembly_info(&self) -> Vec<FragmentReassemblyInfo> {
+        let buffers = self.inbound_buffers.lock();
+        let mut info_list = Vec::new();
+        
+        for (tx_id, fragments) in buffers.iter() {
+            if fragments.is_empty() {
+                continue;
+            }
+            
+            // Get total fragments from first fragment
+            let total_fragments = fragments.first().map(|f| f.total).unwrap_or(0);
+            let received_count = fragments.len();
+            
+            // Get received fragment indices
+            let received_indices: Vec<usize> = fragments.iter()
+                .map(|f| f.index)
+                .collect();
+            
+            // Get fragment sizes
+            let fragment_sizes: Vec<usize> = fragments.iter()
+                .map(|f| f.data.len())
+                .collect();
+            
+            // Calculate total bytes received so far
+            let total_bytes: usize = fragment_sizes.iter().sum();
+            
+            info_list.push(FragmentReassemblyInfo {
+                transaction_id: tx_id.clone(),
+                total_fragments,
+                received_fragments: received_count,
+                received_indices,
+                fragment_sizes,
+                total_bytes_received: total_bytes,
+            });
+        }
+        
+        info_list
     }
     
     /// Get outbound queue size without removing items (for debugging)

@@ -1777,6 +1777,28 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getReceivedQueueSize(
     create_result_string(&mut env, result)
 }
 
+/// Get fragment reassembly info for all incomplete transactions
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getFragmentReassemblyInfo(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let info_list = transport.get_fragment_reassembly_info();
+        
+        let response: FfiResult<FragmentReassemblyInfoList> = FfiResult::success(
+            FragmentReassemblyInfoList {
+                transactions: info_list,
+            }
+        );
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
 /// Mark a transaction as successfully submitted
 #[no_mangle]
 pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_markTransactionSubmitted(

@@ -615,6 +615,18 @@ class PolliNetSDK private constructor(
     }
 
     /**
+     * Get fragment reassembly info for all incomplete transactions
+     */
+    suspend fun getFragmentReassemblyInfo(): Result<FragmentReassemblyInfoList> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getFragmentReassemblyInfo(handle)
+            parseResult<FragmentReassemblyInfoList>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Mark a transaction as successfully submitted (for deduplication)
      */
     suspend fun markTransactionSubmitted(transactionBytes: ByteArray): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -998,6 +1010,21 @@ data class MetricsSnapshot(
     val reassemblyFailures: Int,
     val lastError: String,
     val updatedAt: Long
+)
+
+@Serializable
+data class FragmentReassemblyInfo(
+    @SerialName("transactionId") val transactionId: String,
+    @SerialName("totalFragments") val totalFragments: Int,
+    @SerialName("receivedFragments") val receivedFragments: Int,
+    @SerialName("receivedIndices") val receivedIndices: List<Int>,
+    @SerialName("fragmentSizes") val fragmentSizes: List<Int>,
+    @SerialName("totalBytesReceived") val totalBytesReceived: Int
+)
+
+@Serializable
+data class FragmentReassemblyInfoList(
+    val transactions: List<FragmentReassemblyInfo>
 )
 
 // ============================================================================

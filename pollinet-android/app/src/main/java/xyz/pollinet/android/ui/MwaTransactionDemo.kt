@@ -468,11 +468,34 @@ fun MwaTransactionDemo(
                             errorMessage = null
                             statusMessage = "Creating unsigned transaction..."
                             try {
+                                // Random recipient addresses
+                                val recipientAddresses = listOf(
+                                    "A7B9f6dy4Up29g8XMTM4H6i5hMzR2bwYeao3UtuiZLiz",
+                                    "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX",
+                                    "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE",
+                                    "7WPGEvxRzZ3ARQNQU5iEdRevFX2oh1mG1xMq6A2NazBy",
+                                    "CrqmbxGbiTuPZkxz18pSvsZ8JurxGp7cb2mxmdfi5erG",
+                                    "Acau8iLY9Rv115UDzWPkDAopB6t9iFxGQuebZxffqoMv",
+                                    "DyBFbB2VWG6rp4Y3KRYqLU5KenU6yX3hahcts9Gomwmj"
+                                )
+                                
+                                // Random amount between 0.1 to 0.99 SOL (in lamports)
+                                // 0.1 SOL = 100,000,000 lamports
+                                // 0.99 SOL = 990,000,000 lamports
+                                val minAmount = 100_000_000L // 0.1 SOL
+                                val maxAmount = 990_000_000L // 0.99 SOL
+                                val randomAmount = (minAmount..maxAmount).random()
+                                
+                                // Random recipient
+                                val randomRecipient = recipientAddresses.random()
+                                
+                                statusMessage = "Creating transaction: ${randomAmount / 1_000_000_000.0} SOL to ${randomRecipient.take(8)}..."
+                                
                                 val result = sdk!!.createUnsignedOfflineTransaction(
                                     senderPubkey = authorizedPubkey!!,
                                     nonceAuthorityPubkey = authorizedPubkey!!, // Same as sender for demo
-                                    recipient = authorizedPubkey!!, // Self-transfer for demo
-                                    amount = 1000000L // 0.001 SOL
+                                    recipient = randomRecipient,
+                                    amount = randomAmount
                                 )
                                 
                                 result.fold(

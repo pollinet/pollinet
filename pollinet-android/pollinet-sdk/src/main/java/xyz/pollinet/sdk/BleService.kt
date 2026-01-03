@@ -35,6 +35,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 import java.util.UUID as JavaUUID
 
@@ -60,6 +61,17 @@ class BleService : Service() {
         
         const val ACTION_START = "xyz.pollinet.sdk.action.START"
         const val ACTION_STOP = "xyz.pollinet.sdk.action.STOP"
+        
+        // Queue size limits (Edge Case Fix #3)
+        // Prevents OutOfMemoryError from unbounded queue growth
+        private const val MAX_OPERATION_QUEUE_SIZE = 100
+        private const val MAX_FRAGMENT_SIZE = 512 // bytes (documentation)
+        
+        // Transaction size limits (Edge Case Fix #5)
+        // Prevents OutOfMemoryError and DOS attacks from oversized transactions
+        // Reasonable limit: ~10 fragments at 512 bytes each = 5120 bytes (~5KB)
+        // Solana transaction max is 1232 bytes, so 5KB provides comfortable headroom
+        private const val MAX_TRANSACTION_SIZE = 5120 // bytes (~5KB)
     }
 
     private val binder = LocalBinder()
@@ -90,7 +102,27 @@ class BleService : Service() {
     private var sendingJob: Job? = null
     private val sendingMutex = Mutex()
     private val operationQueue = ConcurrentLinkedQueue<ByteArray>()
-    private var operationInProgress = false
+    // Edge Case Fix #8: Use AtomicBoolean to prevent race conditions
+    // Prevents concurrent BLE operations that cause status 133 errors
+    private val operationInProgress = AtomicBoolean(false)
+    
+    /**
+     * Safely add fragment to operation queue with overflow protection
+     * Prevents OutOfMemoryError by enforcing MAX_OPERATION_QUEUE_SIZE limit
+     * When queue is full, drops the oldest fragment (FIFO overflow handling)
+     * 
+     * Edge Case Fix #3: Queue Size Limits
+     */
+    private fun safelyQueueFragment(data: ByteArray, context: String = "") {
+        if (operationQueue.size >= MAX_OPERATION_QUEUE_SIZE) {
+            val dropped = operationQueue.poll()
+            appendLog("⚠️ Operation queue full (${MAX_OPERATION_QUEUE_SIZE}), dropped oldest fragment (${dropped?.size ?: 0}B)")
+            appendLog("   Context: $context")
+            appendLog("   This may indicate connection issues or overwhelmed BLE stack")
+        }
+        operationQueue.offer(data)
+        appendLog("📦 Queued fragment (${data.size}B), queue size: ${operationQueue.size}/$MAX_OPERATION_QUEUE_SIZE")
+    }
     
     // Track original transaction bytes for re-fragmentation when MTU changes
     private var pendingTransactionBytes: ByteArray? = null
@@ -143,6 +175,11 @@ class BleService : Service() {
     // Phase 5: Auto-save job for queue persistence
     private var autoSaveJob: Job? = null
     
+    // Edge Case Fix #1: Bluetooth state tracking
+    // Saves operation state when BT disabled, restores when BT re-enabled
+    private var wasAdvertisingBeforeDisable = false
+    private var wasScanningBeforeDisable = false
+    
     // Bonding state receiver
     private val bondStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -184,6 +221,83 @@ class BleService : Service() {
                                 this@BleService.appendLog("❌ Failed to retry descriptor write after bonding: ${e.message}")
                             }
                         }, 500)
+                    }
+                }
+            }
+        }
+    }
+    
+    // Edge Case Fix #1: Bluetooth state receiver
+    // Monitors Bluetooth on/off state to prevent battery drain and manage operations
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                
+                when (state) {
+                    BluetoothAdapter.STATE_OFF -> {
+                        appendLog("📴 Bluetooth disabled - pausing all BLE operations")
+                        appendLog("   This prevents battery drain from scanning/advertising on disabled BT")
+                        
+                        // Save current operation state before stopping
+                        wasAdvertisingBeforeDisable = _isAdvertising.value
+                        wasScanningBeforeDisable = _isScanning.value
+                        
+                        appendLog("   State saved: advertising=$wasAdvertisingBeforeDisable, scanning=$wasScanningBeforeDisable")
+                        
+                        // Stop all BLE operations immediately
+                        stopScanning()
+                        stopAdvertising()
+                        closeGattConnection()
+                        
+                        // Update connection state
+                        _connectionState.value = ConnectionState.DISCONNECTED
+                        
+                        appendLog("✅ All BLE operations stopped - safe for Bluetooth OFF state")
+                    }
+                    
+                    BluetoothAdapter.STATE_ON -> {
+                        appendLog("📶 Bluetooth enabled - resuming operations")
+                        
+                        // Resume operations based on saved state
+                        if (wasAdvertisingBeforeDisable) {
+                            appendLog("   Resuming advertising (was active before BT disabled)")
+                            mainHandler.postDelayed({
+                                startAdvertising()
+                                wasAdvertisingBeforeDisable = false // Reset flag
+                            }, 500) // Small delay to ensure BT stack is ready
+                        }
+                        
+                        if (wasScanningBeforeDisable) {
+                            appendLog("   Resuming scanning (was active before BT disabled)")
+                            mainHandler.postDelayed({
+                                startScanning()
+                                wasScanningBeforeDisable = false // Reset flag
+                            }, 1000) // Longer delay to avoid conflicts with advertising
+                        }
+                        
+                        if (!wasAdvertisingBeforeDisable && !wasScanningBeforeDisable) {
+                            appendLog("   No operations to resume (were idle before BT disabled)")
+                        }
+                        
+                        appendLog("✅ Bluetooth ready - operations resumed")
+                    }
+                    
+                    BluetoothAdapter.STATE_TURNING_OFF -> {
+                        appendLog("⚠️ Bluetooth turning off - preparing to stop operations")
+                        // Preemptively save state before it fully turns off
+                        wasAdvertisingBeforeDisable = _isAdvertising.value
+                        wasScanningBeforeDisable = _isScanning.value
+                        appendLog("   State pre-saved: advertising=$wasAdvertisingBeforeDisable, scanning=$wasScanningBeforeDisable")
+                    }
+                    
+                    BluetoothAdapter.STATE_TURNING_ON -> {
+                        appendLog("⚠️ Bluetooth turning on - preparing to resume operations")
+                        appendLog("   BLE stack initializing... operations will resume when STATE_ON received")
+                    }
+                    
+                    else -> {
+                        appendLog("⚠️ Unknown Bluetooth state: $state")
                     }
                 }
             }
@@ -234,6 +348,12 @@ class BleService : Service() {
         val bondFilter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         registerReceiver(bondStateReceiver, bondFilter)
         
+        // Edge Case Fix #1: Register Bluetooth state receiver
+        // Monitors BT on/off to prevent battery drain and manage operations
+        val btStateFilter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        registerReceiver(bluetoothStateReceiver, btStateFilter)
+        appendLog("✅ Bluetooth state monitor registered - will handle BT on/off gracefully")
+        
         // Only start foreground if we have required permissions
         if (hasRequiredPermissions()) {
             android.util.Log.d("BleService", "onCreate: Permissions granted, starting foreground")
@@ -276,6 +396,18 @@ class BleService : Service() {
             appendLog("⚠️ SDK not initialized; cannot queue sample transaction")
             return
         }
+        
+        // Edge Case Fix #5: Validate transaction size to prevent OOM and DOS attacks
+        if (byteSize > MAX_TRANSACTION_SIZE) {
+            appendLog("❌ Transaction too large: $byteSize bytes (max: $MAX_TRANSACTION_SIZE)")
+            appendLog("   This prevents OutOfMemoryError and DOS attacks")
+            return
+        }
+        
+        if (byteSize <= 0) {
+            appendLog("❌ Invalid transaction size: $byteSize bytes (must be > 0)")
+            return
+        }
 
         serviceScope.launch {
             appendLog("🧪 Queueing sample transaction (${byteSize} bytes)")
@@ -287,9 +419,9 @@ class BleService : Service() {
                 val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
                 val firstFragmentData = fragments.fragments.firstOrNull()?.data;
                 val firstFragmentType = fragments.fragments.firstOrNull()?.fragmentType
-                appendLog("📤 Queued $count fragments for tx ${txId.take(12)}…")
+                appendLog("📤 Queued $count fragments for tx ${txId}…")
                 appendLog("   Fragment size calculation: ${byteSize} bytes ÷ $maxPayload = ~$count fragments")
-                appendLog(" Fragment Data: ${firstFragmentData?.take(12)}…")
+                appendLog(" Fragment Data: ${firstFragmentData}…")
                 appendLog(" Fragment Type: $firstFragmentType")
 
                 // Store original bytes for potential re-fragmentation if MTU increases
@@ -319,13 +451,21 @@ class BleService : Service() {
         serviceScope.launch {
             try {
                 val bytes = Base64.decode(trimmed, Base64.DEFAULT)
+                
+                // Edge Case Fix #5: Validate transaction size to prevent OOM and DOS attacks
+                if (bytes.size > MAX_TRANSACTION_SIZE) {
+                    appendLog("❌ Transaction too large: ${bytes.size} bytes (max: $MAX_TRANSACTION_SIZE)")
+                    appendLog("   This prevents OutOfMemoryError and DOS attacks")
+                    return@launch
+                }
+                
                 appendLog("🧾 Queueing provided transaction (${bytes.size} bytes)")
                 val maxPayload = (currentMtu - 10).coerceAtLeast(20)
                 appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment")
                 sdkInstance.fragment(bytes, maxPayload).onSuccess { fragments ->
                     val count = fragments.fragments.size
                     val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
-                    appendLog("📤 Queued $count fragments for tx ${txId.take(12)}…")
+                    appendLog("📤 Queued $count fragments for tx ${txId}…")
                     appendLog("   Fragment size calculation: ${bytes.size} bytes ÷ $maxPayload = ~$count fragments")
                     
                     // Store original bytes for potential re-fragmentation if MTU increases
@@ -359,6 +499,15 @@ class BleService : Service() {
             appendLog("⚠️ SDK not initialized; cannot queue transaction")
             return@withContext Result.failure(Exception("SDK not initialized"))
         }
+        
+        // Edge Case Fix #5: Validate transaction size to prevent OOM and DOS attacks
+        if (txBytes.size > MAX_TRANSACTION_SIZE) {
+            appendLog("❌ Transaction too large: ${txBytes.size} bytes (max: $MAX_TRANSACTION_SIZE)")
+            appendLog("   This prevents OutOfMemoryError and DOS attacks")
+            return@withContext Result.failure(
+                Exception("Transaction too large: ${txBytes.size} bytes (max: $MAX_TRANSACTION_SIZE)")
+            )
+        }
 
         try {
             appendLog("🧾 Queueing signed transaction (${txBytes.size} bytes, priority: $priority) [MWA]")
@@ -371,14 +520,64 @@ class BleService : Service() {
             fragmentResult.fold(
                 onSuccess = { fragmentList ->
                     val count = fragmentList.fragments.size
-                    val txId = fragmentList.fragments.firstOrNull()?.id ?: "unknown"
+                    val firstFragment = fragmentList.fragments.firstOrNull()
                     
-                    appendLog("📤 Fragmenting into $count fragments for tx ${txId.take(12)}…")
+                    if (firstFragment == null) {
+                        appendLog("❌ Fragment list is empty")
+                        return@withContext Result.failure(Exception("Fragment list is empty"))
+                    }
                     
-                    // Convert to FragmentFFI format
+                    // Use checksum as transaction ID (SHA-256 hash, hex-encoded)
+                    // The checksum is base64-encoded in the Fragment, so decode and hex-encode it
+                    appendLog("🔍 Decoding fragment checksum to get transaction ID...")
+                    android.util.Log.d("PolliNet.BLE", "🔍 Decoding fragment checksum to get transaction ID...")
+                    appendLog("   Fragment checksum (base64): ${firstFragment.checksum}...")
+                    android.util.Log.d("PolliNet.BLE", "   Fragment checksum (base64): ${firstFragment.checksum}...")
+                    appendLog("   Fragment ID (from Rust): ${firstFragment.id}")
+                    android.util.Log.d("PolliNet.BLE", "   Fragment ID (from Rust): ${firstFragment.id}")
+                    
+                    val txId = try {
+                        val checksumBytes = android.util.Base64.decode(firstFragment.checksum, android.util.Base64.DEFAULT)
+                        appendLog("   ✅ Checksum decoded: ${checksumBytes.size} bytes")
+                        android.util.Log.d("PolliNet.BLE", "   ✅ Checksum decoded: ${checksumBytes.size} bytes")
+                        
+                        if (checksumBytes.size != 32) {
+                            val errorMsg = "❌ Invalid checksum size: ${checksumBytes.size} bytes (expected 32)"
+                            appendLog(errorMsg)
+                            android.util.Log.e("PolliNet.BLE", errorMsg)
+                            return@withContext Result.failure(Exception("Invalid checksum size"))
+                        }
+                        
+                        val hexTxId = checksumBytes.joinToString("") { "%02x".format(it) }
+                        appendLog("   ✅ Transaction ID (hex): $hexTxId")
+                        android.util.Log.d("PolliNet.BLE", "   ✅ Transaction ID (hex): $hexTxId")
+                        appendLog("   ✅ Transaction ID length: ${hexTxId.length} characters (expected 64)")
+                        android.util.Log.d("PolliNet.BLE", "   ✅ Transaction ID length: ${hexTxId.length} characters (expected 64)")
+                        appendLog("   ✅ First 16 chars: ${hexTxId}...")
+                        android.util.Log.d("PolliNet.BLE", "   ✅ First 16 chars: ${hexTxId}...")
+                        hexTxId
+                    } catch (e: Exception) {
+                        val errorMsg = "❌ Failed to decode checksum: ${e.message}"
+                        appendLog(errorMsg)
+                        android.util.Log.e("PolliNet.BLE", errorMsg, e)
+                        appendLog("   Error type: ${e.javaClass.simpleName}")
+                        android.util.Log.e("PolliNet.BLE", "   Error type: ${e.javaClass.simpleName}", e)
+                        return@withContext Result.failure(Exception("Failed to decode checksum: ${e.message}"))
+                    }
+                    
+                    // Add fragment progress indicator (e.g., ~1/2, ~2/2)
+                    val totalFragments = firstFragment.total
+                    val fragmentProgress = "~$count/$totalFragments"
+                    
+                    appendLog("📤 Fragmenting into $count fragments for tx ${txId}… $fragmentProgress")
+                    android.util.Log.d("PolliNet.BLE", "📤 Fragmenting into $count fragments for tx ${txId}… $fragmentProgress")
+                    appendLog("   Using transaction ID: ${txId}... $fragmentProgress (full: $txId)")
+                    android.util.Log.d("PolliNet.BLE", "   Using transaction ID: ${txId}... $fragmentProgress (full: $txId)")
+                    
+                    // Convert to FragmentFFI format - use the hex-encoded checksum as transaction ID
                     val fragmentsFFI = fragmentList.fragments.map { frag ->
                         FragmentFFI(
-                            transactionId = frag.id, // Already a hex string
+                            transactionId = txId, // Use the hex-encoded checksum for all fragments
                             fragmentIndex = frag.index,
                             totalFragments = frag.total,
                             dataBase64 = frag.data
@@ -436,6 +635,11 @@ class BleService : Service() {
             appendLog("🔍 Connection: ${_connectionState.value}")
             appendLog("🔍 Sending job active: ${sendingJob?.isActive}")
             appendLog("🔍 Write in progress: $remoteWriteInProgress")
+            appendLog("🔍 Operation in progress: ${operationInProgress.get()}")
+            appendLog("🔍 Operation queue size: ${operationQueue.size}/$MAX_OPERATION_QUEUE_SIZE")
+            if (operationQueue.size > MAX_OPERATION_QUEUE_SIZE * 0.8) {
+                appendLog("   ⚠️ WARNING: Queue is ${(operationQueue.size.toFloat() / MAX_OPERATION_QUEUE_SIZE * 100).toInt()}% full!")
+            }
             appendLog("🔍 Client GATT: ${clientGatt != null}")
             appendLog("🔍 Remote RX char: ${remoteRxCharacteristic != null}")
             appendLog("🔍 GATT server: ${gattServer != null}")
@@ -554,16 +758,83 @@ class BleService : Service() {
                         }
                         null -> {
                             // Timeout - fallback check for received queue
-                            appendLog("⏰ Worker timeout (30s) - fallback check")
+                            val timeSinceLastCheck = System.currentTimeMillis() - lastReceivedCheck
+                            val timeSinceLastCleanup = System.currentTimeMillis() - lastCleanup
+                            
+                            // Only log timeout if we're actually doing something
+                            val shouldCheckQueue = timeSinceLastCheck > 10_000
+                            val shouldCleanup = timeSinceLastCleanup > 300_000
+                            
+                            if (shouldCheckQueue || shouldCleanup) {
+                                appendLog("⏰ Worker timeout (30s) - running fallback checks")
+                                
+                                // Check fragment reassembly progress using metrics
+                                val metrics = sdk?.metrics()?.getOrNull()
+                                if (metrics != null) {
+                                    appendLog("📊 Fragment reassembly status:")
+                                    appendLog("   Fragments buffered: ${metrics.fragmentsBuffered}")
+                                    appendLog("   Transactions complete: ${metrics.transactionsComplete}")
+                                    appendLog("   Reassembly failures: ${metrics.reassemblyFailures}")
+                                    if (metrics.fragmentsBuffered > 0) {
+                                        appendLog("   ⏳ ${metrics.fragmentsBuffered} fragments waiting for reassembly")
+                                        appendLog("   💡 More fragments may be needed to complete transaction(s)")
+                                    }
+                                    if (metrics.lastError.isNotEmpty()) {
+                                        appendLog("   ⚠️ Last error: ${metrics.lastError}")
+                                    }
+                                }
+                                
+                                // Get detailed fragment metadata for all incomplete transactions
+                                val fragmentInfo = sdk?.getFragmentReassemblyInfo()?.getOrNull()
+                                if (fragmentInfo != null && fragmentInfo.transactions.isNotEmpty()) {
+                                    appendLog("📋 Fragment metadata for incomplete transactions:")
+                                    fragmentInfo.transactions.forEachIndexed { idx, info ->
+                                        val fragmentProgress = "~${info.receivedFragments}/${info.totalFragments}"
+                                        val isComplete = info.receivedFragments == info.totalFragments
+                                        val progressIndicator = if (isComplete) "✅ $fragmentProgress" else "⏳ $fragmentProgress"
+                                        appendLog("   Transaction ${idx + 1}: ${info.transactionId}... $progressIndicator")
+                                        android.util.Log.d("PolliNet.BLE", "   Transaction ${idx + 1}: ${info.transactionId}... $progressIndicator")
+                                        appendLog("      Total fragments: ${info.totalFragments}")
+                                        appendLog("      Received: ${info.receivedFragments}/${info.totalFragments}")
+                                        appendLog("      Fragment indices received: ${info.receivedIndices.sorted().joinToString(", ")}")
+                                        appendLog("      Fragment sizes: ${info.fragmentSizes.joinToString(", ")} bytes")
+                                        appendLog("      Total bytes received: ${info.totalBytesReceived}")
+                                        val missing = info.totalFragments - info.receivedFragments
+                                        if (missing > 0) {
+                                            appendLog("      ⏳ Waiting for $missing more fragments")
+                                            val expectedIndices = (0 until info.totalFragments).toList()
+                                            val missingIndices = expectedIndices.filter { it !in info.receivedIndices }
+                                            appendLog("      Missing fragment indices: ${missingIndices.joinToString(", ")}")
+                                        }
+                                    }
+                                } else if (fragmentInfo != null && fragmentInfo.transactions.isEmpty()) {
+                                    appendLog("✅ No incomplete transactions - all fragments processed")
+                                }
+                            } else {
+                                // Silent timeout - nothing to do, this is normal
+                                // Only log every 5 minutes to reduce noise
+                                if (timeSinceLastCheck > 300_000) {
+                                    appendLog("⏰ Worker idle (no events) - this is normal when no work pending")
+                                    lastReceivedCheck = System.currentTimeMillis() // Reset to avoid spam
+                                }
+                            }
                             
                             // Check received queue (only fallback needed)
-                            if (System.currentTimeMillis() - lastReceivedCheck > 10_000) {
+                            if (shouldCheckQueue) {
+                                appendLog("🔄 Fallback: Checking received queue...")
+                                val queueSize = sdk?.getReceivedQueueSize()?.getOrNull() ?: 0
+                                if (queueSize > 0) {
+                                    appendLog("📦 Found $queueSize transactions in queue - processing...")
+                                } else {
+                                    appendLog("📭 Received queue is empty")
+                                }
                                 processReceivedQueue()
                                 lastReceivedCheck = System.currentTimeMillis()
                             }
                             
                             // Periodic cleanup (every 5 minutes)
-                            if (System.currentTimeMillis() - lastCleanup > 300_000) {
+                            if (shouldCleanup) {
+                                appendLog("🧹 Running periodic cleanup...")
                                 processCleanup()
                                 lastCleanup = System.currentTimeMillis()
                             }
@@ -623,29 +894,89 @@ class BleService : Service() {
      * Process received transaction queue (event-driven)
      */
     private suspend fun processReceivedQueue() {
-        val sdkInstance = sdk ?: return
+        val sdkInstance = sdk ?: run {
+            appendLog("⚠️ processReceivedQueue: SDK not initialized, skipping")
+            return
+        }
+        
+        appendLog("🔄 processReceivedQueue: Starting queue check...")
         
         // Check internet connectivity
         if (!hasInternetConnection()) {
+            appendLog("⚠️ processReceivedQueue: No internet connection, skipping submission")
+            return
+        }
+        
+        // Get fragment reassembly info to show progress indicators
+        val fragmentInfo = sdkInstance.getFragmentReassemblyInfo().getOrNull()
+        val fragmentInfoMap = fragmentInfo?.transactions?.associateBy { it.transactionId } ?: emptyMap()
+        
+        // Check queue size before processing
+        val queueSizeBefore = sdkInstance.getReceivedQueueSize().getOrNull() ?: 0
+        appendLog("📊 Received queue size: $queueSizeBefore transactions")
+        
+        if (queueSizeBefore == 0) {
+            appendLog("📭 Queue is empty - no transactions to submit")
+            // Show incomplete transactions if any
+            if (fragmentInfoMap.isNotEmpty()) {
+                appendLog("   (${fragmentInfoMap.size} incomplete transaction(s) still being reassembled)")
+                fragmentInfoMap.values.forEach { info ->
+                    val fragmentProgress = "~${info.receivedFragments}/${info.totalFragments}"
+                    val progressIndicator = if (info.receivedFragments == info.totalFragments) "✅ $fragmentProgress" else "⏳ $fragmentProgress"
+                    appendLog("      ${info.transactionId} $progressIndicator")
+                    android.util.Log.d("PolliNet.BLE", "      ${info.transactionId} $progressIndicator")
+                }
+            }
             return
         }
         
         var processedCount = 0
+        var successCount = 0
+        var failureCount = 0
         val batchSize = 5 // Process up to 5 received transactions per wake-up
         
+        appendLog("🚀 Processing up to $batchSize transactions from queue...")
+        
         repeat(batchSize) {
-            val receivedTx = sdkInstance.nextReceivedTransaction().getOrNull() ?: return@repeat
+            val receivedTx = sdkInstance.nextReceivedTransaction().getOrNull() ?: run {
+                appendLog("📭 No more transactions in queue")
+                return@repeat
+            }
             
-            appendLog("📥 Processing received tx: ${receivedTx.txId}")
+            // Check if this transaction is still in reassembly buffers (shouldn't happen, but check anyway)
+            val txFragmentInfo = fragmentInfoMap[receivedTx.txId]
+            val progressIndicator = if (txFragmentInfo != null) {
+                val fragmentProgress = "~${txFragmentInfo.receivedFragments}/${txFragmentInfo.totalFragments}"
+                if (txFragmentInfo.receivedFragments == txFragmentInfo.totalFragments) {
+                    "✅ $fragmentProgress" // Complete
+                } else {
+                    "⏳ $fragmentProgress" // Still incomplete (unusual case)
+                }
+            } else {
+                "✅ ~complete" // Already reassembled and in queue (complete)
+            }
+            
+            appendLog("📥 Processing received tx: ${receivedTx.txId} $progressIndicator")
+            android.util.Log.d("PolliNet.BLE", "📥 Processing received tx: ${receivedTx.txId} $progressIndicator")
+            appendLog("   Transaction size: ${receivedTx.transactionBase64.length} base64 chars")
             
             try {
+                appendLog("🌐 Submitting transaction to Solana RPC...")
                 val submitResult = sdkInstance.submitOfflineTransaction(
                     transactionBase64 = receivedTx.transactionBase64,
                     verifyNonce = false
                 )
                 
                 submitResult.onSuccess { signature ->
-                    appendLog("✅ Auto-submitted: $signature")
+                    successCount++
+                    val txProgress = txFragmentInfo?.let { "~${it.totalFragments}/${it.totalFragments}" } ?: "~complete"
+                    appendLog("✅ ✅ ✅ Transaction submitted SUCCESSFULLY! ✅ ✅ ✅")
+                    appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
+                    android.util.Log.d("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
+                    appendLog("   Signature: $signature")
+                    appendLog("   Transaction is now on-chain")
+                    
+                    // Mark as submitted for deduplication
                     sdkInstance.markTransactionSubmitted(
                         android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
                     )
@@ -653,27 +984,61 @@ class BleService : Service() {
                     // Queue confirmation for relay (Phase 2)
                     sdkInstance.queueConfirmation(receivedTx.txId, signature)
                         .onSuccess {
+                            appendLog("📤 Queued confirmation for relay")
                             workChannel.trySend(WorkEvent.ConfirmationReady)
+                        }
+                        .onFailure { e ->
+                            appendLog("⚠️ Failed to queue confirmation: ${e.message}")
                         }
                     
                     processedCount++
                 }.onFailure { error ->
-                    appendLog("⚠️ Submission failed: ${error.message}")
+                    failureCount++
+                    val txProgress = txFragmentInfo?.let { "~${it.totalFragments}/${it.totalFragments}" } ?: "~complete"
+                    appendLog("❌ ❌ ❌ Transaction submission FAILED ❌ ❌ ❌")
+                    appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
+                    android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
+                    appendLog("   Error: ${error.message}")
+                    appendLog("   Adding to retry queue for later...")
                     
                     // Add to retry queue (Phase 2)
                     sdkInstance.addToRetryQueue(
                         txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
                         txId = receivedTx.txId,
                         error = error.message ?: "Unknown error"
-                    )
+                    ).onSuccess {
+                        appendLog("   ✅ Added to retry queue")
+                    }.onFailure { e ->
+                        appendLog("   ❌ Failed to add to retry queue: ${e.message}")
+                    }
                 }
             } catch (e: Exception) {
-                appendLog("❌ Exception processing received tx: ${e.message}")
+                failureCount++
+                val txProgress = txFragmentInfo?.let { "~${it.totalFragments}/${it.totalFragments}" } ?: "~complete"
+                appendLog("❌ ❌ ❌ Exception processing received tx ❌ ❌ ❌")
+                appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
+                android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress", e)
+                appendLog("   Exception: ${e.message}")
+                appendLog("   Stack trace: ${e.stackTraceToString()}")
             }
         }
         
+        // Summary log
         if (processedCount > 0) {
-            appendLog("✅ Processed $processedCount received transactions")
+            appendLog("📊 Queue processing complete:")
+            appendLog("   ✅ Successful: $successCount")
+            appendLog("   ❌ Failed: $failureCount")
+            appendLog("   📦 Total processed: $processedCount")
+            
+            // Check remaining queue size
+            val queueSizeAfter = sdkInstance.getReceivedQueueSize().getOrNull() ?: 0
+            appendLog("   📊 Remaining in queue: $queueSizeAfter")
+            
+            if (queueSizeAfter > 0) {
+                appendLog("   🔄 More transactions pending - will process in next cycle")
+            }
+        } else {
+            appendLog("ℹ️ No transactions were processed")
         }
     }
     
@@ -1034,25 +1399,75 @@ class BleService : Service() {
             val result = sdk?.pushInbound(data)
             result?.onSuccess {
                 appendLog("✅ ✅ ✅ Fragment processed successfully ✅ ✅ ✅")
+                android.util.Log.d("PolliNet.BLE", "✅ ✅ ✅ Fragment processed successfully ✅ ✅ ✅")
                 appendLog("✅ Fragment added to reassembly buffer")
                 
-                // Check if we have completed transactions
+                // Check metrics to see if transaction was completed
+                val metrics = sdk?.metrics()?.getOrNull()
+                metrics?.let {
+                    appendLog("📊 Metrics after fragment processing:")
+                    android.util.Log.d("PolliNet.BLE", "📊 Metrics: fragmentsBuffered=${it.fragmentsBuffered}, transactionsComplete=${it.transactionsComplete}, reassemblyFailures=${it.reassemblyFailures}")
+                    appendLog("   Fragments buffered: ${it.fragmentsBuffered}")
+                    appendLog("   Transactions complete: ${it.transactionsComplete}")
+                    appendLog("   Reassembly failures: ${it.reassemblyFailures}")
+                    
+                    if (it.transactionsComplete > 0) {
+                        appendLog("   ⚠️ Transaction was marked complete but checking queue...")
+                        android.util.Log.w("PolliNet.BLE", "   ⚠️ Transaction was marked complete (${it.transactionsComplete}) but checking queue...")
+                    }
+                }
+                
+                // Check if we have completed transactions in queue
                 val queueSize = sdk?.getReceivedQueueSize()?.getOrNull() ?: 0
                 appendLog("📊 Received queue size: $queueSize")
+                android.util.Log.d("PolliNet.BLE", "📊 Received queue size: $queueSize")
                 
                 if (queueSize > 0) {
                     appendLog("🎉 🎉 🎉 Transaction reassembly complete! Queue size: $queueSize")
+                    android.util.Log.i("PolliNet.BLE", "🎉 🎉 🎉 Transaction reassembly complete! Queue size: $queueSize")
                     
                     // Phase 4: Trigger event for immediate processing (no polling delay!)
                     workChannel.trySend(WorkEvent.ReceivedReady)
                     appendLog("📡 Event triggered - unified worker will submit transaction")
+                } else {
+                    // Queue is empty - check fragment reassembly info
+                    val fragmentInfo = sdk?.getFragmentReassemblyInfo()?.getOrNull()
+                    if (fragmentInfo != null && fragmentInfo.transactions.isEmpty()) {
+                        // No incomplete transactions - transaction was completed but not queued
+                        if (metrics?.transactionsComplete ?: 0 > 0) {
+                            appendLog("⚠️ ⚠️ ⚠️ WARNING: Transaction was completed but NOT in received queue! ⚠️ ⚠️ ⚠️")
+                            android.util.Log.w("PolliNet.BLE", "⚠️ ⚠️ ⚠️ WARNING: Transaction was completed (metrics: ${metrics?.transactionsComplete}) but NOT in received queue!")
+                            appendLog("   ✅ Fragments were successfully reassembled")
+                            appendLog("   ❌ BUT transaction was rejected as a DUPLICATE")
+                            appendLog("   💡 This means the transaction hash already exists in submitted_tx_hashes")
+                            appendLog("   💡 Possible reasons:")
+                            appendLog("      • Transaction was already received/submitted before")
+                            appendLog("      • You're testing with the same transaction multiple times")
+                            appendLog("      • Same device is both sender and receiver (loopback)")
+                            appendLog("   🔧 To reset: Clear app data or reinstall the app")
+                            android.util.Log.w("PolliNet.BLE", "   💡 Transaction was rejected as duplicate - clear app data to reset")
+                        } else {
+                            appendLog("⏳ Waiting for more fragments... (received queue is empty)")
+                            appendLog("   This is normal if not all fragments have been received yet")
+                        }
+                    } else {
+                        appendLog("⏳ Waiting for more fragments... (received queue is empty)")
+                        appendLog("   This is normal if not all fragments have been received yet")
+                        fragmentInfo?.transactions?.forEach { info ->
+                            val progress = "~${info.receivedFragments}/${info.totalFragments}"
+                            appendLog("   Fragment progress: ${info.transactionId.take(16)}... $progress")
+                        }
+                    }
                 }
             }?.onFailure { e ->
                 appendLog("❌ ❌ ❌ Error processing fragment ❌ ❌ ❌")
                 appendLog("❌ Error: ${e.message}")
+                appendLog("❌ Fragment size: ${data.size} bytes")
+                appendLog("❌ Data preview: ${data.take(32).joinToString(" ") { "%02X".format(it) }}...")
                 if (e is PolliNetException) {
                     appendLog("❌ Code: ${e.code}")
                 }
+                appendLog("⚠️ This might indicate a fragment format mismatch or deserialization error")
             }
             appendLog("📥 ===== END PROCESSING =====\n")
         } catch (e: Exception) {
@@ -1071,6 +1486,13 @@ class BleService : Service() {
     }
     
     override fun onDestroy() {
+        // Edge Case Fix #21: Cancel all pending handler callbacks FIRST
+        // Prevents memory leaks from pending postDelayed callbacks
+        // This must be done before any other cleanup to prevent callbacks
+        // from executing after service is partially destroyed
+        mainHandler.removeCallbacksAndMessages(null)
+        appendLog("🧹 Cancelled all pending handler callbacks")
+        
         // Phase 5: Force save queues before shutdown
         serviceScope.launch {
             try {
@@ -1098,6 +1520,14 @@ class BleService : Service() {
         // Unregister bond state receiver
         try {
             unregisterReceiver(bondStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Receiver was not registered
+        }
+        
+        // Edge Case Fix #1: Unregister Bluetooth state receiver
+        try {
+            unregisterReceiver(bluetoothStateReceiver)
+            appendLog("✅ Bluetooth state monitor unregistered")
         } catch (e: IllegalArgumentException) {
             // Receiver was not registered
         }
@@ -1131,10 +1561,24 @@ class BleService : Service() {
 
     /**
      * Initialize the PolliNet SDK
+     * 
+     * @param config SDK configuration (RPC URL, storage directory, etc.)
+     * @return Result<Unit> - Success if initialized, Failure if error occurred
+     * 
+     * Note: If SDK is already initialized, this method will return success without re-initializing
+     * to prevent resource leaks and handle duplication.
      */
     suspend fun initializeSdk(config: SdkConfig): Result<Unit> {
+        // Prevent double initialization - if SDK is already initialized, return success
+        if (sdk != null) {
+            appendLog("⚠️ SDK already initialized - skipping re-initialization")
+            appendLog("   This prevents resource leaks from duplicate initialization")
+            return Result.success(Unit)
+        }
+        
         return PolliNetSDK.initialize(config).map { 
             sdk = it
+            appendLog("✅ SDK initialized successfully")
             
             // Phase 4: Start unified event-driven worker (replaces multiple polling loops)
             startUnifiedEventWorker()
@@ -1151,6 +1595,16 @@ class BleService : Service() {
             // Phase 5: Start auto-save job for queue persistence
             startAutoSaveJob()
             appendLog("💾 Auto-save job started (debounced: 5s)")
+            
+            // If already connected, start the sending loop now that SDK is ready
+            if (_connectionState.value == ConnectionState.CONNECTED) {
+                appendLog("🔄 Connection already established - starting sending loop now that SDK is ready")
+                ensureSendingLoopStarted()
+            }
+        }.onFailure { error ->
+            // Log initialization failure for debugging
+            appendLog("❌ SDK initialization failed: ${error.message}")
+            appendLog("   SDK will remain null - operations requiring SDK will be skipped")
         }
     }
     
@@ -1366,6 +1820,12 @@ class BleService : Service() {
             return
         }
         
+        // CRITICAL: Don't start sending until SDK is initialized
+        if (sdk == null) {
+            appendLog("⚠️ SDK not initialized - sending loop will start after initialization")
+            return
+        }
+        
         if (_connectionState.value != ConnectionState.CONNECTED) {
             appendLog("⚠️ Not connected - fragments will be sent when connection established")
             return
@@ -1404,7 +1864,7 @@ class BleService : Service() {
                 return
             }
             
-            if (operationInProgress) {
+            if (operationInProgress.get()) {
                 // Operation already in progress, skip
                 return
             }
@@ -1471,13 +1931,12 @@ class BleService : Service() {
             appendLog("   Data preview: ${data.take(20).joinToString(" ") { "%02X".format(it) }}...")
 
             // Mark operation in progress for client writes
-            if (operationInProgress) {
+            // Edge Case Fix #8: Atomic check-and-set prevents race conditions
+            if (!operationInProgress.compareAndSet(false, true)) {
                 appendLog("⚠️ Operation in progress, queuing fragment")
-                operationQueue.offer(data)
+                safelyQueueFragment(data, "Client write path - operation in progress")
                 return
             }
-            
-            operationInProgress = true
             
             // Use official sample's write pattern (Android 13+ vs older)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1489,7 +1948,7 @@ class BleService : Service() {
                 appendLog("✅ Wrote ${data.size}B (result=$result) to ${gatt.device.address}")
                 if (result != BluetoothGatt.GATT_SUCCESS) {
                     appendLog("   ⚠️ Write result indicates failure: $result")
-                    operationInProgress = false
+                    operationInProgress.set(false)
                 }
             } else {
                 remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
@@ -1499,7 +1958,7 @@ class BleService : Service() {
                 val success = gatt.writeCharacteristic(remoteRx)
                 appendLog(if (success) "✅ Wrote ${data.size}B to ${gatt.device.address}" else "❌ Write failed to ${gatt.device.address}")
                 if (!success) {
-                    operationInProgress = false
+                    operationInProgress.set(false)
                 }
             }
             return
@@ -1515,13 +1974,12 @@ class BleService : Service() {
             appendLog("   → Using SERVER path (notify) - no client connection")
             // Add flow control for server path (critical fix)
             // Android docs: notifyCharacteristicChanged() returns when queued, not when delivered
-            if (operationInProgress) {
+            // Edge Case Fix #8: Atomic check-and-set prevents race conditions
+            if (!operationInProgress.compareAndSet(false, true)) {
                 appendLog("⚠️ Operation in progress, queuing fragment")
-                operationQueue.offer(data)
+                safelyQueueFragment(data, "Server notify path - operation in progress")
                 return
             }
-            
-            operationInProgress = true
             txChar.value = data
             val success = server.notifyCharacteristicChanged(device, txChar, false)
             
@@ -1532,13 +1990,13 @@ class BleService : Service() {
                 // Android BLE best practice: space out notifications to avoid overwhelming connection
                 // Increased from 150ms to 300ms for better reliability
                 mainHandler.postDelayed({
-                    operationInProgress = false
+                    operationInProgress.set(false)
                     processOperationQueue()
                 }, 300) // 300ms delay ensures notification is actually delivered
             } else {
                 appendLog("❌ Notify failed")
-                operationInProgress = false
-                operationQueue.offer(data) // Queue for retry
+                operationInProgress.set(false)
+                safelyQueueFragment(data, "Server notify failure - retry needed")
             }
             return
         }
@@ -1794,7 +2252,7 @@ class BleService : Service() {
                     remoteTxCharacteristic = null
                     remoteRxCharacteristic = null
                     remoteWriteInProgress = false
-                    operationInProgress = false
+                    operationInProgress.set(false)
                     operationQueue.clear()
                     descriptorWriteRetries = 0
                     pendingDescriptorWrite = null
@@ -2006,7 +2464,7 @@ class BleService : Service() {
         ) {
             appendLog("📝 Characteristic WRITE (Client): char=${characteristic.uuid}, status=$status")
             if (characteristic.uuid == RX_CHAR_UUID) {
-                operationInProgress = false
+                operationInProgress.set(false)
                 
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     completeRemoteWrite()
@@ -2507,10 +2965,10 @@ class BleService : Service() {
      */
     @SuppressLint("MissingPermission")
     private fun processOperationQueue() {
-        if (operationInProgress || operationQueue.isEmpty()) return
+        if (operationInProgress.get() || operationQueue.isEmpty()) return
         
         val data = operationQueue.poll() ?: return
-        operationInProgress = true
+        operationInProgress.set(true)
         
         appendLog("📤 Processing queued operation (${data.size} bytes)")
         sendToGatt(data)

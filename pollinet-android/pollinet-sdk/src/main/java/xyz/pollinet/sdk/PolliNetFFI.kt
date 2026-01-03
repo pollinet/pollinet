@@ -274,6 +274,13 @@ object PolliNetFFI {
     external fun getReceivedQueueSize(handle: Long): String
     
     /**
+     * Get fragment reassembly info for all incomplete transactions
+     * @param handle SDK handle
+     * @return JSON FfiResult with FragmentReassemblyInfoList
+     */
+    external fun getFragmentReassemblyInfo(handle: Long): String
+    
+    /**
      * Mark a transaction as successfully submitted (for deduplication)
      * @param handle SDK handle
      * @param transactionBytes Submitted transaction bytes
