@@ -728,10 +728,14 @@ class BleService : Service() {
                     
                     when (event) {
                         WorkEvent.OutboundReady -> {
-                            appendLog("📤 Event: OutboundReady")
+                            appendLog("📤 Event: OutboundReady (sending loop handles transmission)")
                             eventCount++
                             lastEventTime = System.currentTimeMillis()
-                            processOutboundQueue()
+                            // DISABLED: processOutboundQueue() was redundant - sending loop handles transmission via nextOutbound()
+                            // The sending loop (started by ensureSendingLoopStarted()) already reads fragments from the queue
+                            // and sends them via sendNextOutbound() -> nextOutbound() -> sendToGatt()
+                            // processOutboundQueue() was only logging "Would transmit" without actually sending
+                            // processOutboundQueue()
                         }
                         WorkEvent.ReceivedReady -> {
                             appendLog("📥 Event: ReceivedReady")

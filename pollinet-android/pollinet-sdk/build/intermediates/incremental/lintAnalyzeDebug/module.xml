@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk"
+    name=":pollinet-sdk"
+    type="LIBRARY"
+    maven="pollinet-android:pollinet-sdk:unspecified"
+    agpVersion="8.12.3"
+    buildFolder="build"
+    bootClassPath="/Users/oghenekparoboreminokanju/Library/Android/sdk/platforms/android-36/android.jar:/Users/oghenekparoboreminokanju/Library/Android/sdk/build-tools/35.0.0/core-lambda-stubs.jar"
+    javaSourceLevel="11"
+    compileTarget="android-36"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="debug"/>
+</lint-module>

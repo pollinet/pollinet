@@ -29,3 +29,6 @@ Thumbs.db
 
 # Optional: if you use Clippy lints cache
 .clippy/
+
+
+docs/

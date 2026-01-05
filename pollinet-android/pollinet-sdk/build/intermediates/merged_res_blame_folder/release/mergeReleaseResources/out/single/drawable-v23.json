@@ -1,26 +1,26 @@
 [
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-v23/mtrl_popupmenu_background_overlay.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/drawable-v23/mtrl_popupmenu_background_overlay.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/drawable-v23/abc_control_background_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/drawable-v23/abc_control_background_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-v23/m3_tabs_transparent_background.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/drawable-v23/m3_tabs_transparent_background.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/drawable-v23/m3_radiobutton_ripple.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/drawable-v23/m3_radiobutton_ripple.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-v23/m3_tabs_background.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/drawable-v23/m3_tabs_background.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/drawable-v23/m3_selection_control_ripple.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/drawable-v23/m3_selection_control_ripple.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-v23/m3_radiobutton_ripple.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/drawable-v23/m3_radiobutton_ripple.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/drawable-v23/m3_tabs_background.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/drawable-v23/m3_tabs_background.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-v23/m3_selection_control_ripple.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/drawable-v23/m3_selection_control_ripple.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/drawable-v23/mtrl_popupmenu_background_overlay.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/drawable-v23/mtrl_popupmenu_background_overlay.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/drawable-v23/abc_control_background_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/drawable-v23/abc_control_background_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/drawable-v23/m3_tabs_transparent_background.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/drawable-v23/m3_tabs_transparent_background.xml"
     }
 ]

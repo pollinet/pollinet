@@ -1,42 +1,42 @@
 [
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_emphasized.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_emphasized.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/mtrl_fast_out_slow_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/mtrl_fast_out_slow_in.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_emphasized_decelerate.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_emphasized_decelerate.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_linear.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_linear.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_emphasized_accelerate.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_emphasized_accelerate.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_emphasized_decelerate.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_emphasized_decelerate.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/mtrl_linear_out_slow_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/mtrl_linear_out_slow_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/mtrl_linear_out_slow_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/mtrl_linear_out_slow_in.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_standard_accelerate.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_standard_accelerate.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/mtrl_fast_out_linear_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/mtrl_fast_out_linear_in.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/mtrl_fast_out_linear_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/mtrl_fast_out_linear_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_standard.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_standard.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/mtrl_fast_out_slow_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/mtrl_fast_out_slow_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_emphasized_accelerate.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_emphasized_accelerate.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_standard_decelerate.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_standard_decelerate.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_emphasized.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_emphasized.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_linear.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_linear.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_standard_accelerate.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_standard_accelerate.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/interpolator-v21/m3_sys_motion_easing_standard.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/interpolator-v21/m3_sys_motion_easing_standard.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/interpolator-v21/m3_sys_motion_easing_standard_decelerate.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/interpolator-v21/m3_sys_motion_easing_standard_decelerate.xml"
     }
 ]

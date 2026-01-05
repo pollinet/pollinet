@@ -1,46 +1,46 @@
 [
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/m3_side_sheet_exit_to_left.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/m3_side_sheet_exit_to_left.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/mtrl_bottom_sheet_slide_out.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/mtrl_bottom_sheet_slide_out.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/m3_bottom_sheet_slide_out.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/m3_bottom_sheet_slide_out.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/m3_side_sheet_exit_to_left.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/m3_side_sheet_exit_to_left.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/mtrl_bottom_sheet_slide_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/mtrl_bottom_sheet_slide_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/fragment_fast_out_extra_slow_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-fragment-1.3.6-3:/anim-v21/fragment_fast_out_extra_slow_in.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/mtrl_bottom_sheet_slide_out.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/mtrl_bottom_sheet_slide_out.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/m3_bottom_sheet_slide_out.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/m3_bottom_sheet_slide_out.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/design_bottom_sheet_slide_out.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/design_bottom_sheet_slide_out.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/mtrl_bottom_sheet_slide_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/mtrl_bottom_sheet_slide_in.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/m3_bottom_sheet_slide_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/m3_bottom_sheet_slide_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/m3_side_sheet_exit_to_right.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/m3_side_sheet_exit_to_right.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/m3_side_sheet_exit_to_right.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/m3_side_sheet_exit_to_right.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/design_bottom_sheet_slide_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/design_bottom_sheet_slide_in.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/design_bottom_sheet_slide_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/design_bottom_sheet_slide_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/m3_side_sheet_enter_from_left.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/m3_side_sheet_enter_from_left.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/m3_side_sheet_enter_from_left.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/m3_side_sheet_enter_from_left.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/design_bottom_sheet_slide_out.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/design_bottom_sheet_slide_out.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/m3_side_sheet_enter_from_right.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/anim-v21/m3_side_sheet_enter_from_right.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/m3_side_sheet_enter_from_right.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/m3_side_sheet_enter_from_right.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/anim-v21/fragment_fast_out_extra_slow_in.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-fragment-1.3.6-2:/anim-v21/fragment_fast_out_extra_slow_in.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/anim-v21/m3_bottom_sheet_slide_in.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/anim-v21/m3_bottom_sheet_slide_in.xml"
     }
 ]

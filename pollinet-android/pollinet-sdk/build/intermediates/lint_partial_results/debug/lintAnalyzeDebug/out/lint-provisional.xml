@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.12.3" type="conditional_incidents">
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="202"
+            column="29"
+            startOffset="9221"
+            endLine="202"
+            endColumn="50"
+            endOffset="9242"/>
+    </incident>
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="212"
+            column="37"
+            startOffset="9785"
+            endLine="212"
+            endColumn="101"
+            endOffset="9849"/>
+    </incident>
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="216"
+            column="41"
+            startOffset="10137"
+            endLine="216"
+            endColumn="73"
+            endOffset="10169"/>
+    </incident>
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="">
+        <fix-data missing="android.permission.ACCESS_NETWORK_STATE" message="Missing permissions required by ConnectivityManager.registerNetworkCallback: %1$s" lastApi="2147483647" operator="&amp;"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="1236"
+            column="13"
+            startOffset="60846"
+            endLine="1236"
+            endColumn="91"
+            endOffset="60924"/>
+        <map>
+            <entry
+                name="message"
+                string="Missing permissions required by ConnectivityManager.registerNetworkCallback: %1$s"/>
+            <entry
+                name="requirement"
+                string="android.permission.ACCESS_NETWORK_STATE"/>
+        </map>
+    </incident>
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="1543"
+            column="9"
+            startOffset="76080"
+            endLine="1543"
+            endColumn="28"
+            endOffset="76099"/>
+    </incident>
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="2334"
+            column="35"
+            startOffset="112152"
+            endLine="2334"
+            endColumn="58"
+            endOffset="112175"/>
+    </incident>
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="2850"
+            column="13"
+            startOffset="138243"
+            endLine="2850"
+            endColumn="93"
+            endOffset="138323"/>
+    </incident>
+
+    <incident
+        id="UnusedAttribute"
+        severity="warning"
+        message="">
+        <fix-data minSdk="28-∞" requiresApi="31-∞"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*manifest*0}"
+            line="8"
+            column="9"
+            startOffset="386"
+            endLine="8"
+            endColumn="55"
+            endOffset="432"/>
+        <map>
+            <entry
+                name="message"
+                string="Attribute `usesPermissionFlags` is only used in API level 31 and higher (current min is %1$s)"/>
+            <api-levels id="minSdk"
+                value="28-∞"/>
+            <api-levels id="requiresApi"
+                value="31-∞"/>
+        </map>
+    </incident>
+
+</incidents>

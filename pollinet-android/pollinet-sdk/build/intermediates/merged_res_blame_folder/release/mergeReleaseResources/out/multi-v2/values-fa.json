@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "xyz.pollinet.sdk.pollinet-sdk-mergeReleaseResources-29:/values-fa/values-fa.xml",
+            "outputFile": "xyz.pollinet.sdk.pollinet-sdk-mergeReleaseResources-36:/values-fa/values-fa.xml",
             "map": [
                 {
                     "source": "/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/da75f1bf7582e3ec1af584d6f7c262ab/transformed/material-1.11.0/res/values-fa/values-fa.xml",
@@ -59,7 +59,7 @@
             ]
         },
         {
-            "outputFile": "xyz.pollinet.sdk.pollinet-sdk-release-31:/values-fa/values-fa.xml",
+            "outputFile": "xyz.pollinet.sdk.pollinet-sdk-release-38:/values-fa/values-fa.xml",
             "map": [
                 {
                     "source": "/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/da75f1bf7582e3ec1af584d6f7c262ab/transformed/material-1.11.0/res/values-fa/values-fa.xml",

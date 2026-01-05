@@ -1,394 +1,394 @@
 [
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_list_menu_item_radio.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_list_menu_item_radio.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_alert_select_dialog_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_alert_select_dialog_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_header_title_text.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_header_title_text.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_screen_content_include.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_screen_content_include.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_clockface_view.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_clockface_view.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_select_dialog_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_select_dialog_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_search_view.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_search_view.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_months.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_months.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_search_dropdown_item_icons_2line.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_search_dropdown_item_icons_2line.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_menu_item_action_area.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_menu_item_action_area.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_navigation_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_navigation_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_month_navigation.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_month_navigation.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_expanded_menu_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_expanded_menu_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_alert_dialog_button_bar_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_alert_dialog_button_bar_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_text_input_end_icon.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_text_input_end_icon.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_clockface_view.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_clockface_view.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_text_input_date_range.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_text_input_date_range.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/select_dialog_item_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/select_dialog_item_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_tooltip.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_tooltip.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_search_view.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_search_view.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_layout_snackbar.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_layout_snackbar.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_clock_period_toggle.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_clock_period_toggle.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/m3_auto_complete_simple_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/m3_auto_complete_simple_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/notification_template_part_chronometer.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-21:/layout/notification_template_part_chronometer.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_alert_select_dialog_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_alert_select_dialog_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_text_input_date.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_text_input_date.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/m3_alert_dialog_title.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/m3_alert_dialog_title.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_alert_dialog_title_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_alert_dialog_title_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_popup_menu_item_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_popup_menu_item_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_time_input.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_time_input.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_bottom_navigation_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_bottom_navigation_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_header_title_text.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_header_title_text.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_month_navigation.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_month_navigation.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_header_toggle.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_header_toggle.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_clock_display_divider.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_clock_display_divider.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_navigation_item_separator.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_navigation_item_separator.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_timepicker.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_timepicker.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_navigation_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_navigation_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_days_of_week.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_days_of_week.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_clock_display.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_clock_display.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_bottom_sheet_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_bottom_sheet_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_year.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_year.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_layout_snackbar_include.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_layout_snackbar_include.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_clock_display_divider.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_clock_display_divider.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_textinput_timepicker.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_textinput_timepicker.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_dialog_title_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_dialog_title_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_text_input_date.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_text_input_date.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_action_mode_bar.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_action_mode_bar.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_layout_snackbar_include.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_layout_snackbar_include.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_day_of_week.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_day_of_week.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_layout_snackbar.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_layout_snackbar.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_text_input_start_icon.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_text_input_start_icon.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_actions.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_actions.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_bottom_navigation_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_bottom_navigation_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_header_fullscreen.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_header_fullscreen.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_actions.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_actions.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_clock_display.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_clock_display.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_search_bar.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_search_bar.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_radial_view_group.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_radial_view_group.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_text_input_end_icon.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_text_input_end_icon.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_vertical.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_vertical.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_action_mode_close_item_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_action_mode_close_item_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_search_view.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_search_view.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_layout_snackbar.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_layout_snackbar.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/support_simple_spinner_dropdown_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/support_simple_spinner_dropdown_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_activity_chooser_view.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_activity_chooser_view.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_navigation_rail_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_navigation_rail_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_auto_complete_simple_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_auto_complete_simple_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_alert_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_alert_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/support_simple_spinner_dropdown_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/support_simple_spinner_dropdown_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_list_menu_item_checkbox.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_list_menu_item_checkbox.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_layout_snackbar_include.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_layout_snackbar_include.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_cascading_menu_item_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_cascading_menu_item_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_cascading_menu_item_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_cascading_menu_item_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_day.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_day.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_timepicker_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_timepicker_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_auto_complete_simple_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_auto_complete_simple_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_clockface_textview.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_clockface_textview.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_list_menu_item_icon.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_list_menu_item_icon.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_header_selection_text.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_header_selection_text.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/notification_template_part_chronometer.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/layout/notification_template_part_chronometer.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_expanded_menu_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_expanded_menu_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_alert_select_dialog_singlechoice.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_alert_select_dialog_singlechoice.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_navigation_rail_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_navigation_rail_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_alert_dialog_title_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_alert_dialog_title_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_action_menu_item_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_action_menu_item_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_activity_chooser_view_list_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_activity_chooser_view_list_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/m3_side_sheet_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/m3_side_sheet_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_list_menu_item_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_list_menu_item_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/custom_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-21:/layout/custom_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_screen_simple.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_screen_simple.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_list_menu_item_checkbox.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_list_menu_item_checkbox.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_dialog_title_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_dialog_title_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_header_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_header_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/m3_side_sheet_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/m3_side_sheet_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_fullscreen.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_fullscreen.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_action_bar_up_container.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_action_bar_up_container.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_layout_tab_text.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_layout_tab_text.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_alert_dialog_title.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_alert_dialog_title.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_layout_snackbar.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_layout_snackbar.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_menu_item_action_area.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_menu_item_action_area.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/notification_template_part_time.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-21:/layout/notification_template_part_time.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_alert_dialog_button_bar_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_alert_dialog_button_bar_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_search_dropdown_item_icons_2line.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_search_dropdown_item_icons_2line.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_fullscreen.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_fullscreen.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_layout_snackbar_include.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_layout_snackbar_include.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_header_toggle.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_header_toggle.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_alert_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_alert_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_clock_period_toggle.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_clock_period_toggle.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_screen_simple_overlay_action_mode.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_screen_simple_overlay_action_mode.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_timepicker_textinput_display.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_timepicker_textinput_display.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_chip_input_combo.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_chip_input_combo.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_action_mode_close_item_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_action_mode_close_item_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_navigation_menu_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_navigation_menu_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/m3_alert_dialog_actions.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/m3_alert_dialog_actions.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_time_chip.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_time_chip.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/m3_alert_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/m3_alert_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_navigation_menu.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_navigation_menu.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/m3_auto_complete_simple_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/m3_auto_complete_simple_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_alert_dialog_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_alert_dialog_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_textinput_timepicker.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_textinput_timepicker.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_layout_tab_text.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_layout_tab_text.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_search_view.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_search_view.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_select_dialog_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_select_dialog_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_action_bar_up_container.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_action_bar_up_container.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_text_input_start_icon.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_text_input_start_icon.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/select_dialog_singlechoice_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/select_dialog_singlechoice_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/custom_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/layout/custom_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_alert_dialog_title.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_alert_dialog_title.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_search_bar.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_search_bar.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_alert_select_dialog_multichoice.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_alert_select_dialog_multichoice.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/select_dialog_singlechoice_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/select_dialog_singlechoice_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_month_labeled.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_month_labeled.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_year.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_year.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_vertical.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_vertical.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_popup_menu_header_item_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_popup_menu_header_item_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_days_of_week.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_days_of_week.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_month_labeled.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_month_labeled.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_navigation_menu_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_navigation_menu_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/m3_alert_dialog_actions.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/m3_alert_dialog_actions.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_day_of_week.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_day_of_week.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_popup_menu_item_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_popup_menu_item_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_activity_chooser_view.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_activity_chooser_view.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_header_fullscreen.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_header_fullscreen.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_horizontal.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_horizontal.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_picker_text_input_date_range.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_picker_text_input_date_range.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_header_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_header_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_timepicker_textinput_display.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_timepicker_textinput_display.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_action_menu_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_action_menu_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_list_menu_item_radio.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_list_menu_item_radio.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_layout_tab_icon.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_layout_tab_icon.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_navigation_item_header.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_navigation_item_header.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_timepicker_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_timepicker_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_day.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_day.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_clockface_textview.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_clockface_textview.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_alert_dialog_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_alert_dialog_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/m3_alert_dialog.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/m3_alert_dialog.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_navigation_item_subheader.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_navigation_item_subheader.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_screen_simple_overlay_action_mode.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_screen_simple_overlay_action_mode.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_popup_menu_header_item_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_popup_menu_header_item_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_time_chip.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_time_chip.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/m3_alert_dialog_title.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/m3_alert_dialog_title.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_navigation_item_subheader.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_navigation_item_subheader.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_bottom_sheet_dialog.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_bottom_sheet_dialog.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/select_dialog_multichoice_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/select_dialog_multichoice_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_list_menu_item_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_list_menu_item_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_action_menu_item_layout.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_action_menu_item_layout.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_action_menu_layout.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_action_menu_layout.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_time_input.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_time_input.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_layout_tab_icon.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_layout_tab_icon.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_picker_header_selection_text.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_picker_header_selection_text.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_list_menu_item_icon.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_list_menu_item_icon.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_navigation_item_header.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_navigation_item_header.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_alert_dialog_actions.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_alert_dialog_actions.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_alert_select_dialog_multichoice.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_alert_select_dialog_multichoice.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_radial_view_group.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_radial_view_group.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_calendar_months.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_calendar_months.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/select_dialog_multichoice_material.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/select_dialog_multichoice_material.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/select_dialog_item_material.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/select_dialog_item_material.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/material_timepicker.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/material_timepicker.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_action_bar_title_item.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_action_bar_title_item.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_tooltip.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_tooltip.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/notification_template_part_time.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-core-1.10.1-18:/layout/notification_template_part_time.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_activity_chooser_view_list_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_activity_chooser_view_list_item.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/design_navigation_item_separator.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/design_navigation_item_separator.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_alert_select_dialog_singlechoice.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_alert_select_dialog_singlechoice.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/mtrl_alert_dialog_actions.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/mtrl_alert_dialog_actions.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/design_navigation_menu.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/design_navigation_menu.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/material_chip_input_combo.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-23:/layout/material_chip_input_combo.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/mtrl_calendar_horizontal.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-material-1.11.0-29:/layout/mtrl_calendar_horizontal.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_action_mode_bar.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_action_mode_bar.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_screen_simple.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_screen_simple.xml"
     },
     {
-        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-31:/layout/abc_screen_content_include.xml",
-        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-7:/layout/abc_screen_content_include.xml"
+        "merged": "xyz.pollinet.sdk.pollinet-sdk-release-38:/layout/abc_action_bar_title_item.xml",
+        "source": "xyz.pollinet.sdk.pollinet-sdk-appcompat-1.6.1-8:/layout/abc_action_bar_title_item.xml"
     }
 ]

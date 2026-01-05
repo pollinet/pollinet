@@ -4,8 +4,9 @@
 //! drives BLE operations, and Rust only handles packetization, reassembly, and
 //! protocol state.
 
-use crate::transaction::{Fragment as TxFragment, FragmentType, TransactionService};
+use crate::transaction::TransactionService;
 use crate::ble::MeshHealthMonitor;
+use crate::ble::mesh::TransactionFragment;
 use crate::storage::SecureStorage;
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
@@ -22,7 +23,7 @@ pub struct HostBleTransport {
     outbound_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
     
     /// Inbound reassembly buffers keyed by transaction ID
-    inbound_buffers: Arc<Mutex<HashMap<String, Vec<TxFragment>>>>,
+    inbound_buffers: Arc<Mutex<HashMap<String, Vec<TransactionFragment>>>>,
     
     /// Completed transactions ready for processing
     completed_transactions: Arc<Mutex<VecDeque<(String, Vec<u8>)>>>,
@@ -139,7 +140,6 @@ impl HostBleTransport {
         tracing::info!("📥 push_inbound() called with {} bytes", data.len());
         
         // Deserialize the mesh fragment using bincode1 (matching outbound serialization)
-        use crate::ble::mesh::TransactionFragment;
         use crate::ble::fragmenter::reconstruct_transaction;
         
         tracing::debug!("🔓 Deserializing fragment from binary data...");
@@ -165,27 +165,10 @@ impl HostBleTransport {
         
         let mut buffers = self.inbound_buffers.lock();
         
-        // IMPORTANT: We need to store the mesh TransactionFragment, not TxFragment
-        // So we need to change the inbound_buffers type
-        // For now, let's convert it to a temporary structure
-        let tx_fragment = TxFragment {
-            id: tx_id.clone(),
-            index: fragment.fragment_index as usize,
-            total: fragment.total_fragments as usize,
-            data: fragment.data.clone(),
-            fragment_type: if fragment.fragment_index == 0 {
-                crate::transaction::FragmentType::FragmentStart
-            } else if fragment.fragment_index == fragment.total_fragments - 1 {
-                crate::transaction::FragmentType::FragmentEnd
-            } else {
-                crate::transaction::FragmentType::FragmentContinue
-            },
-            checksum: fragment.transaction_id,
-        };
-        
+        // Store TransactionFragment directly (no conversion needed)
         let buffer = buffers.entry(tx_id.clone()).or_insert_with(Vec::new);
         let buffer_size_before = buffer.len();
-        buffer.push(tx_fragment.clone());
+        buffer.push(fragment.clone());
         let buffer_size_after = buffer.len();
         
         tracing::debug!("📦 Added fragment to buffer for tx {} (buffer size: {} → {})", 
@@ -228,16 +211,11 @@ impl HostBleTransport {
         if let Some(fragments) = fragments_to_reassemble {
             tracing::info!("🔧 Starting reassembly for tx {} with {} fragments", tx_id, fragments.len());
             
-            // Convert TxFragments back to mesh TransactionFragments for reassembly
-            tracing::debug!("🔄 Converting {} TxFragments to mesh TransactionFragments...", fragments.len());
-            let mesh_fragments: Vec<TransactionFragment> = fragments.iter().map(|f| TransactionFragment {
-                transaction_id: f.checksum,
-                fragment_index: f.index as u16,
-                total_fragments: f.total as u16,
-                data: f.data.clone(),
-            }).collect();
+            // Fragments are already TransactionFragment - sort by index and use directly
+            let mut mesh_fragments = fragments;
+            mesh_fragments.sort_by_key(|f| f.fragment_index);
             
-            tracing::debug!("✅ Converted to {} mesh fragments, calling reconstruct_transaction()...", mesh_fragments.len());
+            tracing::debug!("✅ Using {} TransactionFragments directly, calling reconstruct_transaction()...", mesh_fragments.len());
             
             // Try to reassemble using mesh fragmenter
             match reconstruct_transaction(&mesh_fragments) {
@@ -465,7 +443,7 @@ impl HostBleTransport {
         
         use sha2::{Sha256, Digest};
         
-        // Calculate transaction hash for deduplication
+        // Calculate transaction hash for logging/identification
         tracing::debug!("🔐 Calculating SHA-256 hash for transaction...");
         let mut hasher = Sha256::new();
         hasher.update(&tx_bytes);
@@ -475,35 +453,16 @@ impl HostBleTransport {
             tx_hash_hex.chars().take(32).collect::<String>(), 
             tx_hash.len());
         
-        tracing::debug!("🔍 Checking if transaction {} is duplicate...", tx_hash_hex.chars().take(16).collect::<String>());
-        
-        // COMMENTED OUT: Check if already submitted (duplicate detection disabled for testing)
-        let mut submitted = self.submitted_tx_hashes.lock();
-        let submitted_count_before = submitted.len();
-        tracing::debug!("📊 Submitted transactions cache size: {}", submitted_count_before);
-        
-        if submitted.contains_key(&tx_hash) {
-            let submitted_at = submitted.get(&tx_hash).copied().unwrap_or(0);
-            tracing::warn!("⏩ Skipping duplicate transaction {} (submitted at timestamp {})", 
-                tx_hash_hex.chars().take(16).collect::<String>(), submitted_at);
-            drop(submitted);
-            tracing::info!("❌ push_received_transaction() returning false (duplicate detected)");
-            return false;
-        }
-        
-        tracing::debug!("✅ Transaction is not a duplicate, proceeding...");
-        
-        // Add to submitted set with current timestamp
+        // No duplicate check - all reassembled transactions are queued
         let now = Self::current_timestamp();
-        tracing::debug!("⏰ Current timestamp: {}", now);
-        submitted.insert(tx_hash.clone(), now);
-        let submitted_count_after = submitted.len();
-        drop(submitted);
-        tracing::debug!("✅ Added transaction hash to submitted set (cache size: {} -> {})", 
-            submitted_count_before, submitted_count_after);
+        tracing::debug!("📥 Processing transaction {} (no duplicate check)", 
+            tx_hash_hex.chars().take(16).collect::<String>());
         
         // Generate transaction ID
         let tx_id = uuid::Uuid::new_v4().to_string();
+        #[cfg(feature = "android")]
+        log::debug!("🆔 Generated transaction ID: {}", tx_id);
+        #[cfg(not(feature = "android"))]
         tracing::debug!("🆔 Generated transaction ID: {}", tx_id);
         
         // Add to received queue
@@ -566,12 +525,12 @@ impl HostBleTransport {
             }
             
             // Get total fragments from first fragment
-            let total_fragments = fragments.first().map(|f| f.total).unwrap_or(0);
+            let total_fragments = fragments.first().map(|f| f.total_fragments as usize).unwrap_or(0);
             let received_count = fragments.len();
             
             // Get received fragment indices
             let received_indices: Vec<usize> = fragments.iter()
-                .map(|f| f.index)
+                .map(|f| f.fragment_index as usize)
                 .collect();
             
             // Get fragment sizes
