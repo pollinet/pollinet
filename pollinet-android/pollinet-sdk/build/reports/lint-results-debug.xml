@@ -12,7 +12,7 @@
         errorLine1="                            clientGatt?.connect()"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="202"
             column="29"/>
     </issue>
@@ -28,7 +28,7 @@
         errorLine1="                                    gatt.setCharacteristicNotification(remoteTxCharacteristic, true)"
         errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="212"
             column="37"/>
     </issue>
@@ -44,7 +44,7 @@
         errorLine1="                                        gatt.writeDescriptor(descriptor)"
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="216"
             column="41"/>
     </issue>
@@ -60,7 +60,7 @@
         errorLine1="            connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="1236"
             column="13"/>
     </issue>
@@ -76,7 +76,7 @@
         errorLine1="        gattServer?.close()"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="1543"
             column="9"/>
     </issue>
@@ -92,7 +92,7 @@
         errorLine1="            val discoverSuccess = gatt.discoverServices()"
         errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="2334"
             column="35"/>
     </issue>
@@ -108,7 +108,7 @@
         errorLine1="            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="2850"
             column="13"/>
     </issue>
@@ -124,7 +124,7 @@
         errorLine1="        android:usesPermissionFlags=&quot;neverForLocation&quot; />"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml"
             line="8"
             column="9"/>
     </issue>
@@ -140,8 +140,8 @@
         errorLine1="    implementation(&quot;androidx.work:work-runtime-ktx:2.9.0&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="63"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="70"
             column="20"/>
     </issue>
 
@@ -156,8 +156,8 @@
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="56"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="63"
             column="20"/>
     </issue>
 
@@ -172,8 +172,8 @@
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="57"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="64"
             column="20"/>
     </issue>
 
@@ -188,8 +188,8 @@
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="60"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="67"
             column="20"/>
     </issue>
 
@@ -204,8 +204,8 @@
         errorLine1="    implementation(&quot;net.java.dev.jna:jna:5.14.0@aar&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="66"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="73"
             column="20"/>
     </issue>
 
@@ -222,8 +222,8 @@
         errorLine1="    implementation(&quot;net.java.dev.jna:jna:5.14.0@aar&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="66"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="73"
             column="20"/>
     </issue>
 
@@ -238,7 +238,7 @@
         url="https://developer.android.com/guide/practices/page-sizes"
         urls="https://developer.android.com/guide/practices/page-sizes">
         <location
-            file="/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so"/>
+            file="/home/oghenekparob_r/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so"/>
     </issue>
 
     <issue
@@ -252,7 +252,7 @@
         url="https://developer.android.com/guide/practices/page-sizes"
         urls="https://developer.android.com/guide/practices/page-sizes">
         <location
-            file="/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so"/>
+            file="/home/oghenekparob_r/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so"/>
     </issue>
 
     <issue
@@ -268,7 +268,7 @@
         errorLine1="            val myAddress = bluetoothAdapter?.address ?: &quot;00:00:00:00:00:00&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="2141"
             column="29"/>
     </issue>
@@ -284,7 +284,7 @@
         errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
             line="2895"
             column="13"/>
     </issue>
@@ -300,7 +300,7 @@
         errorLine1="                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt"
             line="33"
             column="17"/>
     </issue>
@@ -316,7 +316,7 @@
         errorLine1="                if (useStrongBox &amp;&amp; android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {"
         errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt"
             line="79"
             column="37"/>
     </issue>
@@ -332,8 +332,8 @@
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="56"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="63"
             column="20"/>
     </issue>
 
@@ -348,8 +348,8 @@
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="57"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="64"
             column="20"/>
     </issue>
 
@@ -364,8 +364,8 @@
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="60"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="67"
             column="20"/>
     </issue>
 
@@ -380,8 +380,8 @@
         errorLine1="    implementation(&quot;androidx.work:work-runtime-ktx:2.9.0&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="63"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="70"
             column="20"/>
     </issue>
 
@@ -396,8 +396,8 @@
         errorLine1="    implementation(&quot;net.java.dev.jna:jna:5.14.0@aar&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
-            line="66"
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts"
+            line="73"
             column="20"/>
     </issue>
 

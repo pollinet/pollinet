@@ -607,9 +607,17 @@ class PolliNetSDK private constructor(
     suspend fun getReceivedQueueSize(): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val resultJson = PolliNetFFI.getReceivedQueueSize(handle)
+            android.util.Log.d("PolliNetSDK", "🔍 getReceivedQueueSize() - Raw JSON: $resultJson")
             val response = parseResult<QueueSizeResponse>(resultJson)
-            response.map { it.queueSize }
+            response.onFailure { error ->
+                android.util.Log.e("PolliNetSDK", "❌ getReceivedQueueSize() - Parse error: ${error.message}")
+            }
+            response.map { 
+                android.util.Log.d("PolliNetSDK", "✅ getReceivedQueueSize() - Parsed queueSize: ${it.queueSize}")
+                it.queueSize 
+            }
         } catch (e: Exception) {
+            android.util.Log.e("PolliNetSDK", "💥 getReceivedQueueSize() - Exception: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -914,18 +922,24 @@ class PolliNetSDK private constructor(
             if (successResult.ok) {
                 // Handle nullable data field (for Unit return types)
                 @Suppress("UNCHECKED_CAST")
-                val data = successResult.data ?: (Unit as T)
+                val data = successResult.data ?: run {
+                    // If T is nullable, allow null; otherwise return Unit as before
+                    if (null is T) null as T else (Unit as T)
+                }
                 Result.success(data)
             } else {
                 // Shouldn't happen, but handle gracefully
+                android.util.Log.e("PolliNetSDK", "⚠️ parseResult() - Unexpected result format: ok=false")
                 Result.failure(Exception("Unexpected result format"))
             }
         } catch (e: Exception) {
             // Try to parse as error
             try {
                 val errorResult = this.json.decodeFromString<FfiResultError>(json)
+                android.util.Log.e("PolliNetSDK", "❌ parseResult() - FFI error: [${errorResult.code}] ${errorResult.message}")
                 Result.failure(PolliNetException(errorResult.code, errorResult.message))
             } catch (e2: Exception) {
+                android.util.Log.e("PolliNetSDK", "💥 parseResult() - JSON parse failed: ${e.message}\nJSON: $json", e)
                 Result.failure(Exception("Failed to parse FFI result: ${e.message}\nJSON input: $json"))
             }
         }

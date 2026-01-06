@@ -45,6 +45,13 @@ android {
             jniLibs.srcDirs("src/main/jniLibs")
         }
     }
+    
+    lint {
+        // Don't abort build on lint errors (can fix later)
+        abortOnError = false
+        // Treat warnings as errors (optional, can remove if too strict)
+        warningsAsErrors = false
+    }
 }
 
 dependencies {

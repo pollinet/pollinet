@@ -8,7 +8,7 @@
     proguardFiles="build/intermediates/default_proguard_files/global/proguard-android.txt-8.12.3"
     consumerProguardFiles="consumer-rules.pro"
     partialResultsDir="build/intermediates/lint_partial_results/debug/lintAnalyzeDebug/out"
-    desugaredMethodsFiles="/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/b8bbbd787952e3d441c323b54494146f/transformed/D8BackportedDesugaredMethods.txt">
+    desugaredMethodsFiles="/home/oghenekparob_r/.gradle/caches/8.13/transforms/b8bbbd787952e3d441c323b54494146f/transformed/D8BackportedDesugaredMethods.txt">
   <buildFeatures
       namespacing="REQUIRED"/>
   <sourceProviders>
@@ -28,6 +28,6 @@
       applicationId="xyz.pollinet.sdk"
       generatedSourceFolders="build/generated/ap_generated_sources/debug/out"
       generatedResourceFolders="build/generated/res/resValues/debug"
-      desugaredMethodsFiles="/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/b8bbbd787952e3d441c323b54494146f/transformed/D8BackportedDesugaredMethods.txt">
+      desugaredMethodsFiles="/home/oghenekparob_r/.gradle/caches/8.13/transforms/b8bbbd787952e3d441c323b54494146f/transformed/D8BackportedDesugaredMethods.txt">
   </artifact>
 </variant>

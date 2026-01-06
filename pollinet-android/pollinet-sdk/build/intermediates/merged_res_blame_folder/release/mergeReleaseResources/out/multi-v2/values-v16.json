@@ -4,7 +4,7 @@
             "outputFile": "xyz.pollinet.sdk.pollinet-sdk-release-38:/values-v16/values-v16.xml",
             "map": [
                 {
-                    "source": "/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/a2f073e7add60349aadf30744e611a9c/transformed/core-1.10.1/res/values-v16/values-v16.xml",
+                    "source": "/home/oghenekparob_r/.gradle/caches/8.13/transforms/a2f073e7add60349aadf30744e611a9c/transformed/core-1.10.1/res/values-v16/values-v16.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",
@@ -14,7 +14,7 @@
                     }
                 },
                 {
-                    "source": "/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/3410e68594b09856a3c19508d9bab7d3/transformed/appcompat-1.6.1/res/values-v16/values-v16.xml",
+                    "source": "/home/oghenekparob_r/.gradle/caches/8.13/transforms/3410e68594b09856a3c19508d9bab7d3/transformed/appcompat-1.6.1/res/values-v16/values-v16.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",
@@ -38,7 +38,7 @@
             "outputFile": "xyz.pollinet.sdk.pollinet-sdk-mergeReleaseResources-36:/values-v16/values-v16.xml",
             "map": [
                 {
-                    "source": "/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/a2f073e7add60349aadf30744e611a9c/transformed/core-1.10.1/res/values-v16/values-v16.xml",
+                    "source": "/home/oghenekparob_r/.gradle/caches/8.13/transforms/a2f073e7add60349aadf30744e611a9c/transformed/core-1.10.1/res/values-v16/values-v16.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",
@@ -48,7 +48,7 @@
                     }
                 },
                 {
-                    "source": "/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/3410e68594b09856a3c19508d9bab7d3/transformed/appcompat-1.6.1/res/values-v16/values-v16.xml",
+                    "source": "/home/oghenekparob_r/.gradle/caches/8.13/transforms/3410e68594b09856a3c19508d9bab7d3/transformed/appcompat-1.6.1/res/values-v16/values-v16.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",

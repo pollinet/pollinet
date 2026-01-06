@@ -179,7 +179,7 @@ document.getElementById(id).style.display = 'none';
     <div class="mdl-layout__header-row">
       <span class="mdl-layout-title">Lint Report: 7 errors and 18 warnings</span>
       <div class="mdl-layout-spacer"></div>
-      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Mon Jan 05 16:23:45 WAT 2026 by AGP (8.12.3)</nav>
+      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Tue Jan 06 09:32:40 WAT 2026 by AGP (8.12.3)</nav>
     </div>
   </header>
   <div class="mdl-layout__drawer">
@@ -417,14 +417,14 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:63</span>: <span class="message">A newer version of androidx.work:work-runtime-ktx than 2.9.0 is available: 2.11.0</span><br /><pre class="errorlines">
-<span class="lineno">  60 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-<span class="lineno">  61 </span>    
-<span class="lineno">  62 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
-<span class="caretline"><span class="lineno">  63 </span>    implementation(<span class="warning">"androidx.work:work-runtime-ktx:2.9.0"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  64 </span>    
-<span class="lineno">  65 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
-<span class="lineno">  66 </span>    implementation("net.java.dev.jna:jna:5.14.0@aar")
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:70</span>: <span class="message">A newer version of androidx.work:work-runtime-ktx than 2.9.0 is available: 2.11.0</span><br /><pre class="errorlines">
+<span class="lineno">  67 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+<span class="lineno">  68 </span>    
+<span class="lineno">  69 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
+<span class="caretline"><span class="lineno">  70 </span>    implementation(<span class="warning">"androidx.work:work-runtime-ktx:2.9.0"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  71 </span>    
+<span class="lineno">  72 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
+<span class="lineno">  73 </span>    implementation("net.java.dev.jna:jna:5.14.0@aar")
 </pre>
 
 </div>
@@ -463,44 +463,44 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:56</span>: <span class="message">A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.8.1 is available: 1.10.2</span><br /><pre class="errorlines">
-<span class="lineno">  53 </span>    implementation(libs.material)
-<span class="lineno">  54 </span>    
-<span class="lineno">  55 </span>    // Coroutines for async operations
-<span class="caretline"><span class="lineno">  56 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  57 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-<span class="lineno">  58 </span>    
-<span class="lineno">  59 </span>    // JSON parsing
-</pre>
-
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:57</span>: <span class="message">A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-core than 1.8.1 is available: 1.10.2</span><br /><pre class="errorlines">
-<span class="lineno">  54 </span>    
-<span class="lineno">  55 </span>    // Coroutines for async operations
-<span class="lineno">  56 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-<span class="caretline"><span class="lineno">  57 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  58 </span>    
-<span class="lineno">  59 </span>    // JSON parsing
-<span class="lineno">  60 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-</pre>
-
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:60</span>: <span class="message">A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.7.3 is available: 1.9.0</span><br /><pre class="errorlines">
-<span class="lineno">  57 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-<span class="lineno">  58 </span>    
-<span class="lineno">  59 </span>    // JSON parsing
-<span class="caretline"><span class="lineno">  60 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:63</span>: <span class="message">A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.8.1 is available: 1.10.2</span><br /><pre class="errorlines">
+<span class="lineno">  60 </span>    implementation(libs.material)
 <span class="lineno">  61 </span>    
-<span class="lineno">  62 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
-<span class="lineno">  63 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
+<span class="lineno">  62 </span>    // Coroutines for async operations
+<span class="caretline"><span class="lineno">  63 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  64 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+<span class="lineno">  65 </span>    
+<span class="lineno">  66 </span>    // JSON parsing
 </pre>
 
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:66</span>: <span class="message">A newer version of net.java.dev.jna:jna than 5.14.0 is available: 5.18.1</span><br /><pre class="errorlines">
-<span class="lineno">  63 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
-<span class="lineno">  64 </span>    
-<span class="lineno">  65 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
-<span class="caretline"><span class="lineno">  66 </span>    implementation(<span class="warning">"net.java.dev.jna:jna:5.14.0@aar"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  67 </span>    
-<span class="lineno">  68 </span>    testImplementation(libs.junit)
-<span class="lineno">  69 </span>    androidTestImplementation(libs.androidx.junit)
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:64</span>: <span class="message">A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-core than 1.8.1 is available: 1.10.2</span><br /><pre class="errorlines">
+<span class="lineno">  61 </span>    
+<span class="lineno">  62 </span>    // Coroutines for async operations
+<span class="lineno">  63 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+<span class="caretline"><span class="lineno">  64 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  65 </span>    
+<span class="lineno">  66 </span>    // JSON parsing
+<span class="lineno">  67 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+</pre>
+
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:67</span>: <span class="message">A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.7.3 is available: 1.9.0</span><br /><pre class="errorlines">
+<span class="lineno">  64 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+<span class="lineno">  65 </span>    
+<span class="lineno">  66 </span>    // JSON parsing
+<span class="caretline"><span class="lineno">  67 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  68 </span>    
+<span class="lineno">  69 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
+<span class="lineno">  70 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
+</pre>
+
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:73</span>: <span class="message">A newer version of net.java.dev.jna:jna than 5.14.0 is available: 5.18.1</span><br /><pre class="errorlines">
+<span class="lineno">  70 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
+<span class="lineno">  71 </span>    
+<span class="lineno">  72 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
+<span class="caretline"><span class="lineno">  73 </span>    implementation(<span class="warning">"net.java.dev.jna:jna:5.14.0@aar"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  74 </span>    
+<span class="lineno">  75 </span>    testImplementation(libs.junit)
+<span class="lineno">  76 </span>    androidTestImplementation(libs.androidx.junit)
 </pre>
 
 </div>
@@ -539,14 +539,14 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:66</span>: <span class="message">The native library <code>x86_64/libjnidispatch.so</code> (from <code>net.java.dev.jna:jna:5.14.0</code>) is not 16 KB aligned</span><br /><pre class="errorlines">
-<span class="lineno">  63 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
-<span class="lineno">  64 </span>    
-<span class="lineno">  65 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
-<span class="caretline"><span class="lineno">  66 </span>    implementation(<span class="warning">"net.java.dev.jna:jna:5.14.0@aar"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  67 </span>    
-<span class="lineno">  68 </span>    testImplementation(libs.junit)
-<span class="lineno">  69 </span>    androidTestImplementation(libs.androidx.junit)
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:73</span>: <span class="message">The native library <code>x86_64/libjnidispatch.so</code> (from <code>net.java.dev.jna:jna:5.14.0</code>) is not 16 KB aligned</span><br /><pre class="errorlines">
+<span class="lineno">  70 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
+<span class="lineno">  71 </span>    
+<span class="lineno">  72 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
+<span class="caretline"><span class="lineno">  73 </span>    implementation(<span class="warning">"net.java.dev.jna:jna:5.14.0@aar"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  74 </span>    
+<span class="lineno">  75 </span>    testImplementation(libs.junit)
+<span class="lineno">  76 </span>    androidTestImplementation(libs.androidx.junit)
 </pre>
 
 <span class="location"><a href="../../../../../.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so">../../../../../.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so</a></span>: <span class="message">The native library <code>x86_64/libjnidispatch.so</code> (from <code>net.java.dev.jna:jna:5.14.0</code>) is not 16 KB aligned</span><br />
@@ -715,54 +715,54 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:56</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
-<span class="lineno">  53 </span>    implementation(libs.material)
-<span class="lineno">  54 </span>    
-<span class="lineno">  55 </span>    // Coroutines for async operations
-<span class="caretline"><span class="lineno">  56 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  57 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-<span class="lineno">  58 </span>    
-<span class="lineno">  59 </span>    // JSON parsing
-</pre>
-
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:57</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
-<span class="lineno">  54 </span>    
-<span class="lineno">  55 </span>    // Coroutines for async operations
-<span class="lineno">  56 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-<span class="caretline"><span class="lineno">  57 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  58 </span>    
-<span class="lineno">  59 </span>    // JSON parsing
-<span class="lineno">  60 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-</pre>
-
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:60</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
-<span class="lineno">  57 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-<span class="lineno">  58 </span>    
-<span class="lineno">  59 </span>    // JSON parsing
-<span class="caretline"><span class="lineno">  60 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  61 </span>    
-<span class="lineno">  62 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
-<span class="lineno">  63 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
-</pre>
-
 <span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:63</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
-<span class="lineno">  60 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+<span class="lineno">  60 </span>    implementation(libs.material)
 <span class="lineno">  61 </span>    
-<span class="lineno">  62 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
-<span class="caretline"><span class="lineno">  63 </span>    implementation(<span class="warning">"androidx.work:work-runtime-ktx:2.9.0"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  64 </span>    
-<span class="lineno">  65 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
-<span class="lineno">  66 </span>    implementation("net.java.dev.jna:jna:5.14.0@aar")
+<span class="lineno">  62 </span>    // Coroutines for async operations
+<span class="caretline"><span class="lineno">  63 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  64 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+<span class="lineno">  65 </span>    
+<span class="lineno">  66 </span>    // JSON parsing
 </pre>
 
-<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:66</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
-<span class="lineno">  63 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
-<span class="lineno">  64 </span>    
-<span class="lineno">  65 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
-<span class="caretline"><span class="lineno">  66 </span>    implementation(<span class="warning">"net.java.dev.jna:jna:5.14.0@aar"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  67 </span>    
-<span class="lineno">  68 </span>    testImplementation(libs.junit)
-<span class="lineno">  69 </span>    androidTestImplementation(libs.androidx.junit)
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:64</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
+<span class="lineno">  61 </span>    
+<span class="lineno">  62 </span>    // Coroutines for async operations
+<span class="lineno">  63 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+<span class="caretline"><span class="lineno">  64 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  65 </span>    
+<span class="lineno">  66 </span>    // JSON parsing
+<span class="lineno">  67 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+</pre>
+
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:67</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
+<span class="lineno">  64 </span>    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+<span class="lineno">  65 </span>    
+<span class="lineno">  66 </span>    // JSON parsing
+<span class="caretline"><span class="lineno">  67 </span>    implementation(<span class="warning">"org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  68 </span>    
+<span class="lineno">  69 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
+<span class="lineno">  70 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
+</pre>
+
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:70</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
+<span class="lineno">  67 </span>    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+<span class="lineno">  68 </span>    
+<span class="lineno">  69 </span>    // WorkManager for battery-efficient background tasks (Phase 4)
+<span class="caretline"><span class="lineno">  70 </span>    implementation(<span class="warning">"androidx.work:work-runtime-ktx:2.9.0"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  71 </span>    
+<span class="lineno">  72 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
+<span class="lineno">  73 </span>    implementation("net.java.dev.jna:jna:5.14.0@aar")
+</pre>
+
+<span class="location"><a href="../../build.gradle.kts">../../build.gradle.kts</a>:73</span>: <span class="message">Use version catalog instead</span><br /><pre class="errorlines">
+<span class="lineno">  70 </span>    implementation("androidx.work:work-runtime-ktx:2.9.0")
+<span class="lineno">  71 </span>    
+<span class="lineno">  72 </span>    // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
+<span class="caretline"><span class="lineno">  73 </span>    implementation(<span class="warning">"net.java.dev.jna:jna:5.14.0@aar"</span>)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  74 </span>    
+<span class="lineno">  75 </span>    testImplementation(libs.junit)
+<span class="lineno">  76 </span>    androidTestImplementation(libs.androidx.junit)
 </pre>
 
 </div>

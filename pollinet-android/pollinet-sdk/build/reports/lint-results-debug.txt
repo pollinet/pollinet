@@ -1,22 +1,22 @@
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:202: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:202: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
                             clientGatt?.connect()
                             ~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:212: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:212: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
                                     gatt.setCharacteristicNotification(remoteTxCharacteristic, true)
                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:216: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:216: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
                                         gatt.writeDescriptor(descriptor)
                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1236: Error: Missing permissions required by ConnectivityManager.registerNetworkCallback: android.permission.ACCESS_NETWORK_STATE [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1236: Error: Missing permissions required by ConnectivityManager.registerNetworkCallback: android.permission.ACCESS_NETWORK_STATE [MissingPermission]
             connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1543: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1543: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
         gattServer?.close()
         ~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2334: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2334: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
             val discoverSuccess = gatt.discoverServices()
                                   ~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2850: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2850: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
             gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -30,7 +30,7 @@
    client code must also be prepared to handle the calls throwing an exception
    if the user rejects the request for permission at runtime.
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:8: Warning: Attribute usesPermissionFlags is only used in API level 31 and higher (current min is 28) [UnusedAttribute]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:8: Warning: Attribute usesPermissionFlags is only used in API level 31 and higher (current min is 28) [UnusedAttribute]
         android:usesPermissionFlags="neverForLocation" />
         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -51,7 +51,7 @@
    can be unused too, such as the new <tag> element in layouts introduced in
    API 21.
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:63: Warning: A newer version of androidx.work:work-runtime-ktx than 2.9.0 is available: 2.11.0 [GradleDependency]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:70: Warning: A newer version of androidx.work:work-runtime-ktx than 2.9.0 is available: 2.11.0 [GradleDependency]
     implementation("androidx.work:work-runtime-ktx:2.9.0")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -62,16 +62,16 @@
    However, you may simply not be aware that a more recent version is
    available, and that is what this lint check helps find.
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:56: Warning: A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.8.1 is available: 1.10.2 [NewerVersionAvailable]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:63: Warning: A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.8.1 is available: 1.10.2 [NewerVersionAvailable]
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:57: Warning: A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-core than 1.8.1 is available: 1.10.2 [NewerVersionAvailable]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:64: Warning: A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-core than 1.8.1 is available: 1.10.2 [NewerVersionAvailable]
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:60: Warning: A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.7.3 is available: 1.9.0 [NewerVersionAvailable]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:67: Warning: A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.7.3 is available: 1.9.0 [NewerVersionAvailable]
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:66: Warning: A newer version of net.java.dev.jna:jna than 5.14.0 is available: 5.18.1 [NewerVersionAvailable]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:73: Warning: A newer version of net.java.dev.jna:jna than 5.14.0 is available: 5.18.1 [NewerVersionAvailable]
     implementation("net.java.dev.jna:jna:5.14.0@aar")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -83,11 +83,11 @@
    MavenCentral dependency, and connects to the library every time, which
    makes it more flexible but also much slower.
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:66: Warning: The native library x86_64/libjnidispatch.so (from net.java.dev.jna:jna:5.14.0) is not 16 KB aligned [Aligned16KB]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:73: Warning: The native library x86_64/libjnidispatch.so (from net.java.dev.jna:jna:5.14.0) is not 16 KB aligned [Aligned16KB]
     implementation("net.java.dev.jna:jna:5.14.0@aar")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so: Warning: The native library x86_64/libjnidispatch.so (from net.java.dev.jna:jna:5.14.0) is not 16 KB aligned [Aligned16KB]
-/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so: Warning: The native library x86_64/libjnidispatch.so (from net.java.dev.jna:jna:5.14.0) is not 16 KB aligned [Aligned16KB]
+/home/oghenekparob_r/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so: Warning: The native library x86_64/libjnidispatch.so (from net.java.dev.jna:jna:5.14.0) is not 16 KB aligned [Aligned16KB]
+/home/oghenekparob_r/.gradle/caches/8.13/transforms/0d0edf9f463a4fde8c3e87ec6801b663/transformed/jna-5.14.0/jni/x86_64/libjnidispatch.so: Warning: The native library x86_64/libjnidispatch.so (from net.java.dev.jna:jna:5.14.0) is not 16 KB aligned [Aligned16KB]
 
    Explanation for issues of type "Aligned16KB":
    Android has traditionally used 4 KB memory page sizes. However, to support
@@ -116,7 +116,7 @@
 
    https://developer.android.com/guide/practices/page-sizes
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2141: Warning: Using getAddress to get device identifiers is not recommended [HardwareIds]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2141: Warning: Using getAddress to get device identifiers is not recommended [HardwareIds]
             val myAddress = bluetoothAdapter?.address ?: "00:00:00:00:00:00"
                             ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -128,13 +128,13 @@
 
    https://developer.android.com/training/articles/user-data-ids.html
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2895: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2895: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt:33: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt:33: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
                 android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt:79: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt:79: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
                 if (useStrongBox && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -147,19 +147,19 @@
    where the version qualifier is less than or equal to the minSdkVersion,
    where the contents should be merged into the best folder.
 
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:56: Warning: Use version catalog instead [UseTomlInstead]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:63: Warning: Use version catalog instead [UseTomlInstead]
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:57: Warning: Use version catalog instead [UseTomlInstead]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:64: Warning: Use version catalog instead [UseTomlInstead]
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:60: Warning: Use version catalog instead [UseTomlInstead]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:67: Warning: Use version catalog instead [UseTomlInstead]
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:63: Warning: Use version catalog instead [UseTomlInstead]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:70: Warning: Use version catalog instead [UseTomlInstead]
     implementation("androidx.work:work-runtime-ktx:2.9.0")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/oghenekparoboreminokanju/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:66: Warning: Use version catalog instead [UseTomlInstead]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/build.gradle.kts:73: Warning: Use version catalog instead [UseTomlInstead]
     implementation("net.java.dev.jna:jna:5.14.0@aar")
                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -28,6 +28,6 @@
       applicationId="xyz.pollinet.sdk"
       generatedSourceFolders="build/generated/ap_generated_sources/debug/out"
       generatedResourceFolders="build/generated/res/resValues/debug"
-      desugaredMethodsFiles="/Users/oghenekparoboreminokanju/.gradle/caches/8.13/transforms/b8bbbd787952e3d441c323b54494146f/transformed/D8BackportedDesugaredMethods.txt">
+      desugaredMethodsFiles="/home/oghenekparob_r/.gradle/caches/8.13/transforms/b8bbbd787952e3d441c323b54494146f/transformed/D8BackportedDesugaredMethods.txt">
   </artifact>
 </variant>
