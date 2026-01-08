@@ -8,12 +8,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="202"
+            line="223"
             column="29"
-            startOffset="9221"
-            endLine="202"
+            startOffset="10032"
+            endLine="223"
             endColumn="50"
-            endOffset="9242"/>
+            endOffset="10053"/>
     </incident>
 
     <incident
@@ -23,12 +23,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="212"
+            line="233"
             column="37"
-            startOffset="9785"
-            endLine="212"
+            startOffset="10596"
+            endLine="233"
             endColumn="101"
-            endOffset="9849"/>
+            endOffset="10660"/>
     </incident>
 
     <incident
@@ -38,12 +38,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="216"
+            line="237"
             column="41"
-            startOffset="10137"
-            endLine="216"
+            startOffset="10948"
+            endLine="237"
             endColumn="73"
-            endOffset="10169"/>
+            endOffset="10980"/>
     </incident>
 
     <incident
@@ -53,12 +53,12 @@
         <fix-data missing="android.permission.ACCESS_NETWORK_STATE" message="Missing permissions required by ConnectivityManager.registerNetworkCallback: %1$s" lastApi="2147483647" operator="&amp;"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="1236"
+            line="1505"
             column="13"
-            startOffset="60846"
-            endLine="1236"
+            startOffset="75572"
+            endLine="1505"
             endColumn="91"
-            endOffset="60924"/>
+            endOffset="75650"/>
         <map>
             <entry
                 name="message"
@@ -76,12 +76,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="1543"
+            line="1854"
             column="9"
-            startOffset="76080"
-            endLine="1543"
+            startOffset="92493"
+            endLine="1854"
             endColumn="28"
-            endOffset="76099"/>
+            endOffset="92512"/>
     </incident>
 
     <incident
@@ -91,12 +91,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="2334"
+            line="2869"
             column="35"
-            startOffset="112152"
-            endLine="2334"
+            startOffset="139141"
+            endLine="2869"
             endColumn="58"
-            endOffset="112175"/>
+            endOffset="139164"/>
     </incident>
 
     <incident
@@ -106,12 +106,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="2850"
+            line="3411"
             column="13"
-            startOffset="138243"
-            endLine="2850"
+            startOffset="166600"
+            endLine="3411"
             endColumn="93"
-            endOffset="138323"/>
+            endOffset="166680"/>
     </incident>
 
     <incident

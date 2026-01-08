@@ -384,25 +384,33 @@ impl HostBleTransport {
         
         t_debug!("🔍 next_outbound called: queue has {} items, max_len={}", queue_size_before, max_len);
         
-        let result = queue.pop_front().and_then(|data| {
+        // Try to find a fragment that fits
+        let mut attempts = 0;
+        let max_attempts = queue_size_before.min(10); // Don't check more than 10 items
+        
+        while attempts < max_attempts && !queue.is_empty() {
+            let data = queue.pop_front().unwrap();
+            
             if data.len() <= max_len {
                 let queue_size_after = queue.len();
                 t_info!("✅ Returning fragment of {} bytes (max: {})", data.len(), max_len);
                 t_info!("📊 Queue: {} → {} fragments remaining", queue_size_before, queue_size_after);
-                Some(data)
+                return Some(data);
             } else {
-                // Put it back if too large
-                t_warn!("⚠️ Fragment too large: {} bytes (max: {}), putting back in queue", data.len(), max_len);
-                queue.push_front(data);
-                None
+                // Put it back at the end (rotate queue to avoid infinite loop)
+                t_warn!("⚠️ Fragment too large: {} bytes (max: {}), rotating to end of queue", data.len(), max_len);
+                queue.push_back(data);
+                attempts += 1;
             }
-        });
-        
-        if result.is_none() && queue_size_before == 0 {
-            t_debug!("📭 Queue is empty, nothing to send");
         }
         
-        result
+        if queue_size_before == 0 {
+            t_debug!("📭 Queue is empty, nothing to send");
+        } else if attempts >= max_attempts {
+            t_error!("❌ All fragments in queue are too large (max: {}). This indicates a fragmentation bug - fragments should fit within max_len!", max_len);
+        }
+        
+        None
     }
 
     /// Convert a BLE mesh TransactionFragment to FFI Fragment
@@ -574,7 +582,7 @@ impl HostBleTransport {
         
         use sha2::{Sha256, Digest};
         
-        // Calculate transaction hash for logging/identification
+        // Calculate transaction hash for logging/identification and duplicate checking
         t_debug!("🔐 Calculating SHA-256 hash for transaction...");
         let mut hasher = Sha256::new();
         hasher.update(&tx_bytes);
@@ -584,9 +592,37 @@ impl HostBleTransport {
             tx_hash_hex.chars().take(32).collect::<String>(), 
             tx_hash.len());
         
-        // No duplicate check - all reassembled transactions are queued
+        // Check if transaction was already submitted
+        let submitted = self.submitted_tx_hashes.lock();
+        if submitted.contains_key(&tx_hash) {
+            drop(submitted);
+            t_warn!("⚠️ Transaction {} already submitted (duplicate detected)", 
+                tx_hash_hex.chars().take(16).collect::<String>());
+            t_info!("❌ push_received_transaction() returning false (duplicate - already submitted)");
+            return false;
+        }
+        drop(submitted);
+        
+        // Check if transaction is already in the received queue
+        let queue = self.received_tx_queue.lock();
+        for (_, queued_tx_bytes, _) in queue.iter() {
+            let mut queued_hasher = Sha256::new();
+            queued_hasher.update(queued_tx_bytes);
+            let queued_hash = queued_hasher.finalize().to_vec();
+            
+            if queued_hash == tx_hash {
+                drop(queue);
+                t_warn!("⚠️ Transaction {} already in received queue (duplicate detected)", 
+                    tx_hash_hex.chars().take(16).collect::<String>());
+                t_info!("❌ push_received_transaction() returning false (duplicate - already queued)");
+                return false;
+            }
+        }
+        drop(queue);
+        
+        // Not a duplicate - proceed with adding to queue
         let now = Self::current_timestamp();
-        t_debug!("📥 Processing transaction {} (no duplicate check)", 
+        t_debug!("📥 Processing transaction {} (passed duplicate check)", 
             tx_hash_hex.chars().take(16).collect::<String>());
         
         // Generate transaction ID

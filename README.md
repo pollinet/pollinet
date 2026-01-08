@@ -13,7 +13,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-PolliNet is an open-source SDK and runtime enabling **offline Solana transaction propagation** over Bluetooth Low Energy (BLE) mesh networks. Inspired by biological pollination, transactions are created and signed offline, relayed opportunistically across devices, and submitted to Solana when any peer regains internet access.
+Pollinet is an open-source SDK and runtime enabling **offline Solana transaction propagation** over Bluetooth Low Energy (BLE) mesh networks. Inspired by biological pollination, transactions are created and signed offline, relayed opportunistically across devices, and submitted to Solana when any peer regains internet access.
 
 ---
 

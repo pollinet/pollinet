@@ -85,6 +85,16 @@ object PolliNetFFI {
      */
     external fun createUnsignedSplTransaction(handle: Long, requestJson: ByteArray): String
 
+    /**
+     * Create unsigned governance vote transaction for MWA or manual signing.
+     * Uses a nonce account on-chain (online: fetches nonce data via RPC).
+     *
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded CastUnsignedVoteRequest
+     * @return JSON FfiResult with base64-encoded unsigned vote transaction
+     */
+    external fun castUnsignedVote(handle: Long, requestJson: ByteArray): String
+
     // =========================================================================
     // Signature helpers
     // =========================================================================
@@ -170,6 +180,16 @@ object PolliNetFFI {
     external fun createUnsignedOfflineTransaction(handle: Long, requestJson: ByteArray): String
 
     /**
+     * Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing
+     * Uses cached nonce data from the offline bundle (no network required).
+     *
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded CreateUnsignedOfflineSplTransactionRequest
+     * @return JSON FfiResult with base64-encoded unsigned SPL transaction
+     */
+    external fun createUnsignedOfflineSplTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
      * Get transaction message bytes that need to be signed by MWA
      * Extracts the raw message from unsigned transaction for secure signing
      * @param requestJson JSON-encoded GetMessageToSignRequest
@@ -212,7 +232,31 @@ object PolliNetFFI {
      */
     external fun cacheNonceAccounts(handle: Long, requestJson: ByteArray): String
     
+    /**
+     * Refresh all cached nonce data in the offline bundle
+     * 
+     * Fetches latest on-chain nonce state for all cached nonce accounts and updates
+     * the stored OfflineTransactionBundle in secure storage. Marks all nonces as
+     * available (used = false) after refresh.
+     * 
+     * @param handle SDK handle
+     * @return JSON FfiResult with { refreshedCount: Int }
+     */
+    external fun refreshOfflineBundle(handle: Long): String
+    
     external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
+    
+    /**
+     * Refresh the blockhash in an unsigned transaction.
+     * 
+     * Use this right before sending an unsigned transaction to MWA for signing
+     * to ensure the blockhash is fresh and won't expire during the signing process.
+     * 
+     * @param handle SDK handle
+     * @param unsignedTxBase64 Base64-encoded unsigned transaction
+     * @return JSON FfiResult with refreshed transaction (base64-encoded)
+     */
+    external fun refreshBlockhashInUnsignedTransaction(handle: Long, unsignedTxBase64: String): String
     
     // =========================================================================
     // BLE Mesh Operations

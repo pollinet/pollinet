@@ -1,22 +1,22 @@
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:202: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:223: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
                             clientGatt?.connect()
                             ~~~~~~~~~~~~~~~~~~~~~
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:212: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:233: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
                                     gatt.setCharacteristicNotification(remoteTxCharacteristic, true)
                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:216: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:237: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
                                         gatt.writeDescriptor(descriptor)
                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1236: Error: Missing permissions required by ConnectivityManager.registerNetworkCallback: android.permission.ACCESS_NETWORK_STATE [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1505: Error: Missing permissions required by ConnectivityManager.registerNetworkCallback: android.permission.ACCESS_NETWORK_STATE [MissingPermission]
             connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1543: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:1854: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
         gattServer?.close()
         ~~~~~~~~~~~~~~~~~~~
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2334: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2869: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
             val discoverSuccess = gatt.discoverServices()
                                   ~~~~~~~~~~~~~~~~~~~~~~~
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2850: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:3411: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
             gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -116,7 +116,7 @@
 
    https://developer.android.com/guide/practices/page-sizes
 
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2141: Warning: Using getAddress to get device identifiers is not recommended [HardwareIds]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2613: Warning: Using getAddress to get device identifiers is not recommended [HardwareIds]
             val myAddress = bluetoothAdapter?.address ?: "00:00:00:00:00:00"
                             ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -128,9 +128,18 @@
 
    https://developer.android.com/training/articles/user-data-ids.html
 
-/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:2895: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:3456: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt:3483: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BootReceiver.kt:31: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BootReceiver.kt:52: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/KeystoreManager.kt:33: Warning: Unnecessary; SDK_INT is always >= 28 [ObsoleteSdkInt]
                 android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -169,4 +178,4 @@
    declarations outside of the TOML file and suggests moving them (and in the
    IDE, provides a quickfix to performing the operation automatically).
 
-7 errors, 18 warnings
+7 errors, 21 warnings

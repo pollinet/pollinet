@@ -414,6 +414,60 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedSplTransaction
     create_result_string(&mut env, result)
 }
 
+/// Create unsigned governance vote transaction with durable nonce (online)
+/// Returns base64-encoded unsigned transaction (MWA-compatible)
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: CastUnsignedVoteRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("🗳️ Creating unsigned governance vote transaction");
+        tracing::info!("   Voter: {}", request.voter);
+        tracing::info!("   Proposal: {}", request.proposal_id);
+        tracing::info!("   Vote account: {}", request.vote_account);
+        tracing::info!("   Choice: {}", request.choice);
+
+        // Build unsigned vote transaction (uses RPC to fetch nonce data)
+        let base64_tx = runtime::block_on(async {
+            transport
+                .transaction_service()
+                .cast_unsigned_vote(
+                    &request.voter,
+                    &request.proposal_id,
+                    &request.vote_account,
+                    request.choice,
+                    &request.fee_payer,
+                    &request.nonce_account,
+                )
+                .await
+        })
+        .map_err(|e| format!("Failed to create unsigned vote transaction: {}", e))?;
+
+        tracing::info!(
+            "✅ Created unsigned vote transaction (base64 length: {})",
+            base64_tx.len()
+        );
+
+        let response: FfiResult<String> = FfiResult::success(base64_tx);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
 // =============================================================================
 // Signature helpers (M5)
 // =============================================================================
@@ -989,6 +1043,96 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedOfflineTransac
     create_result_string(&mut env, result)
 }
 
+/// Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing
+/// Uses cached nonce data from the offline bundle (no RPC required).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedOfflineSplTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        // Parse request
+        let request_data: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?;
+
+        let request: CreateUnsignedOfflineSplTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("🔓 Creating UNSIGNED offline SPL transaction for MWA");
+        tracing::info!("   Sender wallet: {}", request.sender_wallet);
+        tracing::info!("   Recipient wallet: {}", request.recipient_wallet);
+
+        // Load bundle from secure storage
+        let storage = transport
+            .secure_storage()
+            .ok_or_else(|| "Secure storage not configured".to_string())?;
+
+        let mut bundle = storage
+            .load_bundle()
+            .map_err(|e| format!("Failed to load bundle: {}", e))?
+            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+
+        tracing::info!(
+            "📂 Loaded bundle: {} total nonces, {} available",
+            bundle.nonce_caches.len(),
+            bundle.available_nonces()
+        );
+
+        // Find first available (unused) nonce
+        let nonce_to_use = bundle
+            .nonce_caches
+            .iter_mut()
+            .find(|n| !n.used)
+            .ok_or_else(|| {
+                "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
+                    .to_string()
+            })?;
+
+        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+
+        // Clone the nonce data
+        let cached_nonce = nonce_to_use.clone();
+
+        // Mark as used and save bundle
+        nonce_to_use.used = true;
+        storage
+            .save_bundle(&bundle)
+            .map_err(|e| format!("Failed to save bundle: {}", e))?;
+
+        tracing::info!(
+            "💾 Bundle saved (available nonces remaining: {})",
+            bundle.available_nonces()
+        );
+
+        // Create UNSIGNED offline SPL transaction
+        let unsigned_tx = transport
+            .transaction_service()
+            .create_unsigned_offline_spl_transaction(
+                &request.sender_wallet,
+                &request.recipient_wallet,
+                &request.fee_payer,
+                &request.mint_address,
+                request.amount,
+                &cached_nonce,
+            )
+            .map_err(|e| format!("Failed to create unsigned offline SPL transaction: {}", e))?;
+
+        tracing::info!("✅ Unsigned offline SPL transaction created for MWA signing");
+
+        let response: FfiResult<String> = FfiResult::success(unsigned_tx);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
 /// Get the message bytes that need to be signed by MWA
 /// Extracts the raw message from unsigned transaction for MWA/Seed Vault
 #[cfg(feature = "android")]
@@ -1091,6 +1235,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedNonceTransacti
             .convert_byte_array(&request_json)
             .map_err(|e| format!("Failed to read request: {}", e))?;
 
+        tracing::debug!("📥 Request data size: {} bytes", request_data.len());
+
         // Get transport
         let transport = get_transport(handle)?;
 
@@ -1099,8 +1245,9 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedNonceTransacti
             serde_json::from_slice(&request_data)
                 .map_err(|e| format!("Failed to parse request: {}", e))?;
 
-        tracing::info!("Creating {} unsigned nonce transactions for payer: {}", 
+        tracing::info!("📋 Creating {} unsigned nonce transactions for payer: {}", 
             request.count, request.payer_pubkey);
+        tracing::debug!("   Request version: {}", request.version);
 
         // Call the transaction service
         let transactions = runtime::block_on(async {
@@ -1112,6 +1259,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedNonceTransacti
         })?;
 
         tracing::info!("✅ Created {} unsigned nonce transactions", transactions.len());
+        
+        // Log details about each transaction
+        for (i, tx) in transactions.iter().enumerate() {
+            tracing::debug!("   Transaction {}: {} nonce account(s), tx size: {} bytes", 
+                i + 1, 
+                tx.nonce_pubkey.len(),
+                tx.unsigned_transaction_base64.len() * 3 / 4  // Approximate base64 decoded size
+            );
+            for (j, pubkey) in tx.nonce_pubkey.iter().enumerate() {
+                tracing::debug!("     Nonce {}: {}", j + 1, pubkey);
+            }
+        }
 
         let response: FfiResult<Vec<UnsignedNonceTransaction>> = FfiResult::success(transactions);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
@@ -1211,6 +1370,109 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cacheNonceAccounts(
     create_result_string(&mut env, result)
 }
 
+/// Refresh all cached nonce data in the offline bundle
+/// 
+/// This:
+/// - Loads the existing OfflineTransactionBundle from secure storage
+/// - For each nonce account, fetches the latest on-chain nonce state
+/// - Updates blockhash / fee data and marks all nonces as available (used = false)
+/// - Saves the refreshed bundle back to secure storage
+/// 
+/// Response JSON: FfiResult<{ \"refreshedCount\": N }>
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_refreshOfflineBundle(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        tracing::info!("♻️  FFI refreshOfflineBundle called with handle={}", handle);
+
+        let transport = get_transport(handle)?;
+
+        let refreshed_count = runtime::block_on(async {
+            if let Some(secure_storage) = transport.secure_storage() {
+                // Load existing bundle
+                let mut bundle = match secure_storage.load_bundle() {
+                    Ok(Some(existing)) => existing,
+                    Ok(None) => {
+                        tracing::info!("📂 No existing bundle to refresh");
+                        return Ok::<usize, String>(0);
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to load bundle: {}", e));
+                    }
+                };
+
+                if bundle.nonce_caches.is_empty() {
+                    tracing::info!("📂 Bundle is empty - nothing to refresh");
+                    return Ok(0);
+                }
+
+                tracing::info!(
+                    "📂 Refreshing bundle: {} total nonces ({} available, {} used)",
+                    bundle.total_nonces(),
+                    bundle.available_nonces(),
+                    bundle.used_nonces()
+                );
+
+                let mut refreshed = 0usize;
+
+                for nonce in bundle.nonce_caches.iter_mut() {
+                    let account = nonce.nonce_account.clone();
+                    match transport
+                        .transaction_service()
+                        .prepare_offline_nonce_data(&account)
+                        .await
+                    {
+                        Ok(fresh) => {
+                            nonce.authority = fresh.authority;
+                            nonce.blockhash = fresh.blockhash;
+                            nonce.lamports_per_signature = fresh.lamports_per_signature;
+                            nonce.cached_at = fresh.cached_at;
+                            nonce.used = false; // Make available again
+                            refreshed += 1;
+                            tracing::info!("   ✅ Refreshed nonce {}", account);
+                        }
+                        Err(e) => {
+                            tracing::warn!("   ⚠️  Failed to refresh nonce {}: {}", account, e);
+                        }
+                    }
+                }
+
+                // Save updated bundle
+                secure_storage
+                    .save_bundle(&bundle)
+                    .map_err(|e| format!("Failed to save refreshed bundle: {}", e))?;
+
+                tracing::info!(
+                    "✅ Refreshed {} nonce accounts (bundle now has {} available)",
+                    refreshed,
+                    bundle.available_nonces()
+                );
+
+                Ok::<usize, String>(refreshed)
+            } else {
+                tracing::info!("ℹ️  Secure storage not initialized - cannot refresh bundle");
+                Ok(0)
+            }
+        })?;
+
+        #[derive(serde::Serialize)]
+        struct RefreshResponse {
+            #[serde(rename = "refreshedCount")]
+            refreshed_count: usize,
+        }
+
+        let response: FfiResult<RefreshResponse> =
+            FfiResult::success(RefreshResponse { refreshed_count });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
 /// Add nonce signature to a payer-signed transaction
 /// This is called after MWA has added the payer signature (first signature)
 /// to add the nonce keypair signature (second signature)
@@ -1230,67 +1492,152 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
             .convert_byte_array(&request_json)
             .map_err(|e| format!("Failed to read request: {}", e))?;
 
+        tracing::debug!("📥 Request data size: {} bytes", request_data.len());
+
         // Get transport
         let transport = get_transport(handle)?;
 
-        // Parse request
-        #[derive(serde::Deserialize)]
-        struct AddNonceSignatureRequest {
-            #[serde(default = "crate::ffi::types::default_version")]
-            version: u32,
-            #[serde(rename = "payerSignedTransactionBase64")]
-            payer_signed_transaction_base64: String,
-            #[serde(rename = "nonceKeypairBase64")]
-            nonce_keypair_base64: String,
-        }
-
-        let request: AddNonceSignatureRequest =
+        // Parse request - use the type from types.rs
+        let request: crate::ffi::types::AddNonceSignatureRequest =
             serde_json::from_slice(&request_data)
-                .map_err(|e| format!("Failed to parse request: {}", e))?;
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
 
-        tracing::info!("Adding nonce signature to payer-signed transaction");
+        tracing::info!("✍️  Adding {} nonce signature(s) to payer-signed transaction", 
+            request.nonce_keypair_base64.len());
+        tracing::debug!("   Request version: {}", request.version);
+        tracing::debug!("   Payer-signed transaction size: {} bytes (base64)", 
+            request.payer_signed_transaction_base64.len());
 
         // Decode payer-signed transaction
+        tracing::debug!("🔓 Decoding payer-signed transaction from base64...");
         let payer_signed_tx_bytes = base64::decode(&request.payer_signed_transaction_base64)
-            .map_err(|e| format!("Failed to decode payer-signed transaction: {}", e))?;
+            .map_err(|e| {
+                tracing::error!("❌ Failed to decode payer-signed transaction: {}", e);
+                format!("Failed to decode payer-signed transaction: {}", e)
+            })?;
+
+        tracing::debug!("   Decoded transaction size: {} bytes", payer_signed_tx_bytes.len());
 
         // Deserialize transaction
+        tracing::debug!("📦 Deserializing transaction...");
         let mut tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&payer_signed_tx_bytes)
-            .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
+            .map_err(|e| {
+                tracing::error!("❌ Failed to deserialize transaction: {}", e);
+                format!("Failed to deserialize transaction: {}", e)
+            })?;
 
-        tracing::info!("Transaction has {} signatures before adding nonce signature", tx.signatures.len());
+        tracing::info!("📋 Transaction has {} signature(s) before adding nonce signatures", tx.signatures.len());
+        tracing::debug!("   Transaction has {} account(s) in message", tx.message.account_keys.len());
+        tracing::debug!("   Blockhash: {}", tx.message.recent_blockhash);
+        tracing::info!("🔐 Adding signatures for {} nonce account(s)", request.nonce_keypair_base64.len());
 
-        // Decode nonce keypair
-        let nonce_keypair_bytes = base64::decode(&request.nonce_keypair_base64)
-            .map_err(|e| format!("Failed to decode nonce keypair: {}", e))?;
+        // Decode all nonce keypairs
+        tracing::debug!("🔑 Decoding {} nonce keypair(s)...", request.nonce_keypair_base64.len());
+        let mut nonce_keypairs = Vec::new();
+        for (i, keypair_base64) in request.nonce_keypair_base64.iter().enumerate() {
+            tracing::debug!("   Decoding keypair {} (base64 size: {} bytes)...", i + 1, keypair_base64.len());
+            let nonce_keypair_bytes = base64::decode(keypair_base64)
+                .map_err(|e| {
+                    tracing::error!("❌ Failed to decode nonce keypair {}: {}", i, e);
+                    format!("Failed to decode nonce keypair {}: {}", i, e)
+                })?;
 
-        if nonce_keypair_bytes.len() != 64 {
-            return Err(format!("Invalid nonce keypair length: expected 64, got {}", nonce_keypair_bytes.len()));
+            if nonce_keypair_bytes.len() != 64 {
+                tracing::error!("❌ Invalid nonce keypair {} length: expected 64, got {}", i, nonce_keypair_bytes.len());
+                return Err(format!("Invalid nonce keypair {} length: expected 64, got {}", i, nonce_keypair_bytes.len()));
+            }
+
+            let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
+                .map_err(|e| {
+                    tracing::error!("❌ Failed to create keypair {} from bytes: {}", i, e);
+                    format!("Failed to create keypair {} from bytes: {}", i, e)
+                })?;
+
+            tracing::info!("  🔑 Nonce keypair {} pubkey: {}", i + 1, nonce_keypair.pubkey());
+            nonce_keypairs.push(nonce_keypair);
         }
-
-        let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
-            .map_err(|e| format!("Failed to create keypair from bytes: {}", e))?;
-
-        tracing::info!("Nonce keypair pubkey: {}", nonce_keypair.pubkey());
+        
+        tracing::debug!("✅ Decoded {} nonce keypair(s)", nonce_keypairs.len());
 
         // Get the blockhash from the transaction
         let blockhash = tx.message.recent_blockhash;
+        tracing::debug!("   Using blockhash: {}", blockhash);
 
-        // Add nonce signature (second signer)
-        tx.try_partial_sign(&[&nonce_keypair], blockhash)
-            .map_err(|e| format!("Failed to add nonce signature: {}", e))?;
+        // Add all nonce signatures (each nonce account needs to sign)
+        // Convert Vec<Keypair> to Vec<&Keypair> for try_partial_sign
+        tracing::debug!("✍️  Signing transaction with {} nonce keypair(s)...", nonce_keypairs.len());
+        let nonce_keypair_refs: Vec<&solana_sdk::signature::Keypair> = nonce_keypairs.iter().collect();
+        tx.try_partial_sign(&nonce_keypair_refs, blockhash)
+            .map_err(|e| {
+                tracing::error!("❌ Failed to add nonce signatures: {}", e);
+                format!("Failed to add nonce signatures: {}", e)
+            })?;
 
-        tracing::info!("✅ Transaction now has {} signatures (payer + nonce)", tx.signatures.len());
+        tracing::info!("✅ Transaction now has {} signature(s) (payer + {} nonce account(s))", 
+            tx.signatures.len(), nonce_keypairs.len());
+        tracing::debug!("   Signature breakdown: 1 payer + {} nonce = {} total", 
+            nonce_keypairs.len(), tx.signatures.len());
 
         // Serialize the fully-signed transaction
+        tracing::debug!("💾 Serializing fully-signed transaction...");
         let fully_signed_bytes = bincode1::serialize(&tx)
-            .map_err(|e| format!("Failed to serialize fully-signed transaction: {}", e))?;
+            .map_err(|e| {
+                tracing::error!("❌ Failed to serialize fully-signed transaction: {}", e);
+                format!("Failed to serialize fully-signed transaction: {}", e)
+            })?;
+
+        tracing::debug!("   Serialized size: {} bytes", fully_signed_bytes.len());
 
         let fully_signed_base64 = base64::encode(&fully_signed_bytes);
 
-        tracing::info!("✅ Fully-signed transaction ready for submission ({} bytes)", fully_signed_bytes.len());
+        tracing::info!("✅ Fully-signed transaction ready for submission ({} bytes, base64: {} bytes)", 
+            fully_signed_bytes.len(), fully_signed_base64.len());
 
         let response: FfiResult<String> = FfiResult::success(fully_signed_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Refresh blockhash in an unsigned transaction
+/// 
+/// Use this right before sending an unsigned transaction to MWA for signing
+/// to ensure the blockhash is fresh and won't expire during the signing process.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_refreshBlockhashInUnsignedTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    unsigned_tx_base64: JString,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("🔄 FFI refreshBlockhashInUnsignedTransaction called with handle={}", handle);
+
+        let transport = get_transport(handle)?;
+
+        // Get the base64 string from JNI
+        let tx_base64_str: String = env
+            .get_string(&unsigned_tx_base64)
+            .map_err(|e| format!("Failed to read unsigned transaction string: {:?}", e))?
+            .into();
+
+        tracing::debug!("📥 Unsigned transaction size: {} chars (base64)", tx_base64_str.len());
+
+        // Refresh blockhash
+        let refreshed_tx = runtime::block_on(async {
+            transport
+                .transaction_service()
+                .refresh_blockhash_in_unsigned_transaction(&tx_base64_str)
+                .await
+        })
+        .map_err(|e| format!("Failed to refresh blockhash: {}", e))?;
+
+        tracing::info!("✅ Blockhash refreshed successfully");
+        tracing::debug!("   Refreshed transaction size: {} chars (base64)", refreshed_tx.len());
+
+        let response: FfiResult<String> = FfiResult::success(refreshed_tx);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
 
@@ -2262,3 +2609,150 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupExpired(
     
     create_result_string(&mut env, result)
 }
+
+/// Queue a confirmation for relay back to origin device
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_queueConfirmation(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        // Parse request JSON from Kotlin
+        let request_str: String = env
+            .get_string(&request_json)
+            .map_err(|e| format!("Failed to read request: {}", e))?
+            .into();
+        
+        let request: QueueConfirmationRequest =
+            serde_json::from_str(&request_str)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+        
+        tracing::info!(
+            "📨 Queueing confirmation for tx {} with signature {}...",
+            request.tx_id,
+            &request.signature[..std::cmp::min(16, request.signature.len())]
+        );
+        
+        // Push into confirmation queue (auto-relay subsystem)
+        runtime::block_on(async {
+            let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
+            // Confirmation queue expects tx_id as [u8; 32]
+            let tx_id_bytes = hex::decode(&request.tx_id)
+                .map_err(|e| format!("Invalid txId hex: {}", e))?;
+            if tx_id_bytes.len() != 32 {
+                return Err(format!(
+                    "Invalid txId length: expected 32 bytes, got {}",
+                    tx_id_bytes.len()
+                ));
+            }
+            let mut tx_id_array = [0u8; 32];
+            tx_id_array.copy_from_slice(&tx_id_bytes);
+            
+            let confirmation = crate::queue::confirmation::Confirmation::success(
+                tx_id_array,
+                request.signature.clone(),
+            );
+            
+            conf_queue
+                .push(confirmation)
+                .map_err(|e| format!("Failed to queue confirmation: {:?}", e))?;
+            
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<crate::ffi::types::SuccessResponse> =
+            FfiResult::success(crate::ffi::types::SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Pop next confirmation from queue
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popConfirmation(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        let confirmation = runtime::block_on(async {
+            let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
+            conf_queue.pop()
+        });
+        
+        if let Some(conf) = confirmation {
+            // Convert Rust Confirmation to FFI format
+            let tx_id_hex = hex::encode(&conf.original_tx_id);
+            let status_ffi = match &conf.status {
+                crate::queue::confirmation::ConfirmationStatus::Success { signature } => {
+                    crate::ffi::types::ConfirmationStatusFFI::Success {
+                        signature: signature.clone(),
+                    }
+                }
+                crate::queue::confirmation::ConfirmationStatus::Failed { error } => {
+                    crate::ffi::types::ConfirmationStatusFFI::Failed {
+                        error: error.clone(),
+                    }
+                }
+            };
+            
+            let conf_ffi = crate::ffi::types::ConfirmationFFI {
+                tx_id: tx_id_hex,
+                status: status_ffi,
+                timestamp: conf.timestamp,
+                relay_count: conf.relay_count,
+            };
+            
+            let response: FfiResult<Option<crate::ffi::types::ConfirmationFFI>> =
+                FfiResult::success(Some(conf_ffi));
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        } else {
+            let response: FfiResult<Option<crate::ffi::types::ConfirmationFFI>> =
+                FfiResult::success(None);
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        }
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupStaleFragments(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        // Cleanup stale fragments (older than 5 minutes = 300 seconds)
+        // cleanup_stale_fragments is on TransactionCache, accessed via SDK's local_cache
+        let cleaned = runtime::block_on(async {
+            let mut cache = transport.sdk.local_cache.write().await;
+            cache.cleanup_stale_fragments(300)
+        });
+        
+        #[derive(serde::Serialize)]
+        struct CleanupResponse {
+            fragments_cleaned: usize,
+        }
+        
+        let response: FfiResult<CleanupResponse> = FfiResult::success(CleanupResponse {
+            fragments_cleaned: cleaned,
+        });
+        
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+

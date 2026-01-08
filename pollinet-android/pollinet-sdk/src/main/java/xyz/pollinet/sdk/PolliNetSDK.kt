@@ -293,11 +293,13 @@ class PolliNetSDK private constructor(
      * 
      * @param transactionBase64 Base64-encoded transaction from createOfflineTransaction
      * @param verifyNonce Whether to verify nonce is still valid before submission
+     * @param onSuccess Optional callback invoked with transaction signature after successful submission
      * @return Transaction signature if successful
      */
     suspend fun submitOfflineTransaction(
         transactionBase64: String,
-        verifyNonce: Boolean = true
+        verifyNonce: Boolean = true,
+        onSuccess: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val request = SubmitOfflineTransactionRequest(
@@ -306,7 +308,56 @@ class PolliNetSDK private constructor(
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
             val resultJson = PolliNetFFI.submitOfflineTransaction(handle, requestJson)
-            parseResult<String>(resultJson)
+            val result = parseResult<String>(resultJson)
+            
+            // Invoke callback on success
+            result.onSuccess { signature ->
+                onSuccess?.invoke(signature)
+            }
+            
+            result
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Submit a nonce account creation transaction and automatically cache the nonce accounts.
+     * 
+     * This is a convenience method that:
+     * 1. Submits the transaction to the blockchain
+     * 2. Automatically caches all nonce accounts in the offline bundle after successful submission
+     * 
+     * Use this when submitting nonce account creation transactions created via
+     * [createUnsignedNonceAccountsAndCache] to automatically cache them.
+     * 
+     * Note: Transactions can contain up to 5 nonce accounts (batched).
+     * 
+     * @param unsignedTransaction The unsigned nonce account transaction (may contain multiple nonce accounts)
+     * @param finalSignedTransactionBase64 The fully signed transaction (after MWA + nonce signatures)
+     * @return Transaction signature if successful, and all nonce accounts are automatically cached
+     */
+    suspend fun submitNonceAccountCreationAndCache(
+        unsignedTransaction: UnsignedNonceTransaction,
+        finalSignedTransactionBase64: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            // Submit the transaction
+            val submitResult = submitOfflineTransaction(
+                transactionBase64 = finalSignedTransactionBase64,
+                verifyNonce = false  // Don't verify for creation transactions
+            )
+            
+            // If successful, automatically cache all nonce accounts in this transaction
+            submitResult.onSuccess { signature ->
+                val cacheResult = cacheNonceAccounts(unsignedTransaction.noncePubkey)
+                cacheResult.onFailure { cacheError ->
+                    // Log but don't fail - submission was successful
+                    android.util.Log.w("PolliNetSDK", "Failed to auto-cache ${unsignedTransaction.noncePubkey.size} nonce accounts after submission: ${cacheError.message}")
+                }
+            }
+            
+            submitResult
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -344,6 +395,37 @@ class PolliNetSDK private constructor(
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
             val resultJson = PolliNetFFI.createUnsignedOfflineTransaction(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing.
+     *
+     * This variant:
+     * - Takes only PUBLIC KEYS (no private keys)
+     * - Uses cached nonce data from the offline bundle (no network required)
+     * - Returns a base64-encoded unsigned SPL transaction that MWA will sign
+     */
+    suspend fun createUnsignedOfflineSplTransaction(
+        senderWallet: String,
+        recipientWallet: String,
+        mintAddress: String,
+        amount: Long,
+        feePayer: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = CreateUnsignedOfflineSplTransactionRequest(
+                senderWallet = senderWallet,
+                recipientWallet = recipientWallet,
+                mintAddress = mintAddress,
+                amount = amount,
+                feePayer = feePayer
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.createUnsignedOfflineSplTransaction(handle, requestJson)
             parseResult<String>(resultJson)
         } catch (e: Exception) {
             Result.failure(e)
@@ -393,6 +475,41 @@ class PolliNetSDK private constructor(
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
             val resultJson = PolliNetFFI.getRequiredSigners(handle, requestJson)
             parseResult<List<String>>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Create an unsigned governance vote transaction (durable nonce, MWA-friendly).
+     *
+     * This method builds an unsigned vote transaction using a nonce account on-chain.
+     * The returned base64-encoded transaction can be:
+     * - Sent to MWA/Seed Vault for signing, or
+     * - Signed manually with local keys.
+     *
+     * NOTE: This is an online operation (uses RPC to fetch nonce data).
+     */
+    suspend fun createUnsignedVote(
+        voter: String,
+        proposalId: String,
+        voteAccount: String,
+        choice: Int,
+        feePayer: String,
+        nonceAccount: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = CastUnsignedVoteRequest(
+                voter = voter,
+                proposalId = proposalId,
+                voteAccount = voteAccount,
+                choice = choice.toUByte(),
+                feePayer = feePayer,
+                nonceAccount = nonceAccount
+            )
+            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.castUnsignedVote(handle, requestJson)
+            parseResult<String>(resultJson)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -454,6 +571,134 @@ class PolliNetSDK private constructor(
     }
 
     /**
+     * Convenience helper: create unsigned nonce account transactions.
+     *
+     * ⚠️ IMPORTANT: This method does NOT cache nonce accounts because the accounts
+     * don't exist on-chain yet! You must:
+     * 1. Sign the transactions with MWA (payer signature)
+     * 2. Add nonce signature using [addNonceSignature]
+     * 3. Submit transactions using [submitOfflineTransaction] to create accounts on-chain
+     * 4. THEN call [cacheNonceAccounts] to cache the newly created accounts
+     *
+     * Workflow:
+     * 1. Calls [createUnsignedNonceTransactions] to generate unsigned nonce account TXs.
+     * 2. Returns the list of [UnsignedNonceTransaction] objects ready for MWA signing.
+     *
+     * This method is suitable for both MWA (co-sign with payer) and non-MWA flows.
+     * 
+     * @param count Number of nonce accounts to create (1-10 recommended)
+     * @param payerPubkey Public key of the account that will pay for account creation
+     * @param onCreated Optional callback invoked with nonce pubkeys after transactions are created.
+     *                 Use this to automatically cache accounts after successful submission.
+     * @return List of unsigned nonce account transactions ready for signing
+     */
+    suspend fun createUnsignedNonceAccountsAndCache(
+        count: Int,
+        payerPubkey: String,
+        onCreated: ((List<String>) -> Unit)? = null
+    ): Result<List<UnsignedNonceTransaction>> = withContext(Dispatchers.IO) {
+        try {
+            // Create unsigned transactions
+            val result = createUnsignedNonceTransactions(count, payerPubkey)
+            
+            // Invoke callback with nonce pubkeys if provided (flatten all nonce pubkeys from all transactions)
+            result.onSuccess { transactions ->
+                val noncePubkeys = transactions.flatMap { it.noncePubkey }
+                onCreated?.invoke(noncePubkeys)
+            }
+            
+            result
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Cache nonce accounts after successful submission.
+     * 
+     * Helper method that takes the unsigned transactions and a list of successful signatures,
+     * then automatically caches the corresponding nonce accounts.
+     * 
+     * Use this after submitting nonce account creation transactions to automatically
+     * cache them in the offline bundle.
+     * 
+     * @param transactions The original list of unsigned nonce transactions
+     * @param successfulSignatures List of transaction signatures that were successfully submitted.
+     *                            Must match the order of transactions.
+     * @return Result containing the number of accounts cached
+     */
+    suspend fun cacheNonceAccountsAfterSubmission(
+        transactions: List<UnsignedNonceTransaction>,
+        successfulSignatures: List<String>
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            if (transactions.size != successfulSignatures.size) {
+                return@withContext Result.failure(
+                    IllegalArgumentException(
+                        "Transaction count (${transactions.size}) doesn't match signature count (${successfulSignatures.size})"
+                    )
+                )
+            }
+            
+            // Extract and flatten all nonce pubkeys from successfully submitted transactions
+            val noncePubkeys = transactions.flatMap { it.noncePubkey }
+            
+            // Cache all nonce accounts
+            cacheNonceAccounts(noncePubkeys)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Refresh all cached nonce data in the offline bundle.
+     *
+     * This quietly:
+     * - Loads the existing OfflineTransactionBundle from secure storage
+     * - For each cached nonce account, fetches the latest on-chain nonce state
+     * - Updates blockhash / fee data and marks all nonces as available (used = false)
+     *
+     * Safe to call whenever internet connectivity is restored.
+     *
+     * @return Number of nonce entries refreshed (0 if none or no bundle)
+     */
+    /**
+     * Refresh the blockhash in an unsigned transaction.
+     * 
+     * Use this right before sending an unsigned transaction to MWA for signing
+     * to ensure the blockhash is fresh and won't expire during the signing process.
+     * 
+     * This is particularly useful for nonce account creation transactions, which
+     * may take time to be signed by the user, causing the original blockhash to expire.
+     * 
+     * @param unsignedTxBase64 Base64-encoded unsigned transaction
+     * @return Result containing the refreshed transaction (base64-encoded)
+     */
+    suspend fun refreshBlockhashInUnsignedTransaction(
+        unsignedTxBase64: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.refreshBlockhashInUnsignedTransaction(
+                handle,
+                unsignedTxBase64
+            )
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    suspend fun refreshOfflineBundle(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.refreshOfflineBundle(handle)
+            val response = parseResult<RefreshOfflineBundleResponse>(resultJson)
+            response.map { it.refreshedCount }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Add nonce signature to a payer-signed transaction
      * 
      * After MWA signs the transaction with the payer key (first signature),
@@ -465,7 +710,7 @@ class PolliNetSDK private constructor(
      */
     suspend fun addNonceSignature(
         payerSignedTransactionBase64: String,
-        nonceKeypairBase64: String
+        nonceKeypairBase64: List<String>  // Multiple keypairs for batched transactions
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val request = AddNonceSignatureRequest(
@@ -1107,6 +1352,16 @@ data class CreateUnsignedOfflineTransactionRequest(
 )
 
 @Serializable
+data class CreateUnsignedOfflineSplTransactionRequest(
+    val version: Int = 1,
+    val senderWallet: String,
+    val recipientWallet: String,
+    val mintAddress: String,
+    val amount: Long,
+    val feePayer: String
+)
+
+@Serializable
 data class GetMessageToSignRequest(
     val version: Int = 1,
     val unsignedTransactionBase64: String
@@ -1132,8 +1387,8 @@ data class CreateUnsignedNonceTransactionsRequest(
 @Serializable
 data class UnsignedNonceTransaction(
     val unsignedTransactionBase64: String,
-    val nonceKeypairBase64: String,
-    val noncePubkey: String
+    val nonceKeypairBase64: List<String>,  // Multiple keypairs for batched transactions
+    val noncePubkey: List<String>  // Multiple pubkeys for batched transactions
 )
 
 @Serializable
@@ -1148,10 +1403,26 @@ data class CacheNonceAccountsResponse(
 )
 
 @Serializable
+data class RefreshOfflineBundleResponse(
+    val refreshedCount: Int
+)
+
+@Serializable
+data class CastUnsignedVoteRequest(
+    val version: Int = 1,
+    val voter: String,
+    @SerialName("proposal_id") val proposalId: String,
+    @SerialName("vote_account") val voteAccount: String,
+    val choice: UByte,
+    @SerialName("fee_payer") val feePayer: String,
+    @SerialName("nonce_account") val nonceAccount: String
+)
+
+@Serializable
 data class AddNonceSignatureRequest(
     val version: Int = 1,
     val payerSignedTransactionBase64: String,
-    val nonceKeypairBase64: String
+    val nonceKeypairBase64: List<String>  // Multiple keypairs for batched transactions
 )
 
 // =============================================================================

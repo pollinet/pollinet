@@ -35,8 +35,6 @@ pub fn fragment_transaction_with_max_payload(
     transaction_bytes: &[u8],
     max_payload: usize,
 ) -> Vec<TransactionFragment> {
-    use crate::ble::mesh::HEADER_SIZE;
-    
     tracing::info!("Fragmenting transaction: {} bytes (max_payload: {})", transaction_bytes.len(), max_payload);
 
     // Calculate transaction ID (SHA256 hash)
@@ -55,8 +53,9 @@ pub fn fragment_transaction_with_max_payload(
     // - fragment_index: 2-3 bytes (u16 + varint overhead)
     // - total_fragments: 2-3 bytes (u16 + varint overhead)
     // - data length prefix: 1-4 bytes (Vec<u8> length)
-    // Total overhead: ~40 bytes conservatively
-    let bincode_overhead = 40;
+    // - bincode container overhead: ~2-4 bytes
+    // Total overhead: ~45-50 bytes (measured: 44 bytes actual, using 50 for safety margin)
+    let bincode_overhead = 50; // Increased from 40 to account for actual measured overhead
     let max_data = max_payload.saturating_sub(bincode_overhead);
     
     // Ensure minimum fragment size (but allow much larger with good MTU)

@@ -188,6 +188,32 @@ impl PolliNetSDK {
             .await?)
     }
     
+    /// Create an UNSIGNED offline SPL token transfer transaction using cached nonce data
+    /// This variant is designed for MWA/Seed Vault workflows where private keys do not
+    /// leave the device and nonce/blockhash data comes from an offline bundle.
+    ///
+    /// Returns base64-encoded unsigned transaction suitable for MWA signing.
+    pub fn create_unsigned_offline_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        recipient_wallet: &str,
+        fee_payer: &str,
+        mint_address: &str,
+        amount: u64,
+        cached_nonce: &transaction::CachedNonceData,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_offline_spl_transaction(
+                sender_wallet,
+                recipient_wallet,
+                fee_payer,
+                mint_address,
+                amount,
+                cached_nonce,
+            )?)
+    }
+    
     /// Create an unsigned governance vote transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned vote transaction
     /// Voter is used as nonce authority
@@ -396,6 +422,20 @@ impl PolliNetSDK {
         Ok(self
             .transaction_service
             .send_and_confirm_transaction(base64_tx)
+            .await?)
+    }
+    
+    /// Refresh the blockhash in an unsigned transaction
+    /// 
+    /// Use this right before sending an unsigned transaction to MWA for signing
+    /// to ensure the blockhash is fresh and won't expire during the signing process.
+    pub async fn refresh_blockhash_in_unsigned_transaction(
+        &self,
+        unsigned_tx_base64: &str,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .refresh_blockhash_in_unsigned_transaction(unsigned_tx_base64)
             .await?)
     }
     

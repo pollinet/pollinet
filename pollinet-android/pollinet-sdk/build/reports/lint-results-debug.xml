@@ -13,7 +13,7 @@
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="202"
+            line="223"
             column="29"/>
     </issue>
 
@@ -29,7 +29,7 @@
         errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="212"
+            line="233"
             column="37"/>
     </issue>
 
@@ -45,7 +45,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="216"
+            line="237"
             column="41"/>
     </issue>
 
@@ -61,7 +61,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="1236"
+            line="1505"
             column="13"/>
     </issue>
 
@@ -77,7 +77,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="1543"
+            line="1854"
             column="9"/>
     </issue>
 
@@ -93,7 +93,7 @@
         errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="2334"
+            line="2869"
             column="35"/>
     </issue>
 
@@ -109,7 +109,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="2850"
+            line="3411"
             column="13"/>
     </issue>
 
@@ -269,7 +269,7 @@
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="2141"
+            line="2613"
             column="29"/>
     </issue>
 
@@ -285,8 +285,56 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="2895"
+            line="3456"
             column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        severity="Warning"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        category="Performance"
+        priority="6"
+        summary="Obsolete SDK_INT Version Check"
+        explanation="This check flags version checks that are not necessary, because the `minSdkVersion` (or surrounding known API level) is already at least as high as the version checked for.&#xA;&#xA;Similarly, it also looks for resources in `-vNN` folders, such as `values-v14` where the version qualifier is less than or equal to the `minSdkVersion`, where the contents should be merged into the best folder."
+        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
+            line="3483"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        severity="Warning"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        category="Performance"
+        priority="6"
+        summary="Obsolete SDK_INT Version Check"
+        explanation="This check flags version checks that are not necessary, because the `minSdkVersion` (or surrounding known API level) is already at least as high as the version checked for.&#xA;&#xA;Similarly, it also looks for resources in `-vNN` folders, such as `values-v14` where the version qualifier is less than or equal to the `minSdkVersion`, where the contents should be merged into the best folder."
+        errorLine1="                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BootReceiver.kt"
+            line="31"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        severity="Warning"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        category="Performance"
+        priority="6"
+        summary="Obsolete SDK_INT Version Check"
+        explanation="This check flags version checks that are not necessary, because the `minSdkVersion` (or surrounding known API level) is already at least as high as the version checked for.&#xA;&#xA;Similarly, it also looks for resources in `-vNN` folders, such as `values-v14` where the version qualifier is less than or equal to the `minSdkVersion`, where the contents should be merged into the best folder."
+        errorLine1="                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BootReceiver.kt"
+            line="52"
+            column="21"/>
     </issue>
 
     <issue

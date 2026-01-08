@@ -117,6 +117,22 @@ pub struct CreateUnsignedOfflineTransactionRequest {
     // NOTE: Nonce is picked automatically from stored bundle
 }
 
+/// Request to create an UNSIGNED offline SPL token transfer for MWA signing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateUnsignedOfflineSplTransactionRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "senderWallet")]
+    pub sender_wallet: String,
+    #[serde(rename = "recipientWallet")]
+    pub recipient_wallet: String,
+    #[serde(rename = "mintAddress")]
+    pub mint_address: String,
+    pub amount: u64,
+    #[serde(rename = "feePayer")]
+    pub fee_payer: String,
+}
+
 // Get message to sign for MWA
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetMessageToSignRequest {
@@ -329,9 +345,9 @@ pub struct UnsignedNonceTransaction {
     #[serde(rename = "unsignedTransactionBase64")]
     pub unsigned_transaction_base64: String,
     #[serde(rename = "nonceKeypairBase64")]
-    pub nonce_keypair_base64: String,
+    pub nonce_keypair_base64: Vec<String>,  // Multiple keypairs for batched transactions
     #[serde(rename = "noncePubkey")]
-    pub nonce_pubkey: String,
+    pub nonce_pubkey: Vec<String>,  // Multiple pubkeys for batched transactions
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,6 +356,16 @@ pub struct CacheNonceAccountsRequest {
     pub version: u32,
     #[serde(rename = "nonceAccounts")]
     pub nonce_accounts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddNonceSignatureRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "payerSignedTransactionBase64")]
+    pub payer_signed_transaction_base64: String,
+    #[serde(rename = "nonceKeypairBase64")]
+    pub nonce_keypair_base64: Vec<String>,  // Multiple keypairs for batched transactions
 }
 
 // ============================================================================

@@ -45,11 +45,16 @@
 25-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:21:5-67
 25-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:21:22-64
 26
-27    <uses-feature
-27-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:23:5-90
-28        android:name="android.hardware.bluetooth_le"
-28-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:23:19-63
-29        android:required="true" />
-29-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:23:64-87
-30
-31</manifest>
+27    <!-- Boot completed permission for auto-start after device reboot -->
+28    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+28-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:24:5-81
+28-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:24:22-78
+29
+30    <uses-feature
+30-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:26:5-90
+31        android:name="android.hardware.bluetooth_le"
+31-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:26:19-63
+32        android:required="true" />
+32-->/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:26:64-87
+33
+34</manifest>

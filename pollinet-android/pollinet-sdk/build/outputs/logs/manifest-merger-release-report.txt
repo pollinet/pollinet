@@ -1,7 +1,7 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:2:1-25:12
-INJECTED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:2:1-25:12
+ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:2:1-28:12
+INJECTED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:2:1-28:12
 	package
 		INJECTED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml
 	xmlns:android
@@ -48,12 +48,16 @@ uses-permission#android.permission.INTERNET
 ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:21:5-67
 	android:name
 		ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:21:22-64
-uses-feature#android.hardware.bluetooth_le
-ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:23:5-90
-	android:required
-		ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:23:64-87
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:24:5-81
 	android:name
-		ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:23:19-63
+		ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:24:22-78
+uses-feature#android.hardware.bluetooth_le
+ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:26:5-90
+	android:required
+		ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:26:64-87
+	android:name
+		ADDED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml:26:19-63
 uses-sdk
 INJECTED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/AndroidManifest.xml

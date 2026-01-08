@@ -177,9 +177,9 @@ document.getElementById(id).style.display = 'none';
 <div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
   <header class="mdl-layout__header">
     <div class="mdl-layout__header-row">
-      <span class="mdl-layout-title">Lint Report: 7 errors and 18 warnings</span>
+      <span class="mdl-layout-title">Lint Report: 7 errors and 21 warnings</span>
       <div class="mdl-layout-spacer"></div>
-      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Tue Jan 06 09:32:40 WAT 2026 by AGP (8.12.3)</nav>
+      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Thu Jan 08 14:10:29 WAT 2026 by AGP (8.12.3)</nav>
     </div>
   </header>
   <div class="mdl-layout__drawer">
@@ -192,7 +192,7 @@ document.getElementById(id).style.display = 'none';
       <a class="mdl-navigation__link" href="#NewerVersionAvailable"><i class="material-icons warning-icon">warning</i>Newer Library Versions Available (4)</a>
       <a class="mdl-navigation__link" href="#Aligned16KB"><i class="material-icons warning-icon">warning</i>Native library dependency not 16 KB aligned (3)</a>
       <a class="mdl-navigation__link" href="#HardwareIds"><i class="material-icons warning-icon">warning</i>Hardware Id Usage (1)</a>
-      <a class="mdl-navigation__link" href="#ObsoleteSdkInt"><i class="material-icons warning-icon">warning</i>Obsolete SDK_INT Version Check (3)</a>
+      <a class="mdl-navigation__link" href="#ObsoleteSdkInt"><i class="material-icons warning-icon">warning</i>Obsolete SDK_INT Version Check (6)</a>
       <a class="mdl-navigation__link" href="#UseTomlInstead"><i class="material-icons warning-icon">warning</i>Use TOML Version Catalog Instead (5)</a>
     </nav>
   </div>
@@ -231,7 +231,7 @@ document.getElementById(id).style.display = 'none';
 <tr><td class="countColumn"></td><td class="categoryColumn"><a href="#Performance">Performance</a>
 </td></tr>
 <tr>
-<td class="countColumn">3</td><td class="issueColumn"><i class="material-icons warning-icon">warning</i>
+<td class="countColumn">6</td><td class="issueColumn"><i class="material-icons warning-icon">warning</i>
 <a href="#ObsoleteSdkInt">ObsoleteSdkInt</a>: Obsolete SDK_INT Version Check</td></tr>
 <tr><td class="countColumn"></td><td class="categoryColumn"><a href="#Productivity">Productivity</a>
 </td></tr>
@@ -259,74 +259,74 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:202</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno">  199 </span>  <span class="keyword">if</span> (device == clientGatt?.device) {
-<span class="lineno">  200 </span>      <span class="keyword">this</span><span class="annotation">@BleService</span>.appendLog(<span class="string">"✅ Bonding completed, retrying connection..."</span>)
-<span class="lineno">  201 </span>      mainHandler.postDelayed({
-<span class="caretline"><span class="lineno">  202 </span>          <span class="error">clientGatt?.connect()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  203 </span>      }, <span class="number">500</span>)
-<span class="lineno">  204 </span>  }
-<span class="lineno">  205 </span>  
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:223</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno">  220 </span>  <span class="keyword">if</span> (device == clientGatt?.device) {
+<span class="lineno">  221 </span>      <span class="keyword">this</span><span class="annotation">@BleService</span>.appendLog(<span class="string">"✅ Bonding completed, retrying connection..."</span>)
+<span class="lineno">  222 </span>      mainHandler.postDelayed({
+<span class="caretline"><span class="lineno">  223 </span>          <span class="error">clientGatt?.connect()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  224 </span>      }, <span class="number">500</span>)
+<span class="lineno">  225 </span>  }
+<span class="lineno">  226 </span>  
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:212</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno">  209 </span>  mainHandler.postDelayed({
-<span class="lineno">  210 </span>      <span class="keyword">try</span> {
-<span class="lineno">  211 </span>          pendingGatt?.let { gatt ->
-<span class="caretline"><span class="lineno">  212 </span>              <span class="error">gatt.setCharacteristicNotification(remoteTxCharacteristic, <span class="keyword">true</span>)</span></span>
-<span class="lineno">  213 </span>              <span class="keyword">val</span> descriptor = pendingDescriptorWrite
-<span class="lineno">  214 </span>              <span class="keyword">if</span> (descriptor != <span class="keyword">null</span>) {
-<span class="lineno">  215 </span>                  descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:233</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno">  230 </span>  mainHandler.postDelayed({
+<span class="lineno">  231 </span>      <span class="keyword">try</span> {
+<span class="lineno">  232 </span>          pendingGatt?.let { gatt ->
+<span class="caretline"><span class="lineno">  233 </span>              <span class="error">gatt.setCharacteristicNotification(remoteTxCharacteristic, <span class="keyword">true</span>)</span></span>
+<span class="lineno">  234 </span>              <span class="keyword">val</span> descriptor = pendingDescriptorWrite
+<span class="lineno">  235 </span>              <span class="keyword">if</span> (descriptor != <span class="keyword">null</span>) {
+<span class="lineno">  236 </span>                  descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:216</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno">  213 </span>      <span class="keyword">val</span> descriptor = pendingDescriptorWrite
-<span class="lineno">  214 </span>      <span class="keyword">if</span> (descriptor != <span class="keyword">null</span>) {
-<span class="lineno">  215 </span>          descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-<span class="caretline"><span class="lineno">  216 </span>          <span class="error">gatt.writeDescriptor(descriptor)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno">  217 </span>          <span class="keyword">this</span><span class="annotation">@BleService</span>.appendLog(<span class="string">"🔄 Retrying descriptor write after bonding..."</span>)
-<span class="lineno">  218 </span>      }
-<span class="lineno">  219 </span>  }
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:237</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno">  234 </span>      <span class="keyword">val</span> descriptor = pendingDescriptorWrite
+<span class="lineno">  235 </span>      <span class="keyword">if</span> (descriptor != <span class="keyword">null</span>) {
+<span class="lineno">  236 </span>          descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+<span class="caretline"><span class="lineno">  237 </span>          <span class="error">gatt.writeDescriptor(descriptor)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno">  238 </span>          <span class="keyword">this</span><span class="annotation">@BleService</span>.appendLog(<span class="string">"🔄 Retrying descriptor write after bonding..."</span>)
+<span class="lineno">  239 </span>      }
+<span class="lineno">  240 </span>  }
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:1236</span>: <span class="message">Missing permissions required by ConnectivityManager.registerNetworkCallback: android.permission.ACCESS_NETWORK_STATE</span><br /><pre class="errorlines">
-<span class="lineno"> 1233 </span>                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-<span class="lineno"> 1234 </span>                .build()
-<span class="lineno"> 1235 </span>            
-<span class="caretline"><span class="lineno"> 1236 </span>            <span class="error">connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 1237 </span>            appendLog(<span class="string">"✅ Network callback registered"</span>)
-<span class="lineno"> 1238 </span>            
-<span class="lineno"> 1239 </span>        } catch (e: Exception) {
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:1505</span>: <span class="message">Missing permissions required by ConnectivityManager.registerNetworkCallback: android.permission.ACCESS_NETWORK_STATE</span><br /><pre class="errorlines">
+<span class="lineno"> 1502 </span>                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+<span class="lineno"> 1503 </span>                .build()
+<span class="lineno"> 1504 </span>            
+<span class="caretline"><span class="lineno"> 1505 </span>            <span class="error">connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 1506 </span>            appendLog(<span class="string">"✅ Network callback registered"</span>)
+<span class="lineno"> 1507 </span>            
+<span class="lineno"> 1508 </span>        } catch (e: Exception) {
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:1543</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno"> 1540 </span>        stopScanning()
-<span class="lineno"> 1541 </span>        stopAdvertising()
-<span class="lineno"> 1542 </span>        closeGattConnection()
-<span class="caretline"><span class="lineno"> 1543 </span>        <span class="error">gattServer?.close()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 1544 </span>        sdk?.shutdown()
-<span class="lineno"> 1545 </span>        <span class="keyword">super</span>.onDestroy()
-<span class="lineno"> 1546 </span>    }
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:1854</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno"> 1851 </span>        stopScanning()
+<span class="lineno"> 1852 </span>        stopAdvertising()
+<span class="lineno"> 1853 </span>        closeGattConnection()
+<span class="caretline"><span class="lineno"> 1854 </span>        <span class="error">gattServer?.close()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 1855 </span>        sdk?.shutdown()
+<span class="lineno"> 1856 </span>        <span class="keyword">super</span>.onDestroy()
+<span class="lineno"> 1857 </span>    }
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2334</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno"> 2331 </span>            
-<span class="lineno"> 2332 </span>            <span class="comment">// CRITICAL: Discover services after MTU negotiation</span>
-<span class="lineno"> 2333 </span>            appendLog(<span class="string">"🔍 Starting service discovery..."</span>)
-<span class="caretline"><span class="lineno"> 2334 </span>            <span class="keyword">val</span> discoverSuccess = <span class="error">gatt.discoverServices()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 2335 </span>            <span class="keyword">if</span> (!discoverSuccess) {
-<span class="lineno"> 2336 </span>                appendLog(<span class="string">"❌ Failed to start service discovery!"</span>)
-<span class="lineno"> 2337 </span>            }
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2869</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno"> 2866 </span>            
+<span class="lineno"> 2867 </span>            <span class="comment">// CRITICAL: Discover services after MTU negotiation</span>
+<span class="lineno"> 2868 </span>            appendLog(<span class="string">"🔍 Starting service discovery..."</span>)
+<span class="caretline"><span class="lineno"> 2869 </span>            <span class="keyword">val</span> discoverSuccess = <span class="error">gatt.discoverServices()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 2870 </span>            <span class="keyword">if</span> (!discoverSuccess) {
+<span class="lineno"> 2871 </span>                appendLog(<span class="string">"❌ Failed to start service discovery!"</span>)
+<span class="lineno"> 2872 </span>            }
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2850</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno"> 2847 </span>
-<span class="lineno"> 2848 </span>  override <span class="keyword">fun</span> onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
-<span class="lineno"> 2849 </span>      appendLog(<span class="string">"📋 EXECUTE WRITE: device=${</span>device.address<span class="string">}, requestId=$requestId, execute=$execute"</span>)
-<span class="caretline"><span class="lineno"> 2850 </span>      <span class="error">gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, <span class="number">0</span>, <span class="keyword">null</span>)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 2851 </span>  }
-<span class="lineno"> 2852 </span>
-<span class="lineno"> 2853 </span>  override <span class="keyword">fun</span> onNotificationSent(device: BluetoothDevice, status: Int) {
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3411</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno"> 3408 </span>
+<span class="lineno"> 3409 </span>  override <span class="keyword">fun</span> onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
+<span class="lineno"> 3410 </span>      appendLog(<span class="string">"📋 EXECUTE WRITE: device=${</span>device.address<span class="string">}, requestId=$requestId, execute=$execute"</span>)
+<span class="caretline"><span class="lineno"> 3411 </span>      <span class="error">gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, <span class="number">0</span>, <span class="keyword">null</span>)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 3412 </span>  }
+<span class="lineno"> 3413 </span>
+<span class="lineno"> 3414 </span>  override <span class="keyword">fun</span> onNotificationSent(device: BluetoothDevice, status: Int) {
 </pre>
 
 </div>
@@ -597,14 +597,14 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2141</span>: <span class="message">Using <code>getAddress</code> to get device identifiers is not recommended</span><br /><pre class="errorlines">
-<span class="lineno"> 2138 </span>            }
-<span class="lineno"> 2139 </span>            
-<span class="lineno"> 2140 </span>            <span class="comment">// Connection arbitration using MAC address comparison</span>
-<span class="caretline"><span class="lineno"> 2141 </span>            <span class="keyword">val</span> myAddress = <span class="warning">bluetoothAdapter?.address</span> ?: <span class="string">"00:00:00:00:00:00"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 2142 </span>            <span class="keyword">val</span> shouldInitiateConnection = myAddress &lt; peerAddress
-<span class="lineno"> 2143 </span>            
-<span class="lineno"> 2144 </span>            <span class="keyword">if</span> (!shouldInitiateConnection) {
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2613</span>: <span class="message">Using <code>getAddress</code> to get device identifiers is not recommended</span><br /><pre class="errorlines">
+<span class="lineno"> 2610 </span>            }
+<span class="lineno"> 2611 </span>            
+<span class="lineno"> 2612 </span>            <span class="comment">// Connection arbitration using MAC address comparison</span>
+<span class="caretline"><span class="lineno"> 2613 </span>            <span class="keyword">val</span> myAddress = <span class="warning">bluetoothAdapter?.address</span> ?: <span class="string">"00:00:00:00:00:00"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 2614 </span>            <span class="keyword">val</span> shouldInitiateConnection = myAddress &lt; peerAddress
+<span class="lineno"> 2615 </span>            
+<span class="lineno"> 2616 </span>            <span class="keyword">if</span> (!shouldInitiateConnection) {
 </pre>
 
 </div>
@@ -645,14 +645,44 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2895</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
-<span class="lineno"> 2892 </span>    }
-<span class="lineno"> 2893 </span>
-<span class="lineno"> 2894 </span>    private <span class="keyword">fun</span> createNotificationChannel() {
-<span class="caretline"><span class="lineno"> 2895 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.O</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 2896 </span>            <span class="keyword">val</span> channel = NotificationChannel(
-<span class="lineno"> 2897 </span>                CHANNEL_ID,
-<span class="lineno"> 2898 </span>                <span class="string">"PolliNet BLE Service"</span>,
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3456</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
+<span class="lineno"> 3453 </span>    }
+<span class="lineno"> 3454 </span>
+<span class="lineno"> 3455 </span>    private <span class="keyword">fun</span> createNotificationChannel() {
+<span class="caretline"><span class="lineno"> 3456 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.O</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 3457 </span>            <span class="keyword">val</span> channel = NotificationChannel(
+<span class="lineno"> 3458 </span>                CHANNEL_ID,
+<span class="lineno"> 3459 </span>                <span class="string">"PolliNet BLE Service"</span>,
+</pre>
+
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3483</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
+<span class="lineno"> 3480 </span><span class="javadoc">     * This is called automatically when the service starts.
+</span><span class="lineno"> 3481 </span><span class="javadoc">     */</span>
+<span class="lineno"> 3482 </span>    private <span class="keyword">fun</span> requestBatteryOptimizationExemption() {
+<span class="caretline"><span class="lineno"> 3483 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.M</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 3484 </span>            <span class="keyword">try</span> {
+<span class="lineno"> 3485 </span>                <span class="keyword">val</span> powerManager = getSystemService(Context.POWER_SERVICE) <span class="keyword">as</span> PowerManager
+<span class="lineno"> 3486 </span>                <span class="keyword">val</span> packageName = packageName
+</pre>
+
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BootReceiver.kt">../../src/main/java/xyz/pollinet/sdk/BootReceiver.kt</a>:31</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
+<span class="lineno"> 28 </span>                    action = BleService.ACTION_START
+<span class="lineno"> 29 </span>                }
+<span class="lineno"> 30 </span>                
+<span class="caretline"><span class="lineno"> 31 </span>                <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.O</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 32 </span>                    <span class="comment">// Android 8.0+ requires startForegroundService</span>
+<span class="lineno"> 33 </span>                    context.startForegroundService(serviceIntent)
+<span class="lineno"> 34 </span>                    Log.d(TAG, <span class="string">"✅ Foreground service started after boot"</span>)
+</pre>
+
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BootReceiver.kt">../../src/main/java/xyz/pollinet/sdk/BootReceiver.kt</a>:52</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
+<span class="lineno"> 49 </span>                    action = BleService.ACTION_START
+<span class="lineno"> 50 </span>                }
+<span class="lineno"> 51 </span>                
+<span class="caretline"><span class="lineno"> 52 </span>                <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.O</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 53 </span>                    context.startForegroundService(serviceIntent)
+<span class="lineno"> 54 </span>                    Log.d(TAG, <span class="string">"✅ Service restarted after app update"</span>)
+<span class="lineno"> 55 </span>                } <span class="keyword">else</span> {
 </pre>
 
 <span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/KeystoreManager.kt">../../src/main/java/xyz/pollinet/sdk/KeystoreManager.kt</a>:33</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">

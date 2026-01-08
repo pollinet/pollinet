@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.os.PowerManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
@@ -38,6 +39,8 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 import java.util.UUID as JavaUUID
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 
 /**
  * Foreground service for BLE operations.
@@ -77,6 +80,12 @@ class BleService : Service() {
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     
+    // JSON serializer for confirmations
+    private val json = Json { 
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+    
     // Bluetooth components
     private var bluetoothManager: BluetoothManager? = null
     private var bluetoothAdapter: BluetoothAdapter? = null
@@ -102,6 +111,11 @@ class BleService : Service() {
     private var sendingJob: Job? = null
     private val sendingMutex = Mutex()
     private val operationQueue = ConcurrentLinkedQueue<ByteArray>()
+    
+    // Connection management - decoupled from discovery
+    private var pendingConnectionDevice: BluetoothDevice? = null
+    private var connectionAttemptTime: Long = 0
+    private val CONNECTION_TIMEOUT_MS = 10_000L // 10 seconds timeout for connection attempts
     // Edge Case Fix #8: Use AtomicBoolean to prevent race conditions
     // Prevents concurrent BLE operations that cause status 133 errors
     private val operationInProgress = AtomicBoolean(false)
@@ -174,6 +188,13 @@ class BleService : Service() {
     
     // Phase 5: Auto-save job for queue persistence
     private var autoSaveJob: Job? = null
+    
+    // Mesh watchdog: Ensures scanning/advertising stay active
+    private var meshWatchdogJob: Job? = null
+    
+    // Alternating mesh mode for dancing mesh
+    private var alternatingMeshJob: Job? = null
+    private val ALTERNATING_INTERVAL_MS = 8_000L // 8 seconds per mode
     
     // Edge Case Fix #1: Bluetooth state tracking
     // Saves operation state when BT disabled, restores when BT re-enabled
@@ -259,28 +280,18 @@ class BleService : Service() {
                     BluetoothAdapter.STATE_ON -> {
                         appendLog("📶 Bluetooth enabled - resuming operations")
                         
-                        // Resume operations based on saved state
-                        if (wasAdvertisingBeforeDisable) {
-                            appendLog("   Resuming advertising (was active before BT disabled)")
-                            mainHandler.postDelayed({
-                                startAdvertising()
-                                wasAdvertisingBeforeDisable = false // Reset flag
-                            }, 500) // Small delay to ensure BT stack is ready
-                        }
-                        
-                        if (wasScanningBeforeDisable) {
-                            appendLog("   Resuming scanning (was active before BT disabled)")
-                            mainHandler.postDelayed({
-                                startScanning()
-                                wasScanningBeforeDisable = false // Reset flag
-                            }, 1000) // Longer delay to avoid conflicts with advertising
-                        }
-                        
-                        if (!wasAdvertisingBeforeDisable && !wasScanningBeforeDisable) {
-                            appendLog("   No operations to resume (were idle before BT disabled)")
-                        }
-                        
-                        appendLog("✅ Bluetooth ready - operations resumed")
+                        // Resume alternating mesh mode after Bluetooth is re-enabled
+                        appendLog("   Resuming alternating mesh mode...")
+                        mainHandler.postDelayed({
+                            if (_connectionState.value == ConnectionState.DISCONNECTED && 
+                                connectedDevice == null && clientGatt == null) {
+                                startAlternatingMeshMode()
+                                appendLog("✅ Alternating mesh mode resumed after BT re-enable")
+                            }
+                            // Reset saved state flags
+                            wasAdvertisingBeforeDisable = false
+                            wasScanningBeforeDisable = false
+                        }, 1000)
                     }
                     
                     BluetoothAdapter.STATE_TURNING_OFF -> {
@@ -359,12 +370,19 @@ class BleService : Service() {
             android.util.Log.d("BleService", "onCreate: Permissions granted, starting foreground")
             startForeground()
             
+            // Request battery optimization exemption for persistent operation
+            requestBatteryOptimizationExemption()
+            
             // Initialize Bluetooth asynchronously to avoid blocking onCreate
             serviceScope.launch {
                 try {
                     android.util.Log.d("BleService", "onCreate: Initializing Bluetooth")
                     initializeBluetooth()
                     android.util.Log.d("BleService", "onCreate: Bluetooth initialized successfully")
+                    
+                    // Auto-start alternating mesh mode for automatic peer discovery
+                    appendLog("🚀 Auto-starting alternating mesh mode")
+                    startAlternatingMeshMode()
                 } catch (e: Exception) {
                     android.util.Log.e("BleService", "onCreate: Failed to initialize Bluetooth", e)
                     _connectionState.value = ConnectionState.ERROR
@@ -378,6 +396,9 @@ class BleService : Service() {
                     delay(1000) // Update every second
                 }
             }
+            
+            // Note: Mesh watchdog disabled - alternating mode handles discovery automatically
+            // startMeshWatchdog()
         } else {
             android.util.Log.w("BleService", "onCreate: Missing required permissions, stopping service")
             // Stop the service if permissions aren't granted
@@ -474,6 +495,20 @@ class BleService : Service() {
                     
                     // Start sending loop if not already running
                     ensureSendingLoopStarted()
+                    
+                    // If not connected, ensure scanning/advertising is active to establish connection
+                    if (_connectionState.value != ConnectionState.CONNECTED) {
+                        appendLog("⚠️ Not connected - ensuring BLE discovery is active...")
+                        // Start scanning if not already scanning and not advertising
+                        if (!_isScanning.value && !_isAdvertising.value) {
+                            appendLog("   Starting scan to find peers...")
+                            startScanning()
+                        } else if (_isAdvertising.value) {
+                            appendLog("   Already advertising - waiting for peer to connect...")
+                        } else {
+                            appendLog("   Already scanning - waiting to find peer...")
+                        }
+                    }
                 }.onFailure {
                     appendLog("❌ Failed to queue provided transaction: ${it.message}")
                 }
@@ -604,6 +639,23 @@ class BleService : Service() {
                             // Store for potential MTU re-fragmentation
                             pendingTransactionBytes = txBytes
                             fragmentsQueuedWithMtu = currentMtu
+                            
+                            // Start sending loop if not already running
+                            ensureSendingLoopStarted()
+                            
+                            // If not connected, ensure scanning/advertising is active to establish connection
+                            if (_connectionState.value != ConnectionState.CONNECTED) {
+                                appendLog("⚠️ Not connected - ensuring BLE discovery is active...")
+                                // Start scanning if not already scanning and not advertising
+                                if (!_isScanning.value && !_isAdvertising.value) {
+                                    appendLog("   Starting scan to find peers...")
+                                    startScanning()
+                                } else if (_isAdvertising.value) {
+                                    appendLog("   Already advertising - waiting for peer to connect...")
+                                } else {
+                                    appendLog("   Already scanning - waiting to find peer...")
+                                }
+                            }
                             
                             Result.success(count)
                         },
@@ -981,12 +1033,23 @@ class BleService : Service() {
                     appendLog("   Transaction is now on-chain")
                     
                     // Mark as submitted for deduplication
-                    sdkInstance.markTransactionSubmitted(
-                        android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
-                    )
+                    val txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
+                    sdkInstance.markTransactionSubmitted(txBytes)
+                    
+                    // Calculate transaction hash (SHA-256) for confirmation
+                    // The confirmation queue expects a hex-encoded 32-byte hash, not the UUID txId
+                    val txHash = try {
+                        val digest = java.security.MessageDigest.getInstance("SHA-256")
+                        digest.update(txBytes)
+                        digest.digest().joinToString("") { "%02x".format(it) }
+                    } catch (e: Exception) {
+                        appendLog("❌ Failed to calculate transaction hash: ${e.message}")
+                        // Fallback: use first 64 chars of base64 as identifier (not ideal but better than UUID)
+                        receivedTx.transactionBase64.take(64)
+                    }
                     
                     // Queue confirmation for relay (Phase 2)
-                    sdkInstance.queueConfirmation(receivedTx.txId, signature)
+                    sdkInstance.queueConfirmation(txHash, signature)
                         .onSuccess {
                             appendLog("📤 Queued confirmation for relay")
                             workChannel.trySend(WorkEvent.ConfirmationReady)
@@ -999,21 +1062,31 @@ class BleService : Service() {
                 }.onFailure { error ->
                     failureCount++
                     val txProgress = txFragmentInfo?.let { "~${it.totalFragments}/${it.totalFragments}" } ?: "~complete"
+                    val errorMsg = error.message ?: "Unknown error"
+                    
                     appendLog("❌ ❌ ❌ Transaction submission FAILED ❌ ❌ ❌")
                     appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
                     android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
-                    appendLog("   Error: ${error.message}")
-                    appendLog("   Adding to retry queue for later...")
+                    appendLog("   Error: $errorMsg")
                     
-                    // Add to retry queue (Phase 2)
-                    sdkInstance.addToRetryQueue(
-                        txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
-                        txId = receivedTx.txId,
-                        error = error.message ?: "Unknown error"
-                    ).onSuccess {
-                        appendLog("   ✅ Added to retry queue")
-                    }.onFailure { e ->
-                        appendLog("   ❌ Failed to add to retry queue: ${e.message}")
+                    // Check if this is a stale transaction error (nonce advanced, etc.)
+                    if (isStaleTransactionError(errorMsg)) {
+                        appendLog("   🗑️ Stale transaction detected - dropping (nonce error, won't retry)")
+                        android.util.Log.w("PolliNet.BLE", "Dropping stale transaction ${receivedTx.txId.take(8)}... due to: $errorMsg")
+                        // Don't add to retry queue - transaction is permanently invalid
+                    } else {
+                        appendLog("   Adding to retry queue for later...")
+                        
+                        // Add to retry queue (Phase 2)
+                        sdkInstance.addToRetryQueue(
+                            txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
+                            txId = receivedTx.txId,
+                            error = errorMsg
+                        ).onSuccess {
+                            appendLog("   ✅ Added to retry queue")
+                        }.onFailure { e ->
+                            appendLog("   ❌ Failed to add to retry queue: ${e.message}")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -1058,11 +1131,45 @@ class BleService : Service() {
         }
         
         var processedCount = 0
+        var skippedCount = 0
         
         repeat(5) { // Process up to 5 retries per wake-up
             val retryItem = sdkInstance.popReadyRetry().getOrNull() ?: return@repeat
             
-            appendLog("🔄 Retrying tx: ${retryItem.txId.take(8)}... (attempt ${retryItem.attemptCount})")
+            // CRITICAL: Check if retry is actually ready (respect backoff)
+            // Rust's pop_ready() should only return items where nextRetryInSecs <= 0,
+            // but we check defensively to ensure we respect backoff timing
+            if (retryItem.nextRetryInSecs > 0) {
+                // Item not ready yet - this indicates a potential bug in Rust's pop_ready() filtering
+                // Skip it to respect backoff and prevent infinite retry loops
+                appendLog("⏳ Retry not ready yet for tx: ${retryItem.txId.take(8)}... (next retry in ${retryItem.nextRetryInSecs}s, attempt ${retryItem.attemptCount})")
+                android.util.Log.w("PolliNet.BLE", "⚠️ Skipping retry - not ready yet (nextRetryInSecs=${retryItem.nextRetryInSecs}). This shouldn't happen if Rust pop_ready() is working correctly.")
+                skippedCount++
+                
+                // Re-add to queue since we popped it but it's not ready
+                // Only re-add if we haven't exceeded max attempts to avoid infinite loops
+                if (retryItem.attemptCount < 5) {
+                    try {
+                        val txBytes = android.util.Base64.decode(retryItem.txBytes, android.util.Base64.NO_WRAP)
+                        sdkInstance.addToRetryQueue(
+                            txBytes = txBytes,
+                            txId = retryItem.txId,
+                            error = retryItem.lastError
+                        ).onFailure { e ->
+                            appendLog("❌ Failed to re-add skipped retry: ${e.message}")
+                            android.util.Log.e("PolliNet.BLE", "Failed to re-add skipped retry", e)
+                        }
+                    } catch (e: Exception) {
+                        appendLog("❌ Exception re-adding skipped retry: ${e.message}")
+                        android.util.Log.e("PolliNet.BLE", "Exception re-adding skipped retry", e)
+                    }
+                } else {
+                    appendLog("❌ Not re-adding skipped retry - max attempts (${retryItem.attemptCount}) exceeded")
+                }
+                return@repeat
+            }
+            
+            appendLog("🔄 Retrying tx: ${retryItem.txId.take(8)}... (attempt ${retryItem.attemptCount}, nextRetryInSecs=${retryItem.nextRetryInSecs})")
             
             try {
                 val txBytes = android.util.Base64.decode(retryItem.txBytes, android.util.Base64.NO_WRAP)
@@ -1075,25 +1182,45 @@ class BleService : Service() {
                     appendLog("✅ Retry successful: $signature")
                     sdkInstance.markTransactionSubmitted(txBytes)
                     
+                    // Calculate transaction hash (SHA-256) for confirmation
+                    // The confirmation queue expects a hex-encoded 32-byte hash, not the UUID txId
+                    val txHash = try {
+                        val digest = java.security.MessageDigest.getInstance("SHA-256")
+                        digest.update(txBytes)
+                        digest.digest().joinToString("") { "%02x".format(it) }
+                    } catch (e: Exception) {
+                        appendLog("❌ Failed to calculate transaction hash: ${e.message}")
+                        // Fallback: use first 64 chars of base64 as identifier (not ideal but better than UUID)
+                        retryItem.txBytes.take(64)
+                    }
+                    
                     // Queue confirmation
-                    sdkInstance.queueConfirmation(retryItem.txId, signature)
+                    sdkInstance.queueConfirmation(txHash, signature)
                         .onSuccess {
                             workChannel.trySend(WorkEvent.ConfirmationReady)
                         }
                     
                     processedCount++
                 }.onFailure { error ->
-                    appendLog("⚠️ Retry failed (attempt ${retryItem.attemptCount}): ${error.message}")
+                    val errorMsg = error.message ?: "Unknown error"
+                    appendLog("⚠️ Retry failed (attempt ${retryItem.attemptCount}): $errorMsg")
                     
-                    // Re-add to retry queue with incremented count (if not max)
-                    if (retryItem.attemptCount < 5) {
-                        sdkInstance.addToRetryQueue(
-                            txBytes = txBytes,
-                            txId = retryItem.txId,
-                            error = error.message ?: "Unknown error"
-                        )
+                    // Check if this is a stale transaction error (nonce advanced, etc.)
+                    if (isStaleTransactionError(errorMsg)) {
+                        appendLog("   🗑️ Stale transaction detected - dropping (nonce error, won't retry)")
+                        android.util.Log.w("PolliNet.BLE", "Dropping stale transaction ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts due to: $errorMsg")
+                        // Don't re-add to retry queue - transaction is permanently invalid
                     } else {
-                        appendLog("❌ Giving up on tx ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts")
+                        // Re-add to retry queue with incremented count (if not max)
+                        if (retryItem.attemptCount < 5) {
+                            sdkInstance.addToRetryQueue(
+                                txBytes = txBytes,
+                                txId = retryItem.txId,
+                                error = errorMsg
+                            )
+                        } else {
+                            appendLog("❌ Giving up on tx ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -1103,6 +1230,9 @@ class BleService : Service() {
         
         if (processedCount > 0) {
             appendLog("✅ Processed $processedCount retry items")
+        }
+        if (skippedCount > 0) {
+            appendLog("⏳ Skipped $skippedCount retry items (not ready yet - respecting backoff)")
         }
     }
     
@@ -1125,24 +1255,139 @@ class BleService : Service() {
             
             appendLog("✅ Relaying confirmation for tx: ${confirmation.txId.take(8)}...")
             
-            // TODO: Actual BLE transmission of confirmation
-            // For now, just log
-            when (confirmation.status) {
-                is ConfirmationStatus.Success -> {
-                    val sig = (confirmation.status as ConfirmationStatus.Success).signature
-                    appendLog("   SUCCESS: $sig")
+            // Serialize confirmation to JSON bytes for BLE transmission
+            try {
+                val jsonBytes = json.encodeToString(Confirmation.serializer(), confirmation).toByteArray(Charsets.UTF_8)
+                
+                appendLog("   📤 Serialized confirmation: ${jsonBytes.size} bytes")
+                when (confirmation.status) {
+                    is ConfirmationStatus.Success -> {
+                        val sig = (confirmation.status as ConfirmationStatus.Success).signature
+                        appendLog("   SUCCESS: ${sig.take(16)}... (relay count: ${confirmation.relayCount})")
+                    }
+                    is ConfirmationStatus.Failed -> {
+                        val err = (confirmation.status as ConfirmationStatus.Failed).error
+                        appendLog("   FAILED: $err (relay count: ${confirmation.relayCount})")
+                    }
                 }
-                is ConfirmationStatus.Failed -> {
-                    val err = (confirmation.status as ConfirmationStatus.Failed).error
-                    appendLog("   FAILED: $err")
+                
+                // Send confirmation over BLE using the same mechanism as fragments
+                // Since confirmations are small, we can send them as a single packet
+                if (jsonBytes.size <= currentMtu - 10) {
+                    // Send directly if it fits in one packet
+                    sendConfirmationToGatt(jsonBytes)
+                    processedCount++
+                } else {
+                    // If confirmation is too large (unlikely), log error
+                    appendLog("❌ Confirmation too large (${jsonBytes.size} bytes) for MTU ($currentMtu)")
                 }
+            } catch (e: Exception) {
+                appendLog("❌ Failed to serialize/send confirmation: ${e.message}")
             }
-            
-            processedCount++
         }
         
         if (processedCount > 0) {
-            appendLog("✅ Relayed $processedCount confirmations (hops: varies)")
+            appendLog("✅ Relayed $processedCount confirmations")
+        }
+    }
+    
+    /**
+     * Handle received confirmation from BLE
+     */
+    private suspend fun handleReceivedConfirmation(data: ByteArray) {
+        try {
+            appendLog("📨 ===== PROCESSING RECEIVED CONFIRMATION =====")
+            appendLog("📨 Confirmation size: ${data.size} bytes")
+            
+            // Deserialize confirmation from JSON
+            val confirmationStr = String(data, Charsets.UTF_8)
+            val confirmation = json.decodeFromString<Confirmation>(confirmationStr)
+            
+            appendLog("✅ Confirmation deserialized for tx: ${confirmation.txId.take(8)}...")
+            appendLog("   Relay count: ${confirmation.relayCount}")
+            
+            when (confirmation.status) {
+                is ConfirmationStatus.Success -> {
+                    val sig = (confirmation.status as ConfirmationStatus.Success).signature
+                    appendLog("   ✅ SUCCESS: ${sig.take(16)}...")
+                    appendLog("   📝 Transaction ${confirmation.txId.take(8)}... was successfully submitted!")
+                }
+                is ConfirmationStatus.Failed -> {
+                    val err = (confirmation.status as ConfirmationStatus.Failed).error
+                    appendLog("   ❌ FAILED: $err")
+                    appendLog("   📝 Transaction ${confirmation.txId.take(8)}... submission failed")
+                }
+            }
+            
+            // If relay count hasn't exceeded max, relay to other peers
+            // For now, we just log - in a full mesh implementation, we'd check
+            // if this confirmation is for us or needs to be relayed further
+            appendLog("✅ Confirmation processed")
+            
+        } catch (e: Exception) {
+            appendLog("❌ Failed to process confirmation: ${e.message}")
+            android.util.Log.e("PolliNet.BLE", "Failed to process confirmation", e)
+        }
+    }
+    
+    /**
+     * Send confirmation over BLE GATT
+     */
+    @SuppressLint("MissingPermission")
+    private fun sendConfirmationToGatt(data: ByteArray) {
+        appendLog("📤 sendConfirmationToGatt: Sending ${data.size} bytes")
+        
+        // Use the same GATT transmission path as fragments
+        val gatt = clientGatt
+        val remoteRx = remoteRxCharacteristic
+        
+        // If we have a client connection, use client path (write to remote RX)
+        if (gatt != null && remoteRx != null) {
+            appendLog("   → Using CLIENT path (write confirmation to remote RX)")
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val result = gatt.writeCharacteristic(
+                    remoteRx,
+                    data,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+                appendLog(if (result == BluetoothGatt.GATT_SUCCESS) {
+                    "✅ Confirmation sent successfully (${data.size}B)"
+                } else {
+                    "❌ Failed to send confirmation (result: $result)"
+                })
+            } else {
+                remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                remoteRx.value = data
+                @Suppress("DEPRECATION")
+                val success = gatt.writeCharacteristic(remoteRx)
+                appendLog(if (success) {
+                    "✅ Confirmation sent successfully (${data.size}B)"
+                } else {
+                    "❌ Failed to send confirmation"
+                })
+            }
+            return
+        }
+        
+        // Fallback: Use server path if no client connection
+        val server = gattServer
+        val txChar = gattCharacteristicTx
+        val device = connectedDevice
+        
+        if (server != null && txChar != null && device != null) {
+            appendLog("   → Using SERVER path (notify confirmation)")
+            @Suppress("DEPRECATION")
+            txChar.value = data
+            val success = server.notifyCharacteristicChanged(device, txChar, false)
+            appendLog(if (success) {
+                "✅ Confirmation notification sent (${data.size}B)"
+            } else {
+                "❌ Failed to notify confirmation"
+            })
+        } else {
+            appendLog("❌ No active connection for sending confirmation")
         }
     }
     
@@ -1209,6 +1454,18 @@ class BleService : Service() {
                     // Internet restored - process pending transactions and retries
                     workChannel.trySend(WorkEvent.ReceivedReady)
                     workChannel.trySend(WorkEvent.RetryReady)
+
+                    // Quietly refresh offline nonce bundle in the background
+                    serviceScope.launch {
+                        try {
+                            val refreshed = sdk?.refreshOfflineBundle()?.getOrNull() ?: 0
+                            if (refreshed > 0) {
+                                appendLog("♻️ Refreshed $refreshed cached nonces after network recovery")
+                            }
+                        } catch (_: Exception) {
+                            // Best-effort, ignore failures
+                        }
+                    }
                 }
                 
                 override fun onLost(network: Network) {
@@ -1225,6 +1482,18 @@ class BleService : Service() {
                     if (hasInternet && validated) {
                         appendLog("📡 Internet validated - triggering work")
                         workChannel.trySend(WorkEvent.ReceivedReady)
+                        
+                        // Also attempt a quiet nonce bundle refresh here (in case onAvailable was missed)
+                        serviceScope.launch {
+                            try {
+                                val refreshed = sdk?.refreshOfflineBundle()?.getOrNull() ?: 0
+                                if (refreshed > 0) {
+                                    appendLog("♻️ Refreshed $refreshed cached nonces after validation")
+                                }
+                            } catch (_: Exception) {
+                                // Ignore, best-effort
+                            }
+                        }
                     }
                 }
             }
@@ -1388,6 +1657,33 @@ class BleService : Service() {
             false
         }
     }
+    
+    /**
+     * Check if error indicates a stale transaction that should not be retried
+     * Detects nonce errors and other permanent failures
+     */
+    private fun isStaleTransactionError(errorMessage: String?): Boolean {
+        if (errorMessage == null) return false
+        
+        val errorLower = errorMessage.lowercase()
+        
+        // Common Solana nonce error patterns
+        val staleErrorPatterns = listOf(
+            "nonce has been advanced",
+            "nonce account",
+            "blockhash not found",
+            "this transaction has already been processed",
+            "transaction has already been processed",
+            "duplicate signature",
+            "signature verification failed", // Can indicate stale transaction
+            "invalid blockhash",
+            "blockhash expired"
+        )
+        
+        return staleErrorPatterns.any { pattern ->
+            errorLower.contains(pattern, ignoreCase = true)
+        }
+    }
 
     /**
      * Handle incoming packet - reassemble and queue for auto-submission
@@ -1399,7 +1695,17 @@ class BleService : Service() {
             appendLog("📥 Data size: ${data.size} bytes")
             appendLog("📥 Data preview: ${data.take(32).joinToString(" ") { "%02X".format(it) }}...")
             
-            // Push to SDK for reassembly
+            // Check if this is a confirmation (JSON) or a fragment (binary)
+            // Confirmations start with '{' (JSON), fragments are binary (bincode)
+            val isConfirmation = data.isNotEmpty() && data[0] == '{'.code.toByte()
+            
+            if (isConfirmation) {
+                // Handle confirmation
+                handleReceivedConfirmation(data)
+                return
+            }
+            
+            // Push to SDK for reassembly (fragment)
             val result = sdk?.pushInbound(data)
             result?.onSuccess {
                 appendLog("✅ ✅ ✅ Fragment processed successfully ✅ ✅ ✅")
@@ -1513,6 +1819,7 @@ class BleService : Service() {
         sendingJob?.cancel()
         unifiedWorker?.cancel() // Phase 4: Cancel unified worker
         autoSaveJob?.cancel() // Phase 5: Cancel auto-save job
+        alternatingMeshJob?.cancel() // Cancel alternating mesh mode
         serviceScope.cancel()
         
         // Phase 4: Cancel WorkManager background tasks
@@ -1535,6 +1842,10 @@ class BleService : Service() {
         } catch (e: IllegalArgumentException) {
             // Receiver was not registered
         }
+        
+        // Note: Mesh watchdog not used with alternating mode
+        meshWatchdogJob?.cancel() // Keep for compatibility if needed
+        stopAlternatingMeshMode() // Stop alternating mesh mode
         
         // Stop BLE operations
         stopScanning()
@@ -1610,6 +1921,140 @@ class BleService : Service() {
             appendLog("❌ SDK initialization failed: ${error.message}")
             appendLog("   SDK will remain null - operations requiring SDK will be skipped")
         }
+    }
+    
+    /**
+     * Start mesh watchdog to ensure scanning/advertising stay active
+     * BLE scanning stops after ~30 seconds (Android timeout), so we need to restart it
+     */
+    private fun startMeshWatchdog() {
+        if (meshWatchdogJob?.isActive == true) {
+            return
+        }
+        
+        meshWatchdogJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    delay(35_000) // Check every 35 seconds (after typical scan timeout)
+                    
+                    // Skip if Bluetooth is disabled
+                    if (bluetoothAdapter?.isEnabled != true) {
+                        continue
+                    }
+                    
+                    // Skip if already connected (no need to scan/advertise)
+                    if (_connectionState.value == ConnectionState.CONNECTED) {
+                        continue
+                    }
+                    
+                    // Restart advertising if it stopped
+                    if (!_isAdvertising.value) {
+                        appendLog("🔄 Mesh watchdog: Advertising stopped - restarting...")
+                        startAdvertising()
+                    }
+                    
+                    // Restart scanning if it stopped (and not connected, and no pending connection)
+                    if (!_isScanning.value && connectedDevice == null && clientGatt == null && pendingConnectionDevice == null) {
+                        appendLog("🔄 Mesh watchdog: Scanning stopped - restarting...")
+                        startScanning()
+                    }
+                    
+                    // Check for connection timeout
+                    if (pendingConnectionDevice != null) {
+                        val elapsed = System.currentTimeMillis() - connectionAttemptTime
+                        if (elapsed > CONNECTION_TIMEOUT_MS) {
+                            appendLog("⏱️ Connection attempt to ${pendingConnectionDevice?.address} timed out after ${elapsed}ms")
+                            pendingConnectionDevice = null
+                            // Restart scanning if it stopped
+                            if (!_isScanning.value) {
+                                appendLog("🔄 Restarting scan after connection timeout...")
+                                startScanning()
+                            }
+                        }
+                    }
+                    
+                } catch (e: Exception) {
+                    appendLog("❌ Mesh watchdog error: ${e.message}")
+                    delay(60_000) // Wait longer on error
+                }
+            }
+        }
+        
+        appendLog("✅ Mesh watchdog started - will keep scanning/advertising active")
+    }
+    
+    /**
+     * Start alternating mesh mode - switches between scanning and advertising
+     * This ensures at least some devices are scanning while others advertise
+     * Prevents deadlock where all devices advertise with nobody scanning
+     */
+    private fun startAlternatingMeshMode() {
+        if (alternatingMeshJob?.isActive == true) {
+            appendLog("🔄 Alternating mesh already running")
+            return
+        }
+        
+        appendLog("🚀 Starting alternating mesh mode (8s scan ↔ 8s advertise)")
+        
+        // Randomize starting mode to ensure ~50% devices scan first, ~50% advertise first
+        val startWithScan = Random.nextBoolean()
+        appendLog("   Starting with: ${if (startWithScan) "SCAN" else "ADVERTISE"} mode")
+        
+        alternatingMeshJob = serviceScope.launch {
+            var scanMode = startWithScan
+            
+            while (isActive) {
+                // Skip alternating if connected (transfer in progress)
+                if (_connectionState.value == ConnectionState.CONNECTED) {
+                    delay(1000)
+                    continue
+                }
+                
+                // Skip if Bluetooth disabled
+                if (bluetoothAdapter?.isEnabled != true) {
+                    delay(1000)
+                    continue
+                }
+                
+                // Skip if already have a pending connection attempt
+                if (pendingConnectionDevice != null) {
+                    delay(1000)
+                    continue
+                }
+                
+                if (scanMode) {
+                    // Scan mode - actively look for peers
+                    appendLog("🔄 Alternating mesh: → SCAN mode (${ALTERNATING_INTERVAL_MS / 1000}s)")
+                    stopAdvertising()
+                    delay(500) // Small gap to avoid BLE conflicts
+                    startScanning()
+                    delay(ALTERNATING_INTERVAL_MS)
+                } else {
+                    // Advertise mode - wait for peers to find us
+                    appendLog("🔄 Alternating mesh: → ADVERTISE mode (${ALTERNATING_INTERVAL_MS / 1000}s)")
+                    stopScanning()
+                    delay(500) // Small gap to avoid BLE conflicts
+                    startAdvertising()
+                    delay(ALTERNATING_INTERVAL_MS)
+                }
+                
+                // Toggle mode for next iteration
+                scanMode = !scanMode
+            }
+        }
+        
+        appendLog("✅ Alternating mesh mode started - automatic peer discovery active")
+    }
+    
+    /**
+     * Stop alternating mesh mode
+     */
+    private fun stopAlternatingMeshMode() {
+        alternatingMeshJob?.cancel()
+        alternatingMeshJob = null
+        stopScanning()
+        stopAdvertising()
+        appendLog("🛑 Alternating mesh mode stopped")
     }
     
     /**
@@ -1700,6 +2145,7 @@ class BleService : Service() {
             val scanSettings = ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+                .setReportDelay(0) // Report results immediately (no batching)
                 .build()
             
             scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
@@ -1897,7 +2343,16 @@ class BleService : Service() {
                         appendLog("✅ All fragments delivered successfully, clearing pending transaction")
                         pendingTransactionBytes = null
                         fragmentsQueuedWithMtu = 0
-                        // Connection is already ready for next transaction - no refresh needed
+                        
+                        // Dancing mesh: After completing transfer, disconnect and move to next peer
+                        appendLog("🔄 Dancing mesh: Transfer complete - disconnecting to find next peer...")
+                        mainHandler.postDelayed({
+                            if (_connectionState.value == ConnectionState.CONNECTED) {
+                                appendLog("🔌 Dancing mesh: Disconnecting from current peer...")
+                                closeGattConnection()
+                                // Scanning will resume automatically in onConnectionStateChange DISCONNECTED handler
+                            }
+                        }, 500) // Small delay to ensure final fragments are delivered
                     } else {
                         appendLog("⚠️ Connection lost, keeping transaction for potential retry")
                     }
@@ -2129,12 +2584,29 @@ class BleService : Service() {
             
             appendLog("📡 Discovered PolliNet device $peerAddress (RSSI: ${result.rssi} dBm)")
             
+            // Check if already connected to THIS device
+            if (connectedDevice?.address == peerAddress || clientGatt?.device?.address == peerAddress) {
+                appendLog("ℹ️ Already connected to this device, ignoring")
+                return
+            }
+            
             // Check if already connected to ANY device (keep it simple - one connection at a time)
             if (connectedDevice != null || clientGatt != null) {
-                appendLog("ℹ️ Already connected to a device, ignoring discovery")
+                appendLog("ℹ️ Already connected to another device, ignoring discovery")
                 appendLog("   Current server: ${connectedDevice?.address}")
                 appendLog("   Current client: ${clientGatt?.device?.address}")
                 return
+            }
+            
+            // Check if we're already attempting to connect to this device
+            if (pendingConnectionDevice?.address == peerAddress) {
+                val elapsed = System.currentTimeMillis() - connectionAttemptTime
+                if (elapsed < CONNECTION_TIMEOUT_MS) {
+                    appendLog("ℹ️ Connection attempt to $peerAddress already in progress (${elapsed}ms ago)")
+                    return
+                } else {
+                    appendLog("⚠️ Previous connection attempt to $peerAddress timed out, retrying...")
+                }
             }
             
             // Connection arbitration using MAC address comparison
@@ -2143,28 +2615,46 @@ class BleService : Service() {
             
             if (!shouldInitiateConnection) {
                 appendLog("🔀 Arbitration: My MAC ($myAddress) > Peer MAC ($peerAddress)")
-                appendLog("   → Acting as SERVER only - peer will connect to me")
-                appendLog("   → Stopping scan to wait for incoming connection")
-                stopScanning()
+                appendLog("   → Acting as SERVER - peer should connect to me")
+                appendLog("   → Continuing to scan/advertise (connection decoupled from discovery)")
+                // DON'T stop scanning - keep discovery active!
                 return
             }
             
             appendLog("🔀 Arbitration: My MAC ($myAddress) < Peer MAC ($peerAddress)")
             appendLog("   → Acting as CLIENT - initiating connection to peer...")
             
-            // Stop scanning before connecting to avoid conflicts
-            stopScanning()
+            // Mark connection attempt (but keep scanning active)
+            pendingConnectionDevice = result.device
+            connectionAttemptTime = System.currentTimeMillis()
             
-            // Small delay before connecting to ensure scan has fully stopped
+            // Attempt connection without stopping scan (decoupled)
             mainHandler.postDelayed({
-                appendLog("🔗 Connecting to $peerAddress as GATT client...")
-                connectToDevice(result.device)
-            }, 500)
+                // Double-check we're not already connected
+                if (connectedDevice == null && clientGatt == null) {
+                    appendLog("🔗 Connecting to $peerAddress as GATT client...")
+                    connectToDevice(result.device)
+                } else {
+                    appendLog("⚠️ Connection state changed, cancelling connection attempt")
+                    pendingConnectionDevice = null
+                }
+            }, 300) // Small delay to avoid rapid-fire connection attempts
         }
 
         override fun onScanFailed(errorCode: Int) {
+            _isScanning.value = false
             _connectionState.value = ConnectionState.ERROR
             appendLog("❌ Scan failed (code $errorCode)")
+            
+            // Auto-restart scanning after a delay (unless connected)
+            if (connectedDevice == null && clientGatt == null && bluetoothAdapter?.isEnabled == true) {
+                appendLog("🔄 Auto-restarting scan after failure...")
+                mainHandler.postDelayed({
+                    if (connectedDevice == null && clientGatt == null && !_isScanning.value) {
+                        startScanning()
+                    }
+                }, 2000) // 2 second delay before retry
+            }
         }
     }
 
@@ -2178,6 +2668,16 @@ class BleService : Service() {
             _connectionState.value = ConnectionState.ERROR
             _isAdvertising.value = false
             appendLog("❌ Advertising failed (code $errorCode)")
+            
+            // Auto-restart advertising after a delay (unless connected)
+            if (connectedDevice == null && clientGatt == null && bluetoothAdapter?.isEnabled == true) {
+                appendLog("🔄 Auto-restarting advertising after failure...")
+                mainHandler.postDelayed({
+                    if (connectedDevice == null && clientGatt == null && !_isAdvertising.value) {
+                        startAdvertising()
+                    }
+                }, 2000) // 2 second delay before retry
+            }
         }
     }
 
@@ -2218,6 +2718,16 @@ class BleService : Service() {
                     }
                 }
                 _connectionState.value = ConnectionState.DISCONNECTED
+                
+                // Clear pending connection on error
+                if (pendingConnectionDevice?.address == gatt.device.address) {
+                    pendingConnectionDevice = null
+                }
+                
+                // Close the failed connection
+                gatt.close()
+                clientGatt = null
+                
                 return
             }
             
@@ -2227,7 +2737,17 @@ class BleService : Service() {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = gatt.device
                     clientGatt = gatt
+                    
+                    // Clear pending connection on success
+                    if (pendingConnectionDevice?.address == gatt.device.address) {
+                        pendingConnectionDevice = null
+                    }
+                    
                     appendLog("✅ Connected to ${gatt.device.address}")
+                    
+                    // Stop scanning/advertising now that we're connected
+                    stopScanning()
+                    stopAdvertising()
                     
                     // Request MTU for better throughput (official sample line 137)
                     // Target 247 bytes (common max) for larger fragments
@@ -2250,6 +2770,11 @@ class BleService : Service() {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     appendLog("🔌 Disconnected from ${gatt.device.address}")
                     
+                    // Clear pending connection on disconnect
+                    if (pendingConnectionDevice?.address == gatt.device.address) {
+                        pendingConnectionDevice = null
+                    }
+                    
                     // Clean up
                     connectedDevice = null
                     clientGatt = null
@@ -2270,6 +2795,16 @@ class BleService : Service() {
                     
                     // Reset descriptor write flag
                     descriptorWriteComplete = false
+                    
+                    // Dancing mesh: Automatically restart alternating mode to find next peer
+                    appendLog("🔄 Dancing mesh: Restarting alternating mode to find next peer...")
+                    mainHandler.postDelayed({
+                        if (_connectionState.value == ConnectionState.DISCONNECTED && 
+                            connectedDevice == null && clientGatt == null) {
+                            startAlternatingMeshMode()
+                            appendLog("✅ Dancing mesh: Alternating mode restarted - will find next peer")
+                        }
+                    }, 1000) // Small delay to ensure cleanup is complete
                 }
             }
         }
@@ -2654,6 +3189,16 @@ class BleService : Service() {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = device
+                    
+                    // Clear pending connection on success
+                    if (pendingConnectionDevice?.address == device.address) {
+                        pendingConnectionDevice = null
+                    }
+                    
+                    // Stop scanning/advertising now that we're connected
+                    stopScanning()
+                    stopAdvertising()
+                    
                     appendLog("🤝 🤝 🤝 (SERVER) CONNECTED ${device.address} 🤝 🤝 🤝")
                     appendLog("   Server mode: Can send notifications immediately")
                     appendLog("   ✅ GATT server: ${gattServer != null}")
@@ -2690,6 +3235,12 @@ class BleService : Service() {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     connectedDevice = null
                     sendingJob?.cancel()
+                    
+                    // Clear pending connection on disconnect
+                    if (pendingConnectionDevice?.address == device.address) {
+                        pendingConnectionDevice = null
+                    }
+                    
                     appendLog("🔌 (Server) disconnected ${device.address}")
                     
                     // Clear re-fragmentation tracking
@@ -2698,6 +3249,16 @@ class BleService : Service() {
                     
                     // Reset descriptor write flag
                     descriptorWriteComplete = false
+                    
+                    // Dancing mesh: Automatically restart alternating mode to find next peer
+                    appendLog("🔄 Dancing mesh: Restarting alternating mode to find next peer...")
+                    mainHandler.postDelayed({
+                        if (_connectionState.value == ConnectionState.DISCONNECTED && 
+                            connectedDevice == null && clientGatt == null) {
+                            startAlternatingMeshMode()
+                            appendLog("✅ Dancing mesh: Alternating mode restarted - will find next peer")
+                        }
+                    }, 1000) // Small delay to ensure cleanup is complete
                 }
             }
         }
@@ -2896,13 +3457,45 @@ class BleService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "PolliNet BLE Service",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH  // High priority for persistent service
             ).apply {
                 description = "Manages PolliNet Bluetooth connections"
+                // Enable sound, vibration, and lights for high priority
+                enableLights(false)
+                enableVibration(false)  // Disable vibration to avoid annoyance
+                setShowBadge(false)
+                // Set lockscreen visibility to show on lock screen
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Request exemption from battery optimization to ensure the service
+     * continues running even when the app is in the background or killed.
+     * 
+     * This is called automatically when the service starts.
+     */
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                val packageName = packageName
+                
+                if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                    android.util.Log.d("BleService", "Battery optimization not exempted - user should grant exemption")
+                    appendLog("⚠️ Battery optimization exemption recommended for persistent operation")
+                    appendLog("   Go to Settings > Battery > Battery optimization to exempt this app")
+                } else {
+                    android.util.Log.d("BleService", "Battery optimization exemption already granted")
+                    appendLog("✅ Battery optimization exemption active")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("BleService", "Failed to check battery optimization status", e)
+            }
         }
     }
 
@@ -2919,9 +3512,14 @@ class BleService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("PolliNet Active")
-            .setContentText("Managing BLE connections")
+            .setContentText("Managing BLE mesh connections")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setOngoing(true)
+            .setOngoing(true)  // Persistent notification - cannot be dismissed
+            .setPriority(NotificationCompat.PRIORITY_HIGH)  // High priority
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)  // Service category
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)  // Show on lock screen
+            .setShowWhen(false)  // Don't show timestamp for persistent service
+            .setOnlyAlertOnce(true)  // Only alert once, don't repeat
             .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
             .build()
     }

@@ -376,7 +376,8 @@ fun MwaTransactionDemo(
                                         ).getOrThrow()
                                         
                                         // Transaction was submitted successfully
-                                        noncePublicKeys.add(nonceTx.noncePubkey)
+                                        // Add all nonce pubkeys from this batched transaction
+                                        noncePublicKeys.addAll(nonceTx.noncePubkey)
                                         successCount++
                                         
                                         android.util.Log.d("MwaTransactionDemo", "Transaction ${index + 1} submitted: $txSignature")

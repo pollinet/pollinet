@@ -121,12 +121,12 @@
         message="Using `getAddress` to get device identifiers is not recommended">
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="2141"
+            line="2613"
             column="29"
-            startOffset="102136"
-            endLine="2141"
+            startOffset="125793"
+            endLine="2613"
             endColumn="54"
-            endOffset="102161"/>
+            endOffset="125818"/>
     </incident>
 
     <incident
@@ -136,12 +136,57 @@
         <fix-data conditional="true"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="2895"
+            line="3456"
             column="13"
-            startOffset="140148"
-            endLine="2895"
+            startOffset="168505"
+            endLine="3456"
             endColumn="59"
-            endOffset="140194"/>
+            endOffset="168551"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; `SDK_INT` is always >= 28">
+        <fix-data conditional="true"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
+            line="3483"
+            column="13"
+            startOffset="169719"
+            endLine="3483"
+            endColumn="59"
+            endOffset="169765"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; `SDK_INT` is always >= 28">
+        <fix-data conditional="true"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BootReceiver.kt"
+            line="31"
+            column="21"
+            startOffset="975"
+            endLine="31"
+            endColumn="67"
+            endOffset="1021"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; `SDK_INT` is always >= 28">
+        <fix-data conditional="true"/>
+        <location
+            file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BootReceiver.kt"
+            line="52"
+            column="21"
+            startOffset="1999"
+            endLine="52"
+            endColumn="67"
+            endOffset="2045"/>
     </incident>
 
     <incident
