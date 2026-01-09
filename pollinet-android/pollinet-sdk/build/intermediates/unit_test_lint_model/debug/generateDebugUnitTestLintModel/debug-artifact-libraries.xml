@@ -1,9 +1,9 @@
 <libraries>
   <library
       name=":@@:pollinet-sdk::debug"
-      jars="/home/oghenekparob_r/.gradle/caches/8.13/transforms/2f55a1aaa9ec70d7ea750c5892859881/transformed/out/jars/classes.jar:/home/oghenekparob_r/.gradle/caches/8.13/transforms/2f55a1aaa9ec70d7ea750c5892859881/transformed/out/jars/libs/R.jar"
+      jars="/home/oghenekparob_r/.gradle/caches/8.13/transforms/da6987f796a5154441028e5fd4a96c7c/transformed/out/jars/classes.jar:/home/oghenekparob_r/.gradle/caches/8.13/transforms/da6987f796a5154441028e5fd4a96c7c/transformed/out/jars/libs/R.jar"
       resolved="pollinet-android:pollinet-sdk:unspecified"
-      folder="/home/oghenekparob_r/.gradle/caches/8.13/transforms/2f55a1aaa9ec70d7ea750c5892859881/transformed/out"
+      folder="/home/oghenekparob_r/.gradle/caches/8.13/transforms/da6987f796a5154441028e5fd4a96c7c/transformed/out"
       manifest="AndroidManifest.xml"
       resFolder="res"
       assetsFolder="assets"

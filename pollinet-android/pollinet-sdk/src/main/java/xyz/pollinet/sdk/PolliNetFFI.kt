@@ -243,7 +243,9 @@ object PolliNetFFI {
      * @return JSON FfiResult with { refreshedCount: Int }
      */
     external fun refreshOfflineBundle(handle: Long): String
-    
+
+    external fun getAvailableNonce(handle: Long): String
+
     external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
     
     /**

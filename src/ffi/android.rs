@@ -1473,6 +1473,71 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_refreshOfflineBundle(
     create_result_string(&mut env, result)
 }
 
+/// Get an available nonce account from cached bundle
+/// 
+/// Loads the bundle from secure storage and returns the first available
+/// (unused) nonce account data. This allows users to either manage their
+/// own nonce accounts or let PolliNet manage them automatically.
+/// 
+/// Returns None if:
+/// - Secure storage not configured
+/// - Bundle doesn't exist
+/// - Bundle has no available nonces (all are used)
+/// 
+/// Response JSON: {"nonceAccount": "...", "authority": "...", ...} or null
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getAvailableNonce(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        tracing::info!("🔍 FFI getAvailableNonce called with handle={}", handle);
+
+        // Get transport
+        let transport = get_transport(handle)?;
+
+        // Get secure storage
+        let storage = transport.secure_storage()
+            .ok_or_else(|| "Secure storage not configured".to_string())?;
+
+        // Load bundle from secure storage
+        let bundle = storage.load_bundle()
+            .map_err(|e| format!("Failed to load bundle: {}", e))?
+            .ok_or_else(|| "No bundle found - call prepareOfflineBundle or cacheNonceAccounts first".to_string())?;
+
+        tracing::info!("📂 Loaded bundle: {} total nonces, {} available", 
+            bundle.nonce_caches.len(), bundle.available_nonces());
+
+        // Get next available nonce
+        let available_nonce = bundle.get_available_nonce();
+
+        // Convert to FFI type and return as Option
+        let ffi_nonce = available_nonce.map(|nonce| {
+            tracing::info!("✅ Found available nonce account: {}", nonce.nonce_account);
+            crate::ffi::types::CachedNonceData {
+                version: 1,
+                nonce_account: nonce.nonce_account.clone(),
+                authority: nonce.authority.clone(),
+                blockhash: nonce.blockhash.clone(),
+                lamports_per_signature: nonce.lamports_per_signature,
+                cached_at: nonce.cached_at,
+                used: nonce.used,
+            }
+        });
+
+        if ffi_nonce.is_none() {
+            tracing::warn!("⚠️  No available nonces in bundle (all are used)");
+        }
+
+        let response: FfiResult<Option<crate::ffi::types::CachedNonceData>> = FfiResult::success(ffi_nonce);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
 /// Add nonce signature to a payer-signed transaction
 /// This is called after MWA has added the payer signature (first signature)
 /// to add the nonce keypair signature (second signature)
@@ -1493,9 +1558,6 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
             .map_err(|e| format!("Failed to read request: {}", e))?;
 
         tracing::debug!("📥 Request data size: {} bytes", request_data.len());
-
-        // Get transport
-        let transport = get_transport(handle)?;
 
         // Parse request - use the type from types.rs
         let request: crate::ffi::types::AddNonceSignatureRequest =

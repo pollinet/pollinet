@@ -651,6 +651,30 @@ class PolliNetSDK private constructor(
     }
 
     /**
+     * Get an available nonce account from cached bundle.
+     * 
+     * Loads the bundle from secure storage and returns the first available
+     * (unused) nonce account data. This allows users to either manage their
+     * own nonce accounts or let PolliNet manage them automatically.
+     * 
+     * Returns null if:
+     * - Secure storage not configured
+     * - Bundle doesn't exist
+     * - Bundle has no available nonces (all are used)
+     * 
+     * @return Result containing the available nonce data, or null if none available
+     */
+    suspend fun getAvailableNonce(): Result<CachedNonceData?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getAvailableNonce(handle)
+            val response = parseResult<CachedNonceData?>(resultJson)
+            response
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Refresh all cached nonce data in the offline bundle.
      *
      * This quietly:

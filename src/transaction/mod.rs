@@ -218,6 +218,13 @@ impl OfflineTransactionBundle {
         self.available_nonces() == 0
     }
     
+    /// Get the next available nonce account data
+    /// Returns a clone of the first unused nonce, or None if all are used
+    pub fn get_available_nonce(&self) -> Option<CachedNonceData> {
+        self.get_next_available_nonce()
+            .map(|(_, nonce)| nonce.clone())
+    }
+    
     /// Get the age of this bundle in hours
     pub fn age_hours(&self) -> u64 {
         let now = std::time::SystemTime::now()
@@ -1442,6 +1449,42 @@ impl TransactionService {
     /// 
     /// Useful for discovering and caching existing nonce accounts without knowing their pubkeys.
     /// 
+    /// Get an available nonce account from cached bundle
+    /// 
+    /// Loads the bundle from the specified file path and returns the first
+    /// available (unused) nonce account data.
+    /// 
+    /// Returns None if:
+    /// - Bundle file doesn't exist
+    /// - Bundle has no available nonces (all are used)
+    /// 
+    /// This allows users to either manage their own nonce accounts or let
+    /// PolliNet manage them automatically.
+    pub fn get_available_nonce_from_bundle(
+        &self,
+        bundle_file: &str,
+    ) -> Result<Option<CachedNonceData>, TransactionError> {
+        tracing::info!("Loading bundle from: {}", bundle_file);
+        
+        // Load bundle from file
+        let bundle = OfflineTransactionBundle::load_from_file(bundle_file)
+            .map_err(|e| TransactionError::Serialization(format!("Failed to load bundle: {}", e)))?;
+        
+        tracing::info!("Bundle loaded: {} total nonces, {} available", 
+            bundle.total_nonces(), bundle.available_nonces());
+        
+        // Get next available nonce
+        let available_nonce = bundle.get_available_nonce();
+        
+        if let Some(ref nonce) = available_nonce {
+            tracing::info!("✅ Found available nonce account: {}", nonce.nonce_account);
+        } else {
+            tracing::warn!("⚠️  No available nonces in bundle (all are used)");
+        }
+        
+        Ok(available_nonce)
+    }
+    
     /// Returns the number of nonce accounts discovered and cached
     pub async fn discover_and_cache_nonce_accounts_by_authority(
         &self,

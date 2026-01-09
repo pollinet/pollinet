@@ -254,6 +254,26 @@ impl PolliNetSDK {
             .await?)
     }
     
+    /// Get an available nonce account from cached bundle
+    /// 
+    /// Loads the bundle from the specified file path and returns the first
+    /// available (unused) nonce account data.
+    /// 
+    /// This allows users to either manage their own nonce accounts or let
+    /// PolliNet manage them automatically.
+    /// 
+    /// Returns None if:
+    /// - Bundle file doesn't exist
+    /// - Bundle has no available nonces (all are used)
+    pub fn get_available_nonce_from_bundle(
+        &self,
+        bundle_file: &str,
+    ) -> Result<Option<transaction::CachedNonceData>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .get_available_nonce_from_bundle(bundle_file)?)
+    }
+    
     /// Prepare multiple nonce accounts for offline use
     /// Smart bundle management: refreshes used nonces (FREE!), creates new ones only when necessary
     /// 

@@ -1414,6 +1414,147 @@ private fun SplVoteNonceTestContent(
             }
         }
         
+        HorizontalDivider()
+        
+        Text(
+            text = "Test Get Available Nonce Account",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.typography.titleSmall.color
+        )
+        
+        Text(
+            text = "Test picking an available nonce account from cached bundle",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        
+        var pickedNonce by remember { mutableStateOf<xyz.pollinet.sdk.CachedNonceData?>(null) }
+        var isPickingNonce by remember { mutableStateOf(false) }
+        
+        if (pickedNonce != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "✅ Available Nonce Account Picked!",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    
+                    StatusRow(
+                        label = "Nonce Account",
+                        value = pickedNonce!!.nonceAccount.take(32) + "...",
+                        isGood = true
+                    )
+                    
+                    StatusRow(
+                        label = "Authority",
+                        value = pickedNonce!!.authority.take(32) + "...",
+                        isGood = true
+                    )
+                    
+                    StatusRow(
+                        label = "Blockhash",
+                        value = pickedNonce!!.blockhash.take(32) + "...",
+                        isGood = true
+                    )
+                    
+                    StatusRow(
+                        label = "Fee (lamports/sig)",
+                        value = pickedNonce!!.lamportsPerSignature.toString(),
+                        isGood = true
+                    )
+                    
+                    StatusRow(
+                        label = "Cached At",
+                        value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                            .format(java.util.Date(pickedNonce!!.cachedAt * 1000)),
+                        isGood = true
+                    )
+                    
+                    StatusRow(
+                        label = "Used",
+                        value = if (pickedNonce!!.used) "Yes" else "No",
+                        isGood = !pickedNonce!!.used
+                    )
+                }
+            }
+        }
+        
+        Button(
+            onClick = {
+                if (sdk == null) {
+                    onLog("❌ SDK not initialized")
+                    return@Button
+                }
+                isPickingNonce = true
+                pickedNonce = null
+                scope.launch {
+                    try {
+                        onLog("🔍 Testing getAvailableNonce()...")
+                        onLog("   Loading bundle from secure storage...")
+                        
+                        val result = sdk.getAvailableNonce()
+                        
+                        result.onSuccess { nonce ->
+                            if (nonce != null) {
+                                pickedNonce = nonce
+                                onLog("✅ Successfully picked available nonce account!")
+                                onLog("   Nonce Account: ${nonce.nonceAccount}")
+                                onLog("   Authority: ${nonce.authority}")
+                                onLog("   Blockhash: ${nonce.blockhash.take(32)}...")
+                                onLog("   Fee: ${nonce.lamportsPerSignature} lamports/signature")
+                                onLog("   Cached At: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(nonce.cachedAt * 1000))}")
+                                onLog("   Used: ${if (nonce.used) "Yes" else "No"}")
+                                onLog("   ✅ This nonce can be used for creating transactions!")
+                            } else {
+                                onLog("⚠️ No available nonce accounts found")
+                                onLog("   All nonces in bundle are marked as used")
+                                onLog("   💡 Try refreshing the bundle or creating new nonce accounts")
+                                pickedNonce = null
+                            }
+                        }.onFailure { e ->
+                            onLog("❌ Failed to get available nonce: ${e.message}")
+                            onLog("   Possible reasons:")
+                            onLog("   - Secure storage not configured")
+                            onLog("   - No bundle found (create nonce accounts first)")
+                            onLog("   - Bundle loading error")
+                            pickedNonce = null
+                        }
+                    } catch (e: Exception) {
+                        onLog("❌ Exception: ${e.message}")
+                        pickedNonce = null
+                    } finally {
+                        isPickingNonce = false
+                    }
+                }
+            },
+            enabled = !isPickingNonce && sdk != null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (isPickingNonce) "Picking Nonce..." else "🔍 Get Available Nonce Account")
+        }
+        
+        if (pickedNonce != null) {
+            OutlinedButton(
+                onClick = {
+                    pickedNonce = null
+                    onLog("🔄 Cleared picked nonce display")
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Clear Display")
+            }
+        }
+        
         if (sdk == null) {
             Text(
                 text = "⚠️ SDK not initialized. Initialize SDK in MainActivity first.",
