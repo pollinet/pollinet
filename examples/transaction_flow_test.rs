@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, // More data
         0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00, // Even more data
     ];
-    
+
     // Pad to ~600 bytes to ensure it splits into 2 fragments
     // (462 bytes per fragment, so 600 bytes = 2 fragments)
     let mut tx_bytes = tx_bytes;
@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Fragmented and queued: {} fragments", fragments.len());
     for (idx, fragment) in fragments.iter().enumerate() {
         println!("   Fragment {}/{}: ID={}, index={}, total={}, data={} bytes", 
-            idx + 1, fragments.len(),
+            idx + 1, fragments.len(), 
             &fragment.id[..8],
             fragment.index,
             fragment.total,

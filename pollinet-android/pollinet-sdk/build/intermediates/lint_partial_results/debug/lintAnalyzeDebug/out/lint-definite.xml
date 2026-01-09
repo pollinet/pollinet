@@ -121,12 +121,12 @@
         message="Using `getAddress` to get device identifiers is not recommended">
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="2613"
+            line="2628"
             column="29"
-            startOffset="125793"
-            endLine="2613"
+            startOffset="126295"
+            endLine="2628"
             endColumn="54"
-            endOffset="125818"/>
+            endOffset="126320"/>
     </incident>
 
     <incident
@@ -136,12 +136,12 @@
         <fix-data conditional="true"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="3456"
+            line="3471"
             column="13"
-            startOffset="168505"
-            endLine="3456"
+            startOffset="168999"
+            endLine="3471"
             endColumn="59"
-            endOffset="168551"/>
+            endOffset="169045"/>
     </incident>
 
     <incident
@@ -151,12 +151,12 @@
         <fix-data conditional="true"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="3483"
+            line="3498"
             column="13"
-            startOffset="169719"
-            endLine="3483"
+            startOffset="170213"
+            endLine="3498"
             endColumn="59"
-            endOffset="169765"/>
+            endOffset="170259"/>
     </incident>
 
     <incident

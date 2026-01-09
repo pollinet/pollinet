@@ -582,7 +582,7 @@ impl HostBleTransport {
         
         use sha2::{Sha256, Digest};
         
-        // Calculate transaction hash for logging/identification and duplicate checking
+        // Calculate transaction hash for logging/identification
         t_debug!("🔐 Calculating SHA-256 hash for transaction...");
         let mut hasher = Sha256::new();
         hasher.update(&tx_bytes);
@@ -592,37 +592,38 @@ impl HostBleTransport {
             tx_hash_hex.chars().take(32).collect::<String>(), 
             tx_hash.len());
         
-        // Check if transaction was already submitted
-        let submitted = self.submitted_tx_hashes.lock();
-        if submitted.contains_key(&tx_hash) {
-            drop(submitted);
-            t_warn!("⚠️ Transaction {} already submitted (duplicate detected)", 
-                tx_hash_hex.chars().take(16).collect::<String>());
-            t_info!("❌ push_received_transaction() returning false (duplicate - already submitted)");
-            return false;
-        }
-        drop(submitted);
+        // Duplicate check commented out - all reassembled transactions are queued
+        // // Check if transaction was already submitted
+        // let submitted = self.submitted_tx_hashes.lock();
+        // if submitted.contains_key(&tx_hash) {
+        //     drop(submitted);
+        //     t_warn!("⚠️ Transaction {} already submitted (duplicate detected)", 
+        //         tx_hash_hex.chars().take(16).collect::<String>());
+        //     t_info!("❌ push_received_transaction() returning false (duplicate - already submitted)");
+        //     return false;
+        // }
+        // drop(submitted);
+        // 
+        // // Check if transaction is already in the received queue
+        // let queue = self.received_tx_queue.lock();
+        // for (_, queued_tx_bytes, _) in queue.iter() {
+        //     let mut queued_hasher = Sha256::new();
+        //     queued_hasher.update(queued_tx_bytes);
+        //     let queued_hash = queued_hasher.finalize().to_vec();
+        //     
+        //     if queued_hash == tx_hash {
+        //         drop(queue);
+        //         t_warn!("⚠️ Transaction {} already in received queue (duplicate detected)", 
+        //             tx_hash_hex.chars().take(16).collect::<String>());
+        //         t_info!("❌ push_received_transaction() returning false (duplicate - already queued)");
+        //         return false;
+        //     }
+        // }
+        // drop(queue);
         
-        // Check if transaction is already in the received queue
-        let queue = self.received_tx_queue.lock();
-        for (_, queued_tx_bytes, _) in queue.iter() {
-            let mut queued_hasher = Sha256::new();
-            queued_hasher.update(queued_tx_bytes);
-            let queued_hash = queued_hasher.finalize().to_vec();
-            
-            if queued_hash == tx_hash {
-                drop(queue);
-                t_warn!("⚠️ Transaction {} already in received queue (duplicate detected)", 
-                    tx_hash_hex.chars().take(16).collect::<String>());
-                t_info!("❌ push_received_transaction() returning false (duplicate - already queued)");
-                return false;
-            }
-        }
-        drop(queue);
-        
-        // Not a duplicate - proceed with adding to queue
+        // Proceed with adding to queue (no duplicate check)
         let now = Self::current_timestamp();
-        t_debug!("📥 Processing transaction {} (passed duplicate check)", 
+        t_debug!("📥 Processing transaction {} (no duplicate check)", 
             tx_hash_hex.chars().take(16).collect::<String>());
         
         // Generate transaction ID
@@ -729,7 +730,7 @@ impl HostBleTransport {
             "📊 Fragment reassembly info: {} transaction(s) with incomplete fragments",
             info_list.len()
         );
-
+        
         info_list
     }
     

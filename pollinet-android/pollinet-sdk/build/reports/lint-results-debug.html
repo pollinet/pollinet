@@ -179,7 +179,7 @@ document.getElementById(id).style.display = 'none';
     <div class="mdl-layout__header-row">
       <span class="mdl-layout-title">Lint Report: 7 errors and 21 warnings</span>
       <div class="mdl-layout-spacer"></div>
-      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Thu Jan 08 14:10:29 WAT 2026 by AGP (8.12.3)</nav>
+      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Fri Jan 09 14:37:18 WAT 2026 by AGP (8.12.3)</nav>
     </div>
   </header>
   <div class="mdl-layout__drawer">
@@ -299,34 +299,34 @@ Dismiss</button>            </div>
 <span class="lineno"> 1508 </span>        } catch (e: Exception) {
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:1854</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno"> 1851 </span>        stopScanning()
-<span class="lineno"> 1852 </span>        stopAdvertising()
-<span class="lineno"> 1853 </span>        closeGattConnection()
-<span class="caretline"><span class="lineno"> 1854 </span>        <span class="error">gattServer?.close()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 1855 </span>        sdk?.shutdown()
-<span class="lineno"> 1856 </span>        <span class="keyword">super</span>.onDestroy()
-<span class="lineno"> 1857 </span>    }
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:1869</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno"> 1866 </span>        stopScanning()
+<span class="lineno"> 1867 </span>        stopAdvertising()
+<span class="lineno"> 1868 </span>        closeGattConnection()
+<span class="caretline"><span class="lineno"> 1869 </span>        <span class="error">gattServer?.close()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 1870 </span>        sdk?.shutdown()
+<span class="lineno"> 1871 </span>        <span class="keyword">super</span>.onDestroy()
+<span class="lineno"> 1872 </span>    }
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2869</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno"> 2866 </span>            
-<span class="lineno"> 2867 </span>            <span class="comment">// CRITICAL: Discover services after MTU negotiation</span>
-<span class="lineno"> 2868 </span>            appendLog(<span class="string">"🔍 Starting service discovery..."</span>)
-<span class="caretline"><span class="lineno"> 2869 </span>            <span class="keyword">val</span> discoverSuccess = <span class="error">gatt.discoverServices()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 2870 </span>            <span class="keyword">if</span> (!discoverSuccess) {
-<span class="lineno"> 2871 </span>                appendLog(<span class="string">"❌ Failed to start service discovery!"</span>)
-<span class="lineno"> 2872 </span>            }
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2884</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno"> 2881 </span>            
+<span class="lineno"> 2882 </span>            <span class="comment">// CRITICAL: Discover services after MTU negotiation</span>
+<span class="lineno"> 2883 </span>            appendLog(<span class="string">"🔍 Starting service discovery..."</span>)
+<span class="caretline"><span class="lineno"> 2884 </span>            <span class="keyword">val</span> discoverSuccess = <span class="error">gatt.discoverServices()</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 2885 </span>            <span class="keyword">if</span> (!discoverSuccess) {
+<span class="lineno"> 2886 </span>                appendLog(<span class="string">"❌ Failed to start service discovery!"</span>)
+<span class="lineno"> 2887 </span>            }
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3411</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
-<span class="lineno"> 3408 </span>
-<span class="lineno"> 3409 </span>  override <span class="keyword">fun</span> onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
-<span class="lineno"> 3410 </span>      appendLog(<span class="string">"📋 EXECUTE WRITE: device=${</span>device.address<span class="string">}, requestId=$requestId, execute=$execute"</span>)
-<span class="caretline"><span class="lineno"> 3411 </span>      <span class="error">gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, <span class="number">0</span>, <span class="keyword">null</span>)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 3412 </span>  }
-<span class="lineno"> 3413 </span>
-<span class="lineno"> 3414 </span>  override <span class="keyword">fun</span> onNotificationSent(device: BluetoothDevice, status: Int) {
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3426</span>: <span class="message">Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with <code>checkPermission</code>) or explicitly handle a potential <code>SecurityException</code></span><br /><pre class="errorlines">
+<span class="lineno"> 3423 </span>
+<span class="lineno"> 3424 </span>  override <span class="keyword">fun</span> onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
+<span class="lineno"> 3425 </span>      appendLog(<span class="string">"📋 EXECUTE WRITE: device=${</span>device.address<span class="string">}, requestId=$requestId, execute=$execute"</span>)
+<span class="caretline"><span class="lineno"> 3426 </span>      <span class="error">gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, <span class="number">0</span>, <span class="keyword">null</span>)</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 3427 </span>  }
+<span class="lineno"> 3428 </span>
+<span class="lineno"> 3429 </span>  override <span class="keyword">fun</span> onNotificationSent(device: BluetoothDevice, status: Int) {
 </pre>
 
 </div>
@@ -597,14 +597,14 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2613</span>: <span class="message">Using <code>getAddress</code> to get device identifiers is not recommended</span><br /><pre class="errorlines">
-<span class="lineno"> 2610 </span>            }
-<span class="lineno"> 2611 </span>            
-<span class="lineno"> 2612 </span>            <span class="comment">// Connection arbitration using MAC address comparison</span>
-<span class="caretline"><span class="lineno"> 2613 </span>            <span class="keyword">val</span> myAddress = <span class="warning">bluetoothAdapter?.address</span> ?: <span class="string">"00:00:00:00:00:00"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 2614 </span>            <span class="keyword">val</span> shouldInitiateConnection = myAddress &lt; peerAddress
-<span class="lineno"> 2615 </span>            
-<span class="lineno"> 2616 </span>            <span class="keyword">if</span> (!shouldInitiateConnection) {
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:2628</span>: <span class="message">Using <code>getAddress</code> to get device identifiers is not recommended</span><br /><pre class="errorlines">
+<span class="lineno"> 2625 </span>            }
+<span class="lineno"> 2626 </span>            
+<span class="lineno"> 2627 </span>            <span class="comment">// Connection arbitration using MAC address comparison</span>
+<span class="caretline"><span class="lineno"> 2628 </span>            <span class="keyword">val</span> myAddress = <span class="warning">bluetoothAdapter?.address</span> ?: <span class="string">"00:00:00:00:00:00"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 2629 </span>            <span class="keyword">val</span> shouldInitiateConnection = myAddress &lt; peerAddress
+<span class="lineno"> 2630 </span>            
+<span class="lineno"> 2631 </span>            <span class="keyword">if</span> (!shouldInitiateConnection) {
 </pre>
 
 </div>
@@ -645,24 +645,24 @@ Dismiss</button>            </div>
               <div class="mdl-card__supporting-text">
 <div class="issue">
 <div class="warningslist">
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3456</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
-<span class="lineno"> 3453 </span>    }
-<span class="lineno"> 3454 </span>
-<span class="lineno"> 3455 </span>    private <span class="keyword">fun</span> createNotificationChannel() {
-<span class="caretline"><span class="lineno"> 3456 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.O</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 3457 </span>            <span class="keyword">val</span> channel = NotificationChannel(
-<span class="lineno"> 3458 </span>                CHANNEL_ID,
-<span class="lineno"> 3459 </span>                <span class="string">"PolliNet BLE Service"</span>,
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3471</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
+<span class="lineno"> 3468 </span>    }
+<span class="lineno"> 3469 </span>
+<span class="lineno"> 3470 </span>    private <span class="keyword">fun</span> createNotificationChannel() {
+<span class="caretline"><span class="lineno"> 3471 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.O</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 3472 </span>            <span class="keyword">val</span> channel = NotificationChannel(
+<span class="lineno"> 3473 </span>                CHANNEL_ID,
+<span class="lineno"> 3474 </span>                <span class="string">"PolliNet BLE Service"</span>,
 </pre>
 
-<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3483</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
-<span class="lineno"> 3480 </span><span class="javadoc">     * This is called automatically when the service starts.
-</span><span class="lineno"> 3481 </span><span class="javadoc">     */</span>
-<span class="lineno"> 3482 </span>    private <span class="keyword">fun</span> requestBatteryOptimizationExemption() {
-<span class="caretline"><span class="lineno"> 3483 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.M</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-<span class="lineno"> 3484 </span>            <span class="keyword">try</span> {
-<span class="lineno"> 3485 </span>                <span class="keyword">val</span> powerManager = getSystemService(Context.POWER_SERVICE) <span class="keyword">as</span> PowerManager
-<span class="lineno"> 3486 </span>                <span class="keyword">val</span> packageName = packageName
+<span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BleService.kt">../../src/main/java/xyz/pollinet/sdk/BleService.kt</a>:3498</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">
+<span class="lineno"> 3495 </span><span class="javadoc">     * This is called automatically when the service starts.
+</span><span class="lineno"> 3496 </span><span class="javadoc">     */</span>
+<span class="lineno"> 3497 </span>    private <span class="keyword">fun</span> requestBatteryOptimizationExemption() {
+<span class="caretline"><span class="lineno"> 3498 </span>        <span class="keyword">if</span> (<span class="warning">Build.VERSION.SDK_INT >= Build.VERSION_CODES.M</span>) {&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 3499 </span>            <span class="keyword">try</span> {
+<span class="lineno"> 3500 </span>                <span class="keyword">val</span> powerManager = getSystemService(Context.POWER_SERVICE) <span class="keyword">as</span> PowerManager
+<span class="lineno"> 3501 </span>                <span class="keyword">val</span> packageName = packageName
 </pre>
 
 <span class="location"><a href="../../src/main/java/xyz/pollinet/sdk/BootReceiver.kt">../../src/main/java/xyz/pollinet/sdk/BootReceiver.kt</a>:31</span>: <span class="message">Unnecessary; <code>SDK_INT</code> is always >= 28</span><br /><pre class="errorlines">

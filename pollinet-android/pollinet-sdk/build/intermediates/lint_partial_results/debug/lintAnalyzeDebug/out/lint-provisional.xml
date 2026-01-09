@@ -55,10 +55,10 @@
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
             line="1505"
             column="13"
-            startOffset="75572"
+            startOffset="75442"
             endLine="1505"
             endColumn="91"
-            endOffset="75650"/>
+            endOffset="75520"/>
         <map>
             <entry
                 name="message"
@@ -76,12 +76,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="1854"
+            line="1869"
             column="9"
-            startOffset="92493"
-            endLine="1854"
+            startOffset="92995"
+            endLine="1869"
             endColumn="28"
-            endOffset="92512"/>
+            endOffset="93014"/>
     </incident>
 
     <incident
@@ -91,12 +91,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="2869"
+            line="2884"
             column="35"
-            startOffset="139141"
-            endLine="2869"
+            startOffset="139635"
+            endLine="2884"
             endColumn="58"
-            endOffset="139164"/>
+            endOffset="139658"/>
     </incident>
 
     <incident
@@ -106,12 +106,12 @@
         <fix-data missing="android.permission.BLUETOOTH_CONNECT" requirement="android.permission.BLUETOOTH_CONNECT"/>
         <location
             file="${:pollinet-sdk*debug*MAIN*sourceProvider*0*javaDir*0}/xyz/pollinet/sdk/BleService.kt"
-            line="3411"
+            line="3426"
             column="13"
-            startOffset="166600"
-            endLine="3411"
+            startOffset="167094"
+            endLine="3426"
             endColumn="93"
-            endOffset="166680"/>
+            endOffset="167174"/>
     </incident>
 
     <incident

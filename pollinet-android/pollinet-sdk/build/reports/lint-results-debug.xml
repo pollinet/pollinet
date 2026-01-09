@@ -77,7 +77,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="1854"
+            line="1869"
             column="9"/>
     </issue>
 
@@ -93,7 +93,7 @@
         errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="2869"
+            line="2884"
             column="35"/>
     </issue>
 
@@ -109,7 +109,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="3411"
+            line="3426"
             column="13"/>
     </issue>
 
@@ -269,7 +269,7 @@
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="2613"
+            line="2628"
             column="29"/>
     </issue>
 
@@ -285,7 +285,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="3456"
+            line="3471"
             column="13"/>
     </issue>
 
@@ -301,7 +301,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="/home/oghenekparob_r/pollinet/pollinet-android/pollinet-sdk/src/main/java/xyz/pollinet/sdk/BleService.kt"
-            line="3483"
+            line="3498"
             column="13"/>
     </issue>
 

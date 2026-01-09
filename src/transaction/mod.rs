@@ -12,6 +12,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use spl_associated_token_account;
+use spl_associated_token_account::instruction as ata_instruction;
 use spl_token::instruction as spl_instruction;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -886,6 +887,19 @@ impl TransactionService {
         tracing::info!("   Nonce account: {}", nonce_account_pubkey);
         tracing::info!("   Authority: {} (sender)", sender_pubkey);
 
+        // Create idempotent ATA creation instruction for recipient
+        // This instruction is idempotent - it won't fail if the account already exists
+        let create_ata_ix = ata_instruction::create_associated_token_account_idempotent(
+            &fee_payer_pubkey,      // Payer (funds the account creation)
+            &recipient_pubkey,      // Owner of the token account
+            &mint_pubkey,           // Mint address
+            &spl_token::id(),       // Token program ID
+        );
+        tracing::info!("✅ Instruction 2: Create recipient ATA (idempotent)");
+        tracing::info!("   Recipient ATA: {}", recipient_token_account);
+        tracing::info!("   Payer: {}", fee_payer_pubkey);
+        tracing::info!("   This instruction is idempotent - safe if ATA already exists");
+
         // Create SPL token transfer instruction
         let spl_transfer_ix = spl_instruction::transfer(
             &spl_token::id(),
@@ -897,15 +911,15 @@ impl TransactionService {
         )
         .map_err(|e| TransactionError::SolanaInstruction(e.to_string()))?;
 
-        tracing::info!("✅ Instruction 2: SPL Token Transfer {} tokens", amount);
+        tracing::info!("✅ Instruction 3: SPL Token Transfer {} tokens", amount);
         tracing::info!("   From token account: {}", sender_token_account);
         tracing::info!("   To token account: {}", recipient_token_account);
         tracing::info!("   Owner: {}", sender_pubkey);
         tracing::info!("   Fee payer: {}", fee_payer_pubkey);
 
-        // Create transaction with nonce advance as first instruction
+        // Create transaction with all instructions: advance nonce, create ATA, transfer
         let mut transaction = Transaction::new_with_payer(
-            &[advance_nonce_ix, spl_transfer_ix],
+            &[advance_nonce_ix, create_ata_ix, spl_transfer_ix],
             Some(&fee_payer_pubkey), // Fee payer pays the fee
         );
         tracing::info!(
@@ -998,6 +1012,19 @@ impl TransactionService {
         tracing::info!("   Nonce account: {}", nonce_account_pubkey);
         tracing::info!("   Authority: {}", nonce_authority_pubkey);
 
+        // Create idempotent ATA creation instruction for recipient
+        // This instruction is idempotent - it won't fail if the account already exists
+        let create_ata_ix = ata_instruction::create_associated_token_account_idempotent(
+            &fee_payer_pubkey,      // Payer (funds the account creation)
+            &recipient_pubkey,      // Owner of the token account
+            &mint_pubkey,           // Mint address
+            &spl_token::id(),       // Token program ID
+        );
+        tracing::info!("✅ (offline) Instruction 2: Create recipient ATA (idempotent)");
+        tracing::info!("   Recipient ATA: {}", recipient_token_account);
+        tracing::info!("   Payer: {}", fee_payer_pubkey);
+        tracing::info!("   This instruction is idempotent - safe if ATA already exists");
+
         // SPL transfer instruction (same as online path)
         let spl_transfer_ix = spl_instruction::transfer(
             &spl_token::id(),
@@ -1009,15 +1036,15 @@ impl TransactionService {
         )
         .map_err(|e| TransactionError::SolanaInstruction(e.to_string()))?;
 
-        tracing::info!("✅ (offline) Instruction 2: SPL Token Transfer {} tokens", amount);
+        tracing::info!("✅ (offline) Instruction 3: SPL Token Transfer {} tokens", amount);
         tracing::info!("   From token account: {}", sender_token_account);
         tracing::info!("   To token account: {}", recipient_token_account);
         tracing::info!("   Owner: {}", sender_pubkey);
         tracing::info!("   Fee payer: {}", fee_payer_pubkey);
 
-        // Create transaction with nonce advance as first instruction
+        // Create transaction with all instructions: advance nonce, create ATA, transfer
         let mut transaction = Transaction::new_with_payer(
-            &[advance_nonce_ix, spl_transfer_ix],
+            &[advance_nonce_ix, create_ata_ix, spl_transfer_ix],
             Some(&fee_payer_pubkey),
         );
 
@@ -1960,7 +1987,7 @@ impl TransactionService {
                 tracing::error!("❌ Failed to get blockhash: {}", e);
                 TransactionError::RpcClient(format!("Failed to get blockhash: {}", e))
             })?;
-        
+
         tracing::debug!("✅ Blockhash: {}", recent_blockhash);
 
         const MAX_NONCE_ACCOUNTS_PER_TX: usize = 5;
@@ -1986,20 +2013,20 @@ impl TransactionService {
             // Generate keypairs and create instructions for this batch
             tracing::debug!("🔑 Generating {} nonce keypair(s)...", accounts_in_this_tx);
             for i in start_idx..end_idx {
-                // Generate ephemeral nonce keypair
-                let nonce_keypair = Keypair::new();
-                let nonce_pubkey = nonce_keypair.pubkey();
+            // Generate ephemeral nonce keypair
+            let nonce_keypair = Keypair::new();
+            let nonce_pubkey = nonce_keypair.pubkey();
 
                 tracing::info!("  🔑 Nonce account {}/{}: {}", i + 1, count, nonce_pubkey);
                 tracing::debug!("     Keypair generated (ephemeral, will be signed by MWA)");
 
                 // Create nonce account instructions (returns a vector of instructions)
-                let create_nonce_instructions = system_instruction::create_nonce_account(
-                    &payer_pubkey,         // funding account
-                    &nonce_pubkey,         // nonce account
-                    &payer_pubkey,         // authority (set to payer)
-                    rent_exemption,        // lamports
-                );
+            let create_nonce_instructions = system_instruction::create_nonce_account(
+                &payer_pubkey,         // funding account
+                &nonce_pubkey,         // nonce account
+                &payer_pubkey,         // authority (set to payer)
+                rent_exemption,        // lamports
+            );
 
                 tracing::debug!("     Created {} instruction(s) for this nonce account", 
                     create_nonce_instructions.len());
@@ -2058,7 +2085,7 @@ impl TransactionService {
 
             let unsigned_tx_base64 = base64::encode(&tx_bytes);
             tracing::debug!("     Base64 encoded transaction size: {} bytes", unsigned_tx_base64.len());
-            
+
             result.push(UnsignedNonceTransaction {
                 unsigned_transaction_base64: unsigned_tx_base64,
                 nonce_keypair_base64: nonce_keypair_base64_vec,
@@ -2183,10 +2210,10 @@ impl TransactionService {
             if error_msg.contains("Blockhash not found") {
                 if verify_nonce {
                     // This is a nonce-using transaction, nonce was likely advanced
-                    tracing::error!("❌ Blockhash not found - nonce was likely advanced");
-                    TransactionError::InvalidNonceAccount(
-                        "Nonce has been advanced, transaction invalid".to_string()
-                    )
+                tracing::error!("❌ Blockhash not found - nonce was likely advanced");
+                TransactionError::InvalidNonceAccount(
+                    "Nonce has been advanced, transaction invalid".to_string()
+                )
                 } else {
                     // This is NOT a nonce-using transaction (e.g., nonce account creation)
                     // The blockhash is just stale - transaction needs to be recreated with fresh blockhash

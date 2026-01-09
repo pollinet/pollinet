@@ -21,7 +21,7 @@
 
     <!-- Foreground Service (if needed) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    
+
     <!-- Battery optimization exemption (optional, requested at runtime) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 

@@ -1500,7 +1500,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
         // Parse request - use the type from types.rs
         let request: crate::ffi::types::AddNonceSignatureRequest =
             serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
 
         tracing::info!("✍️  Adding {} nonce signature(s) to payer-signed transaction", 
             request.nonce_keypair_base64.len());
@@ -1542,12 +1542,12 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
                     format!("Failed to decode nonce keypair {}: {}", i, e)
                 })?;
 
-            if nonce_keypair_bytes.len() != 64 {
+        if nonce_keypair_bytes.len() != 64 {
                 tracing::error!("❌ Invalid nonce keypair {} length: expected 64, got {}", i, nonce_keypair_bytes.len());
                 return Err(format!("Invalid nonce keypair {} length: expected 64, got {}", i, nonce_keypair_bytes.len()));
-            }
+        }
 
-            let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
+        let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
                 .map_err(|e| {
                     tracing::error!("❌ Failed to create keypair {} from bytes: {}", i, e);
                     format!("Failed to create keypair {} from bytes: {}", i, e)
@@ -2725,6 +2725,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popConfirmation(
     create_result_string(&mut env, result)
 }
 
+/// Cleanup stale fragments from the transaction cache
+#[cfg(feature = "android")]
 #[no_mangle]
 pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupStaleFragments(
     mut env: JNIEnv,

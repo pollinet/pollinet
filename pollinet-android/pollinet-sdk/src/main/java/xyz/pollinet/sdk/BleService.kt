@@ -282,7 +282,7 @@ class BleService : Service() {
                         
                         // Resume alternating mesh mode after Bluetooth is re-enabled
                         appendLog("   Resuming alternating mesh mode...")
-                        mainHandler.postDelayed({
+                            mainHandler.postDelayed({
                             if (_connectionState.value == ConnectionState.DISCONNECTED && 
                                 connectedDevice == null && clientGatt == null) {
                                 startAlternatingMeshMode()
@@ -1069,23 +1069,23 @@ class BleService : Service() {
                     android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
                     appendLog("   Error: $errorMsg")
                     
-                    // Check if this is a stale transaction error (nonce advanced, etc.)
+                    // Check if this is a stale or permanently invalid transaction error
                     if (isStaleTransactionError(errorMsg)) {
-                        appendLog("   🗑️ Stale transaction detected - dropping (nonce error, won't retry)")
-                        android.util.Log.w("PolliNet.BLE", "Dropping stale transaction ${receivedTx.txId.take(8)}... due to: $errorMsg")
+                        appendLog("   🗑️ Invalid transaction detected - dropping (won't retry)")
+                        android.util.Log.w("PolliNet.BLE", "Dropping invalid transaction ${receivedTx.txId.take(8)}... due to: $errorMsg")
                         // Don't add to retry queue - transaction is permanently invalid
                     } else {
-                        appendLog("   Adding to retry queue for later...")
-                        
-                        // Add to retry queue (Phase 2)
-                        sdkInstance.addToRetryQueue(
-                            txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
-                            txId = receivedTx.txId,
+                    appendLog("   Adding to retry queue for later...")
+                    
+                    // Add to retry queue (Phase 2)
+                    sdkInstance.addToRetryQueue(
+                        txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
+                        txId = receivedTx.txId,
                             error = errorMsg
-                        ).onSuccess {
-                            appendLog("   ✅ Added to retry queue")
-                        }.onFailure { e ->
-                            appendLog("   ❌ Failed to add to retry queue: ${e.message}")
+                    ).onSuccess {
+                        appendLog("   ✅ Added to retry queue")
+                    }.onFailure { e ->
+                        appendLog("   ❌ Failed to add to retry queue: ${e.message}")
                         }
                     }
                 }
@@ -1205,21 +1205,21 @@ class BleService : Service() {
                     val errorMsg = error.message ?: "Unknown error"
                     appendLog("⚠️ Retry failed (attempt ${retryItem.attemptCount}): $errorMsg")
                     
-                    // Check if this is a stale transaction error (nonce advanced, etc.)
+                    // Check if this is a stale or permanently invalid transaction error
                     if (isStaleTransactionError(errorMsg)) {
-                        appendLog("   🗑️ Stale transaction detected - dropping (nonce error, won't retry)")
-                        android.util.Log.w("PolliNet.BLE", "Dropping stale transaction ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts due to: $errorMsg")
+                        appendLog("   🗑️ Invalid transaction detected - dropping (won't retry)")
+                        android.util.Log.w("PolliNet.BLE", "Dropping invalid transaction ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts due to: $errorMsg")
                         // Don't re-add to retry queue - transaction is permanently invalid
                     } else {
-                        // Re-add to retry queue with incremented count (if not max)
-                        if (retryItem.attemptCount < 5) {
-                            sdkInstance.addToRetryQueue(
-                                txBytes = txBytes,
-                                txId = retryItem.txId,
+                    // Re-add to retry queue with incremented count (if not max)
+                    if (retryItem.attemptCount < 5) {
+                        sdkInstance.addToRetryQueue(
+                            txBytes = txBytes,
+                            txId = retryItem.txId,
                                 error = errorMsg
-                            )
-                        } else {
-                            appendLog("❌ Giving up on tx ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts")
+                        )
+                    } else {
+                        appendLog("❌ Giving up on tx ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts")
                         }
                     }
                 }
@@ -1260,23 +1260,23 @@ class BleService : Service() {
                 val jsonBytes = json.encodeToString(Confirmation.serializer(), confirmation).toByteArray(Charsets.UTF_8)
                 
                 appendLog("   📤 Serialized confirmation: ${jsonBytes.size} bytes")
-                when (confirmation.status) {
-                    is ConfirmationStatus.Success -> {
-                        val sig = (confirmation.status as ConfirmationStatus.Success).signature
+            when (confirmation.status) {
+                is ConfirmationStatus.Success -> {
+                    val sig = (confirmation.status as ConfirmationStatus.Success).signature
                         appendLog("   SUCCESS: ${sig.take(16)}... (relay count: ${confirmation.relayCount})")
-                    }
-                    is ConfirmationStatus.Failed -> {
-                        val err = (confirmation.status as ConfirmationStatus.Failed).error
-                        appendLog("   FAILED: $err (relay count: ${confirmation.relayCount})")
-                    }
                 }
-                
+                is ConfirmationStatus.Failed -> {
+                    val err = (confirmation.status as ConfirmationStatus.Failed).error
+                        appendLog("   FAILED: $err (relay count: ${confirmation.relayCount})")
+                }
+            }
+            
                 // Send confirmation over BLE using the same mechanism as fragments
                 // Since confirmations are small, we can send them as a single packet
                 if (jsonBytes.size <= currentMtu - 10) {
                     // Send directly if it fits in one packet
                     sendConfirmationToGatt(jsonBytes)
-                    processedCount++
+            processedCount++
                 } else {
                     // If confirmation is too large (unlikely), log error
                     appendLog("❌ Confirmation too large (${jsonBytes.size} bytes) for MTU ($currentMtu)")
@@ -1667,7 +1667,7 @@ class BleService : Service() {
         
         val errorLower = errorMessage.lowercase()
         
-        // Common Solana nonce error patterns
+        // Common Solana nonce error patterns (stale/expired transactions)
         val staleErrorPatterns = listOf(
             "nonce has been advanced",
             "nonce account",
@@ -1680,7 +1680,22 @@ class BleService : Service() {
             "blockhash expired"
         )
         
+        // Permanently invalid transaction errors (won't succeed on retry)
+        val permanentlyInvalidPatterns = listOf(
+            "invalid account data for instruction",
+            "invalidaccountdata",
+            "invalid account data",
+            "account not found",
+            "insufficient funds",
+            "program account not found",
+            "invalid program id",
+            "wrong number of accounts",
+            "invalid instruction data"
+        )
+        
         return staleErrorPatterns.any { pattern ->
+            errorLower.contains(pattern, ignoreCase = true)
+        } || permanentlyInvalidPatterns.any { pattern ->
             errorLower.contains(pattern, ignoreCase = true)
         }
     }
@@ -2632,8 +2647,8 @@ class BleService : Service() {
             mainHandler.postDelayed({
                 // Double-check we're not already connected
                 if (connectedDevice == null && clientGatt == null) {
-                    appendLog("🔗 Connecting to $peerAddress as GATT client...")
-                    connectToDevice(result.device)
+                appendLog("🔗 Connecting to $peerAddress as GATT client...")
+                connectToDevice(result.device)
                 } else {
                     appendLog("⚠️ Connection state changed, cancelling connection attempt")
                     pendingConnectionDevice = null

@@ -121,10 +121,11 @@ impl OutboundQueue {
     
     /// Push transaction to queue (returns error if duplicate or queue full)
     pub fn push(&mut self, tx: OutboundTransaction) -> Result<(), QueueError> {
-        // Check for duplicates
-        if self.deduplication_set.contains(&tx.tx_id) {
-            return Err(QueueError::Duplicate(tx.tx_id));
-        }
+        // Duplicate check commented out - allow re-queuing of transactions
+        // // Check for duplicates
+        // if self.deduplication_set.contains(&tx.tx_id) {
+        //     return Err(QueueError::Duplicate(tx.tx_id));
+        // }
         
         // Check queue size
         if self.len() >= self.max_size {
