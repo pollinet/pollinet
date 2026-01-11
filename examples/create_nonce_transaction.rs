@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n=== Submitting to Solana ===");
     info!("Decompressing and submitting transaction to blockchain...");
 
-    let signature = sdk.submit_transaction_to_solana(&reassembled_tx).await?;
+    let signature = sdk.submit_transaction(reassembled_tx.as_slice()).await?;
     info!("✅ Transaction submitted successfully!");
     info!("   Transaction signature: {}", signature);
 

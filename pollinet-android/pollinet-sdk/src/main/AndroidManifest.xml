@@ -20,6 +20,9 @@
     <!-- Internet for RPC calls (optional) -->
     <uses-permission android:name="android.permission.INTERNET" />
     
+    <!-- Boot completed permission for auto-start after device reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     
 </manifest>

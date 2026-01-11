@@ -376,7 +376,8 @@ fun MwaTransactionDemo(
                                         ).getOrThrow()
                                         
                                         // Transaction was submitted successfully
-                                        noncePublicKeys.add(nonceTx.noncePubkey)
+                                        // Add all nonce pubkeys from this batched transaction
+                                        noncePublicKeys.addAll(nonceTx.noncePubkey)
                                         successCount++
                                         
                                         android.util.Log.d("MwaTransactionDemo", "Transaction ${index + 1} submitted: $txSignature")
@@ -468,11 +469,37 @@ fun MwaTransactionDemo(
                             errorMessage = null
                             statusMessage = "Creating unsigned transaction..."
                             try {
+                                // Random recipient addresses
+                                val recipientAddresses = listOf(
+                                    "A7B9f6dy4Up29g8XMTM4H6i5hMzR2bwYeao3UtuiZLiz",
+                                    "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX",
+                                    "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE",
+                                    "7WPGEvxRzZ3ARQNQU5iEdRevFX2oh1mG1xMq6A2NazBy",
+                                    "CrqmbxGbiTuPZkxz18pSvsZ8JurxGp7cb2mxmdfi5erG",
+                                    "Acau8iLY9Rv115UDzWPkDAopB6t9iFxGQuebZxffqoMv",
+                                    "DyBFbB2VWG6rp4Y3KRYqLU5KenU6yX3hahcts9Gomwmj"
+                                )
+                                
+                                // Random amount between 0.1 to 0.99 SOL (in lamports)
+                                // 0.1 SOL = 100,000,000 lamports
+                                // 0.99 SOL = 990,000,000 lamports
+                                val minAmount = 100_000_000L // 0.1 SOL
+                                val maxAmount = 990_000_000L // 0.99 SOL
+                                val randomAmount = (minAmount..maxAmount).random()
+                                
+                                // Random recipient
+                                val randomRecipient = recipientAddresses.random()
+                                
+                                statusMessage = "Creating transaction: ${randomAmount / 1_000_000_000.0} SOL to ${randomRecipient.take(8)}..."
+                                
+                                // Create offline transaction - can optionally pass nonceData
+                                // If nonceData is not provided, it will auto-pick from bundle
                                 val result = sdk!!.createUnsignedOfflineTransaction(
                                     senderPubkey = authorizedPubkey!!,
                                     nonceAuthorityPubkey = authorizedPubkey!!, // Same as sender for demo
-                                    recipient = authorizedPubkey!!, // Self-transfer for demo
-                                    amount = 1000000L // 0.001 SOL
+                                    recipient = randomRecipient,
+                                    amount = randomAmount
+                                    // Optional: nonceData = cachedNonceData (uses specific nonce)
                                 )
                                 
                                 result.fold(
@@ -687,14 +714,13 @@ fun MwaTransactionDemo(
                                         val txBytes = android.util.Base64.decode(signedTxBase64, android.util.Base64.NO_WRAP)
                                         addBleLog("Transaction size: ${txBytes.size} bytes")
                                         
-                                        // Fragment the transaction
-                                        bleService?.sdk?.fragment(txBytes)?.onSuccess { result ->
-                                            addBleLog("✅ Fragmented into ${result.fragments.size} fragments")
-                                            addBleLog("Transmitting fragments over BLE...")
-                                            // Fragments are automatically queued for transmission
-                                            addBleLog("✅ Fragments queued for transmission")
+                                        // Queue the signed transaction with MTU-aware fragmentation
+                                        bleService?.queueSignedTransaction(txBytes)?.onSuccess { fragmentCount ->
+                                            addBleLog("✅ Fragmented into $fragmentCount MTU-optimized fragments")
+                                            addBleLog("Transmitting fragments over BLE mesh...")
+                                            addBleLog("✅ Fragments queued and sending (supports auto re-fragmentation)")
                                         }?.onFailure { error ->
-                                            addBleLog("❌ Fragmentation failed: ${error.message}")
+                                            addBleLog("❌ Failed to queue transaction: ${error.message}")
                                         }
                                     } catch (e: Exception) {
                                         addBleLog("❌ Error: ${e.message}")

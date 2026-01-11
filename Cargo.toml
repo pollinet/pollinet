@@ -61,3 +61,6 @@ android = ["jni", "openssl", "android_logger"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Android-specific dependencies are already in main dependencies with jni feature flag
+
+[dev-dependencies]
+tempfile = "3.8"

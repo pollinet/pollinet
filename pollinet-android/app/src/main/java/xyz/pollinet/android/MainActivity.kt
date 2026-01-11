@@ -6,9 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import xyz.pollinet.android.ui.DiagnosticsScreen
@@ -52,6 +56,23 @@ class MainActivity : ComponentActivity() {
             val binder = service as? BleService.LocalBinder
             bleService = binder?.getService()
             isBound = true
+            
+            // Initialize SDK in BleService when service is connected
+            lifecycleScope.launch {
+                bleService?.initializeSdk(
+                    SdkConfig(
+                        // Use Helius devnet RPC for BLE service operations
+                        rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
+                        enableLogging = true,
+                        logLevel = "info",
+                        storageDirectory = filesDir.absolutePath
+                    )
+                )?.onSuccess {
+                    Log.d(TAG, "BLE Service SDK initialized successfully")
+                }?.onFailure { e ->
+                    Log.e(TAG, "Failed to initialize BLE Service SDK: ${e.message}", e)
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -110,8 +131,44 @@ class MainActivity : ComponentActivity() {
         if (allGranted) {
             permissionsGranted = true
             startBleService()
+            // Request battery optimization exemption after service starts
+            requestBatteryOptimizationExemption()
         } else {
             requestPermissionLauncher.launch(permissions)
+        }
+    }
+    
+    /**
+     * Request exemption from battery optimization to ensure the service
+     * continues running even when the app is in the background or killed.
+     * 
+     * This is important for maintaining BLE mesh connectivity.
+     */
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val packageName = packageName
+            
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                    Log.d(TAG, "Requested battery optimization exemption")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to request battery optimization exemption", e)
+                    // Fallback: Open battery settings directly
+                    try {
+                        val settingsIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        startActivity(settingsIntent)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Failed to open battery settings", e2)
+                    }
+                }
+            } else {
+                Log.d(TAG, "Battery optimization exemption already granted")
+            }
         }
     }
     
@@ -154,13 +211,24 @@ fun PolliNetApp(mwaActivityResultSender: ActivityResultSender) {
         scope.launch {
             PolliNetSDK.initialize(
                 SdkConfig(
-                    rpcUrl = "https://api.devnet.solana.com", // Use devnet for testing
+                    // Try multiple RPC endpoints for reliability
+                    // Option 1: Alchemy (requires valid API key)
+                    // rpcUrl = "https://solana-devnet.g.alchemy.com/v2/",
+                    
+                    // Option 2: Public Helius endpoint (free, no API key)
+                    rpcUrl = "https://devnet.helius-rpc.com/?api-key=",
+                    
+                    // Option 3: Solana public devnet (can be slow)
+                    // rpcUrl = "https://api.devnet.solana.com",
+                    
                     enableLogging = true,
                     logLevel = "info",
                     storageDirectory = context.filesDir.absolutePath
                 )
             ).onSuccess {
                 sdk = it
+            }.onFailure { e ->
+                android.util.Log.e("PolliNet", "Failed to initialize SDK with RPC", e)
             }
         }
     }

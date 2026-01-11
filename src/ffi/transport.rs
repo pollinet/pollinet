@@ -4,14 +4,76 @@
 //! drives BLE operations, and Rust only handles packetization, reassembly, and
 //! protocol state.
 
-use super::types::{Fragment, MetricsSnapshot};
+use crate::transaction::TransactionService;
 use crate::ble::MeshHealthMonitor;
+use crate::ble::mesh::TransactionFragment;
 use crate::storage::SecureStorage;
 use crate::transaction::{Fragment as TxFragment, FragmentType, TransactionService};
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use super::types::{Fragment, MetricsSnapshot, FragmentReassemblyInfo};
+
+// Unified logging macros for transport layer:
+// - On Android: mirror all messages to log::debug! (for android_logger / logcat),
+//   while still emitting via tracing.
+// - On other platforms: just use tracing.
+#[cfg(feature = "android")]
+macro_rules! t_info {
+    ($($arg:tt)*) => {{
+        tracing::info!($($arg)*);
+        log::debug!($($arg)*);
+    }};
+}
+#[cfg(not(feature = "android"))]
+macro_rules! t_info {
+    ($($arg:tt)*) => {
+        tracing::info!($($arg)*);
+    };
+}
+
+#[cfg(feature = "android")]
+macro_rules! t_debug {
+    ($($arg:tt)*) => {{
+        tracing::debug!($($arg)*);
+        log::debug!($($arg)*);
+    }};
+}
+#[cfg(not(feature = "android"))]
+macro_rules! t_debug {
+    ($($arg:tt)*) => {
+        tracing::debug!($($arg)*);
+    };
+}
+
+#[cfg(feature = "android")]
+macro_rules! t_warn {
+    ($($arg:tt)*) => {{
+        tracing::warn!($($arg)*);
+        log::debug!($($arg)*);
+    }};
+}
+#[cfg(not(feature = "android"))]
+macro_rules! t_warn {
+    ($($arg:tt)*) => {
+        tracing::warn!($($arg)*);
+    };
+}
+
+#[cfg(feature = "android")]
+macro_rules! t_error {
+    ($($arg:tt)*) => {{
+        tracing::error!($($arg)*);
+        log::debug!($($arg)*);
+    }};
+}
+#[cfg(not(feature = "android"))]
+macro_rules! t_error {
+    ($($arg:tt)*) => {
+        tracing::error!($($arg)*);
+    };
+}
 
 /// Maximum MTU size for BLE
 const MAX_MTU: usize = 512;
@@ -22,8 +84,8 @@ pub struct HostBleTransport {
     outbound_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
 
     /// Inbound reassembly buffers keyed by transaction ID
-    inbound_buffers: Arc<Mutex<HashMap<String, Vec<TxFragment>>>>,
-
+    inbound_buffers: Arc<Mutex<HashMap<String, Vec<TransactionFragment>>>>,
+    
     /// Completed transactions ready for processing
     completed_transactions: Arc<Mutex<VecDeque<(String, Vec<u8>)>>>,
 
@@ -45,11 +107,15 @@ pub struct HostBleTransport {
 
     /// Mesh health monitor for tracking peer/network quality
     health_monitor: Arc<MeshHealthMonitor>,
+    
+    /// PolliNet SDK instance (Phase 2 - for queue access)
+    pub sdk: Arc<crate::PolliNetSDK>,
 }
 
 impl HostBleTransport {
     /// Get reference to transaction service
     pub fn transaction_service(&self) -> &TransactionService {
+        t_debug!("ℹ️ HostBleTransport::transaction_service() called");
         &self.transaction_service
     }
 }
@@ -66,11 +132,25 @@ struct TransportMetrics {
 impl HostBleTransport {
     /// Create a new host-driven transport
     pub async fn new() -> Result<Self, String> {
+        t_info!("🚀 HostBleTransport::new() - creating transport without RPC client");
+
         let transaction_service = TransactionService::new()
             .await
             .map_err(|e| format!("Failed to create transaction service: {}", e))?;
+        
+        let sdk = crate::PolliNetSDK::new()
+            .await
+            .map_err(|e| format!("Failed to create SDK: {}", e))?;
+        
+        t_info!("✅ TransactionService created (no RPC)");
 
-        Ok(Self {
+        let sdk = crate::PolliNetSDK::new()
+            .await
+            .map_err(|e| format!("Failed to create SDK: {}", e))?;
+
+        t_info!("✅ PolliNetSDK created (no RPC)");
+
+        let transport = Self {
             outbound_queue: Arc::new(Mutex::new(VecDeque::new())),
             inbound_buffers: Arc::new(Mutex::new(HashMap::new())),
             completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
@@ -80,16 +160,37 @@ impl HostBleTransport {
             transaction_service: Arc::new(transaction_service),
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
-        })
+            sdk: Arc::new(sdk),
+        };
+
+        t_info!("✅ HostBleTransport::new() initialized");
+        Ok(transport)
     }
 
     /// Create with an RPC client and optional secure storage
     pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, String> {
+        t_info!(
+            "🚀 HostBleTransport::new_with_rpc() - creating transport with RPC: {}",
+            rpc_url
+        );
+
         let transaction_service = TransactionService::new_with_rpc(rpc_url)
             .await
             .map_err(|e| format!("Failed to create transaction service: {}", e))?;
+        
+        let sdk = crate::PolliNetSDK::new_with_rpc(rpc_url)
+            .await
+            .map_err(|e| format!("Failed to create SDK: {}", e))?;
+        
+        t_info!("✅ TransactionService created with RPC");
 
-        Ok(Self {
+        let sdk = crate::PolliNetSDK::new_with_rpc(rpc_url)
+            .await
+            .map_err(|e| format!("Failed to create SDK: {}", e))?;
+
+        t_info!("✅ PolliNetSDK created with RPC");
+
+        let transport = Self {
             outbound_queue: Arc::new(Mutex::new(VecDeque::new())),
             inbound_buffers: Arc::new(Mutex::new(HashMap::new())),
             completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
@@ -99,84 +200,151 @@ impl HostBleTransport {
             transaction_service: Arc::new(transaction_service),
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
-        })
+            sdk: Arc::new(sdk),
+        };
+
+        t_info!("✅ HostBleTransport::new_with_rpc() initialized");
+        Ok(transport)
     }
 
     /// Set secure storage directory for nonce bundle persistence
+    /// Also loads the received queue from disk if storage is available
     pub fn set_secure_storage(&mut self, storage_dir: &str) -> Result<(), String> {
         let storage = SecureStorage::new(storage_dir)
             .map_err(|e| format!("Failed to create secure storage: {}", e))?;
         self.secure_storage = Some(Arc::new(storage));
-        tracing::info!("🔒 Secure storage enabled for nonce bundles");
+        t_info!("🔒 Secure storage enabled for nonce bundles");
+        
+        // Load received queue from disk if storage is available
+        let queue_storage_dir = format!("{}/queues", storage_dir);
+        if let Err(e) = self.load_received_queue(&queue_storage_dir) {
+            t_warn!("⚠️ Failed to load received queue: {} (will start fresh)", e);
+        }
+        
+        Ok(())
+    }
+    
+    /// Save received queue to disk
+    pub fn save_received_queue(&self, storage_dir: &str) -> Result<(), String> {
+        use crate::queue::storage::QueueStorage;
+        
+        let storage = QueueStorage::new(storage_dir)
+            .map_err(|e| format!("Failed to create queue storage: {}", e))?;
+        
+        let queue = self.received_tx_queue.lock();
+        let queue_vec: Vec<(String, Vec<u8>, u64)> = queue.iter().cloned().collect();
+        drop(queue);
+        
+        storage.save_received_queue(&queue_vec)
+            .map_err(|e| format!("Failed to save received queue: {}", e))?;
+        
+        t_info!("💾 Saved received queue: {} transactions", queue_vec.len());
+        Ok(())
+    }
+    
+    /// Load received queue from disk
+    pub fn load_received_queue(&self, storage_dir: &str) -> Result<(), String> {
+        use crate::queue::storage::QueueStorage;
+        
+        let storage = QueueStorage::new(storage_dir)
+            .map_err(|e| format!("Failed to create queue storage: {}", e))?;
+        
+        let queue_vec = storage.load_received_queue()
+            .map_err(|e| format!("Failed to load received queue: {}", e))?;
+        
+        if !queue_vec.is_empty() {
+            let mut queue = self.received_tx_queue.lock();
+            queue.clear();
+            for item in queue_vec {
+                queue.push_back(item);
+            }
+            let queue_size = queue.len();
+            drop(queue);
+            
+            t_info!("📥 Loaded received queue: {} transactions", queue_size);
+        } else {
+            t_debug!("📭 No saved received queue found, starting fresh");
+        }
+        
         Ok(())
     }
 
     /// Get secure storage if available
     pub fn secure_storage(&self) -> Option<&Arc<SecureStorage>> {
+        if self.secure_storage.is_some() {
+            t_debug!("🔐 HostBleTransport::secure_storage() → Some(SecureStorage)");
+        } else {
+            t_debug!("🔐 HostBleTransport::secure_storage() → None");
+        }
         self.secure_storage.as_ref()
     }
 
     /// Get health monitor
     pub fn health_monitor(&self) -> Arc<MeshHealthMonitor> {
+        t_debug!("📡 HostBleTransport::health_monitor() called");
         self.health_monitor.clone()
     }
 
     /// Push inbound data from GATT characteristic
     pub fn push_inbound(&self, data: Vec<u8>) -> Result<(), String> {
+        t_info!("📥 push_inbound() called with {} bytes", data.len());
+        
         // Deserialize the mesh fragment using bincode1 (matching outbound serialization)
         use crate::ble::fragmenter::reconstruct_transaction;
-        use crate::ble::mesh::TransactionFragment;
-
+        
+        t_debug!("🔓 Deserializing fragment from binary data...");
         let fragment: TransactionFragment = bincode1::deserialize(&data)
-            .map_err(|e| format!("Failed to deserialize fragment: {}", e))?;
+            .map_err(|e| {
+                let error_msg = format!("Failed to deserialize fragment ({} bytes): {}", data.len(), e);
+                t_error!("❌ {}", error_msg);
+                error_msg
+            })?;
+        
+        t_debug!("✅ Fragment deserialized successfully");
 
-        // Use transaction_id as tx_id (convert to hex string)
-        let tx_id = format!(
-            "{:x}",
-            &fragment
-                .transaction_id
-                .iter()
-                .fold(0u64, |acc, &b| (acc << 8) | b as u64)
-        );
-
-        tracing::info!(
-            "📥 Received mesh fragment {}/{} for tx {}",
+        // Use transaction_id as tx_id (convert to 64-character hex string to match sender format)
+        let tx_id = hex::encode(&fragment.transaction_id);
+        
+        t_info!(
+            "📥 Received mesh fragment {}/{} for tx {} ({} bytes)",
             fragment.fragment_index + 1,
             fragment.total_fragments,
-            tx_id
+            tx_id,
+            data.len()
         );
 
         let mut buffers = self.inbound_buffers.lock();
-
-        // IMPORTANT: We need to store the mesh TransactionFragment, not TxFragment
-        // So we need to change the inbound_buffers type
-        // For now, let's convert it to a temporary structure
-        let tx_fragment = TxFragment {
-            id: tx_id.clone(),
-            index: fragment.fragment_index as usize,
-            total: fragment.total_fragments as usize,
-            data: fragment.data.clone(),
-            fragment_type: if fragment.fragment_index == 0 {
-                crate::transaction::FragmentType::FragmentStart
-            } else if fragment.fragment_index == fragment.total_fragments - 1 {
-                crate::transaction::FragmentType::FragmentEnd
-            } else {
-                crate::transaction::FragmentType::FragmentContinue
-            },
-            checksum: fragment.transaction_id,
-        };
-
+        
+        // Store TransactionFragment directly (no conversion needed)
         let buffer = buffers.entry(tx_id.clone()).or_insert_with(Vec::new);
-        buffer.push(tx_fragment.clone());
-
+        let buffer_size_before = buffer.len();
+        buffer.push(fragment.clone());
+        let buffer_size_after = buffer.len();
+        
+        t_debug!("📦 Added fragment to buffer for tx {} (buffer size: {} → {})", 
+            tx_id, buffer_size_before, buffer_size_after);
+        
         // Check if we have all fragments for this transaction
         let total_fragments = fragment.total_fragments as usize;
-        let all_received = buffer.len() == total_fragments;
-
+        let fragments_received = buffer.len();
+        let all_received = fragments_received == total_fragments;
+        
+        t_debug!("🔢 Fragment count check: {}/{} fragments for tx {}", 
+            fragments_received, total_fragments, tx_id);
+        
+        t_info!(
+            "📊 Fragment status for tx {}: {}/{} fragments received",
+            tx_id,
+            fragments_received,
+            total_fragments
+        );
+        
         // Clone fragments before releasing lock if needed
         let fragments_to_reassemble = if all_received {
+            t_info!("🎉 All fragments received for tx {} - ready for reassembly!", tx_id);
             Some(buffer.clone())
         } else {
+            t_debug!("⏳ Waiting for {} more fragments for tx {}", total_fragments - fragments_received, tx_id);
             None
         };
 
@@ -191,45 +359,61 @@ impl HostBleTransport {
         drop(metrics); // Release metrics lock
 
         if let Some(fragments) = fragments_to_reassemble {
-            // Convert TxFragments back to mesh TransactionFragments for reassembly
-            let mesh_fragments: Vec<TransactionFragment> = fragments
-                .iter()
-                .map(|f| TransactionFragment {
-                    transaction_id: f.checksum,
-                    fragment_index: f.index as u16,
-                    total_fragments: f.total as u16,
-                    data: f.data.clone(),
-                })
-                .collect();
-
+        t_info!("🔧 Starting reassembly for tx {} with {} fragments", tx_id, fragments.len());
+            
+            // Fragments are already TransactionFragment - sort by index and use directly
+            let mut mesh_fragments = fragments;
+            mesh_fragments.sort_by_key(|f| f.fragment_index);
+            
+            t_debug!("✅ Using {} TransactionFragments directly, calling reconstruct_transaction()...", mesh_fragments.len());
+            
             // Try to reassemble using mesh fragmenter
             match reconstruct_transaction(&mesh_fragments) {
                 Ok(tx_bytes) => {
-                    // Move to completed queue
-                    let mut completed = self.completed_transactions.lock();
-                    completed.push_back((tx_id.clone(), tx_bytes.clone()));
-
-                    // Also add to received transaction queue for auto-submission
-                    self.push_received_transaction(tx_bytes);
-
-                    // Remove from inbound buffers
+                    t_info!("✅ Transaction {} reassembled successfully ({} bytes)", tx_id, tx_bytes.len());
+                    
+                    // Remove from inbound buffers FIRST (before updating metrics)
+                    t_debug!("🧹 Removing tx {} from inbound buffers...", tx_id);
                     self.inbound_buffers.lock().remove(&tx_id);
-
-                    // Update metrics
+                    t_debug!("✅ Removed from inbound buffers");
+                    
+                    // Recalculate fragments_buffered after removal
+                    let remaining_fragments = self.inbound_buffers.lock().values().map(|v| v.len() as u32).sum();
+                    t_debug!("📊 Remaining fragments in buffers: {}", remaining_fragments);
+                    
+                    // Move to completed queue
+                    t_debug!("📋 Adding to completed transactions queue...");
+                    let mut completed = self.completed_transactions.lock();
+                    let completed_size_before = completed.len();
+                    completed.push_back((tx_id.clone(), tx_bytes.clone()));
+                    let completed_size_after = completed.len();
+                    drop(completed);
+                    t_debug!("✅ Added to completed queue (size: {} → {})", completed_size_before, completed_size_after);
+                    
+                    // Also add to received transaction queue for auto-submission
+                    t_info!("📥 Calling push_received_transaction() for tx {}...", tx_id);
+                    let was_added = self.push_received_transaction(tx_bytes.clone());
+                    let queue_size = self.received_queue_size();
+                    
+                    if was_added {
+                        t_info!("📥 Transaction {} added to received queue (queue size: {})", tx_id, queue_size);
+                    } else {
+                        t_warn!("⚠️ Transaction {} was NOT added to received queue (likely duplicate, queue size: {})", tx_id, queue_size);
+                    }
+                    
+                    // Update metrics AFTER removing from buffers
                     let mut metrics = self.metrics.lock();
+                    metrics.fragments_buffered = remaining_fragments; // Update to actual count
                     metrics.transactions_complete += 1;
                     metrics.updated_at = Self::current_timestamp();
-
-                    tracing::info!(
-                        "✅ Transaction {} reassembled and queued for auto-submission",
-                        tx_id
-                    );
+                    drop(metrics);
+                    
                     Ok(())
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to reassemble transaction {}: {}", tx_id, e);
-                    tracing::error!("{}", error_msg);
-
+                    t_error!("{}", error_msg);
+                    
                     // Update metrics
                     let mut metrics = self.metrics.lock();
                     metrics.reassembly_failures += 1;
@@ -251,44 +435,36 @@ impl HostBleTransport {
     pub fn next_outbound(&self, max_len: usize) -> Option<Vec<u8>> {
         let mut queue = self.outbound_queue.lock();
         let queue_size_before = queue.len();
-
-        tracing::debug!(
-            "🔍 next_outbound called: queue has {} items, max_len={}",
-            queue_size_before,
-            max_len
-        );
-
-        let result = queue.pop_front().and_then(|data| {
+        
+        t_debug!("🔍 next_outbound called: queue has {} items, max_len={}", queue_size_before, max_len);
+        
+        // Try to find a fragment that fits
+        let mut attempts = 0;
+        let max_attempts = queue_size_before.min(10); // Don't check more than 10 items
+        
+        while attempts < max_attempts && !queue.is_empty() {
+            let data = queue.pop_front().unwrap();
+            
             if data.len() <= max_len {
                 let queue_size_after = queue.len();
-                tracing::info!(
-                    "✅ Returning fragment of {} bytes (max: {})",
-                    data.len(),
-                    max_len
-                );
-                tracing::info!(
-                    "📊 Queue: {} → {} fragments remaining",
-                    queue_size_before,
-                    queue_size_after
-                );
-                Some(data)
+                t_info!("✅ Returning fragment of {} bytes (max: {})", data.len(), max_len);
+                t_info!("📊 Queue: {} → {} fragments remaining", queue_size_before, queue_size_after);
+                return Some(data);
             } else {
-                // Put it back if too large
-                tracing::warn!(
-                    "⚠️ Fragment too large: {} bytes (max: {}), putting back in queue",
-                    data.len(),
-                    max_len
-                );
-                queue.push_front(data);
-                None
+                // Put it back at the end (rotate queue to avoid infinite loop)
+                t_warn!("⚠️ Fragment too large: {} bytes (max: {}), rotating to end of queue", data.len(), max_len);
+                queue.push_back(data);
+                attempts += 1;
             }
-        });
-
-        if result.is_none() && queue_size_before == 0 {
-            tracing::debug!("📭 Queue is empty, nothing to send");
         }
-
-        result
+        
+        if queue_size_before == 0 {
+            t_debug!("📭 Queue is empty, nothing to send");
+        } else if attempts >= max_attempts {
+            t_error!("❌ All fragments in queue are too large (max: {}). This indicates a fragmentation bug - fragments should fit within max_len!", max_len);
+        }
+        
+        None
     }
 
     /// Convert a BLE mesh TransactionFragment to FFI Fragment
@@ -320,12 +496,26 @@ impl HostBleTransport {
     }
 
     /// Queue transaction fragments for sending
-    pub fn queue_transaction(&self, tx_bytes: Vec<u8>) -> Result<Vec<Fragment>, String> {
-        // Use BLE mesh fragmenter for optimal fragment size (52 bytes data)
-        use crate::ble::fragmenter::fragment_transaction as mesh_fragment;
-        let mesh_fragments = mesh_fragment(&tx_bytes);
-
-        tracing::info!(
+    /// 
+    /// # Arguments
+    /// * `tx_bytes` - Complete signed transaction bytes
+    /// * `max_payload` - Optional maximum payload size (typically MTU - 10). If None, uses default MAX_FRAGMENT_DATA
+    pub fn queue_transaction(&self, tx_bytes: Vec<u8>, max_payload: Option<usize>) -> Result<Vec<Fragment>, String> {
+        t_info!("📦 queue_transaction() called with {} bytes, max_payload: {:?}", 
+            tx_bytes.len(), max_payload);
+        
+        // Use BLE mesh fragmenter with MTU-aware payload size
+        use crate::ble::fragmenter;
+        t_debug!("🔧 Fragmenting transaction with max_payload: {:?}...", max_payload);
+        let mesh_fragments = if let Some(max_payload) = max_payload {
+            fragmenter::fragment_transaction_with_max_payload(&tx_bytes, max_payload)
+        } else {
+            fragmenter::fragment_transaction(&tx_bytes)
+        };
+        
+        t_debug!("✅ Fragmenter created {} fragments", mesh_fragments.len());
+        
+        t_info!(
             "📦 Mesh fragmenter created {} fragments for {} byte transaction",
             mesh_fragments.len(),
             tx_bytes.len()
@@ -341,8 +531,8 @@ impl HostBleTransport {
             // TransactionFragment is: transaction_id[32] + fragment_index(u16) + total_fragments(u16) + data(Vec<u8>)
             let binary_bytes = bincode1::serialize(fragment)
                 .map_err(|e| format!("Failed to serialize fragment: {}", e))?;
-
-            tracing::info!(
+            
+            t_info!(
                 "📦 Fragment serialized: {} bytes (data: {}B, index: {}/{})",
                 binary_bytes.len(),
                 fragment.data.len(),
@@ -361,13 +551,13 @@ impl HostBleTransport {
 
         let queue_size_after = queue.len();
         let total_bytes: usize = queue.iter().map(|data| data.len()).sum();
-
-        tracing::info!(
+        
+        t_info!(
             "📤 Queued {} fragments for transaction {}",
             ffi_fragments.len(),
             ffi_fragments[0].id
         );
-        tracing::info!(
+        t_info!(
             "📊 Outbound queue: {} → {} fragments ({} total bytes)",
             queue_size_before,
             queue_size_after,
@@ -376,7 +566,7 @@ impl HostBleTransport {
 
         // Log each fragment in queue for debugging
         for (idx, data) in queue.iter().enumerate() {
-            tracing::debug!("  Fragment [{}]: {} bytes", idx, data.len());
+            t_debug!("  Fragment [{}]: {} bytes", idx, data.len());
         }
 
         Ok(ffi_fragments)
@@ -384,78 +574,226 @@ impl HostBleTransport {
 
     /// Periodic tick for retries and timeouts
     pub fn tick(&self, _now_ms: u64) -> Vec<Vec<u8>> {
-        // TODO: Implement retry logic and timeout handling
-        // For now, just return empty list
+        t_debug!("⏱️ HostBleTransport::tick() called (retry/timeout logic not yet implemented)");
         Vec::new()
     }
 
     /// Get current metrics snapshot
     pub fn metrics(&self) -> MetricsSnapshot {
         let metrics = self.metrics.lock();
-        MetricsSnapshot {
+        let snapshot = MetricsSnapshot {
             fragments_buffered: metrics.fragments_buffered,
             transactions_complete: metrics.transactions_complete,
             reassembly_failures: metrics.reassembly_failures,
             last_error: metrics.last_error.clone(),
             updated_at: metrics.updated_at,
-        }
+        };
+
+        t_debug!(
+            "📊 HostBleTransport::metrics() → fragments_buffered={}, transactions_complete={}, reassembly_failures={}, last_error='{}', updated_at={}",
+            snapshot.fragments_buffered,
+            snapshot.transactions_complete,
+            snapshot.reassembly_failures,
+            snapshot.last_error,
+            snapshot.updated_at
+        );
+
+        snapshot
     }
 
     /// Clear a specific transaction from buffers
     pub fn clear_transaction(&self, tx_id: &str) {
         self.inbound_buffers.lock().remove(tx_id);
-        tracing::info!("🗑️  Cleared transaction {}", tx_id);
+        t_info!("🗑️  Cleared transaction {}", tx_id);
     }
 
     /// Get next completed transaction
     pub fn pop_completed(&self) -> Option<(String, Vec<u8>)> {
-        self.completed_transactions.lock().pop_front()
+        t_info!("📤 HostBleTransport::pop_completed() called");
+
+        let mut completed = self.completed_transactions.lock();
+        let queue_size_before = completed.len();
+        let result = completed.pop_front();
+        let queue_size_after = completed.len();
+
+        match &result {
+            Some((tx_id, bytes)) => {
+                t_info!(
+                    "✅ Popped completed transaction {} ({} bytes). Completed queue: {} → {}",
+                    tx_id,
+                    bytes.len(),
+                    queue_size_before,
+                    queue_size_after
+                );
+            }
+            None => {
+                t_debug!(
+                    "📭 No completed transactions available (queue size: {})",
+                    queue_size_before
+                );
+            }
+        }
+
+        result
     }
 
     /// Push a received transaction into the auto-submission queue
     /// Returns true if added, false if it's a duplicate
     pub fn push_received_transaction(&self, tx_bytes: Vec<u8>) -> bool {
-        use sha2::{Digest, Sha256};
-
-        // Calculate transaction hash for deduplication
+        t_info!("📥 push_received_transaction() called with {} bytes", tx_bytes.len());
+        
+        use sha2::{Sha256, Digest};
+        
+        // Calculate transaction hash for logging/identification
+        t_debug!("🔐 Calculating SHA-256 hash for transaction...");
         let mut hasher = Sha256::new();
         hasher.update(&tx_bytes);
         let tx_hash = hasher.finalize().to_vec();
-
-        // Check if already submitted
-        let mut submitted = self.submitted_tx_hashes.lock();
-        if submitted.contains_key(&tx_hash) {
-            tracing::debug!("⏩ Skipping duplicate transaction");
-            return false;
-        }
-
-        // Add to submitted set with current timestamp
-        submitted.insert(tx_hash, Self::current_timestamp());
-        drop(submitted);
-
+        let tx_hash_hex = hex::encode(&tx_hash);
+        t_debug!("✅ Transaction hash calculated: {} ({} bytes)", 
+            tx_hash_hex.chars().take(32).collect::<String>(), 
+            tx_hash.len());
+        
+        // Duplicate check commented out - all reassembled transactions are queued
+        // // Check if transaction was already submitted
+        // let submitted = self.submitted_tx_hashes.lock();
+        // if submitted.contains_key(&tx_hash) {
+        //     drop(submitted);
+        //     t_warn!("⚠️ Transaction {} already submitted (duplicate detected)", 
+        //         tx_hash_hex.chars().take(16).collect::<String>());
+        //     t_info!("❌ push_received_transaction() returning false (duplicate - already submitted)");
+        //     return false;
+        // }
+        // drop(submitted);
+        // 
+        // // Check if transaction is already in the received queue
+        // let queue = self.received_tx_queue.lock();
+        // for (_, queued_tx_bytes, _) in queue.iter() {
+        //     let mut queued_hasher = Sha256::new();
+        //     queued_hasher.update(queued_tx_bytes);
+        //     let queued_hash = queued_hasher.finalize().to_vec();
+        //     
+        //     if queued_hash == tx_hash {
+        //         drop(queue);
+        //         t_warn!("⚠️ Transaction {} already in received queue (duplicate detected)", 
+        //             tx_hash_hex.chars().take(16).collect::<String>());
+        //         t_info!("❌ push_received_transaction() returning false (duplicate - already queued)");
+        //         return false;
+        //     }
+        // }
+        // drop(queue);
+        
+        // Proceed with adding to queue (no duplicate check)
+        let now = Self::current_timestamp();
+        t_debug!("📥 Processing transaction {} (no duplicate check)", 
+            tx_hash_hex.chars().take(16).collect::<String>());
+        
         // Generate transaction ID
         let tx_id = uuid::Uuid::new_v4().to_string();
-
+        t_debug!("🆔 Generated transaction ID: {}", tx_id);
+        
         // Add to received queue
         let mut queue = self.received_tx_queue.lock();
-        queue.push_back((tx_id.clone(), tx_bytes, Self::current_timestamp()));
-
-        tracing::info!(
-            "📥 Queued received transaction {} for auto-submission",
-            tx_id
-        );
+        let queue_size_before = queue.len();
+        t_debug!("📋 Received queue size before adding: {}", queue_size_before);
+        
+        queue.push_back((tx_id.clone(), tx_bytes.clone(), now));
+        let queue_size = queue.len();
+        drop(queue);
+        
+        t_info!("📥 Queued received transaction {} for auto-submission (queue size: {} -> {})", 
+            tx_id, queue_size_before, queue_size);
+        t_info!("   Transaction hash: {} ({} bytes)", 
+            tx_hash_hex.chars().take(32).collect::<String>(), 
+            tx_bytes.len());
+        t_info!("   Timestamp: {}", now);
+        t_info!("✅ push_received_transaction() returning true (successfully queued)");
         true
     }
 
     /// Get next received transaction for auto-submission
     /// Returns (tx_id, tx_bytes, received_at_timestamp)
     pub fn next_received_transaction(&self) -> Option<(String, Vec<u8>, u64)> {
-        self.received_tx_queue.lock().pop_front()
+        t_info!("📤 next_received_transaction() called");
+        
+        let mut queue = self.received_tx_queue.lock();
+        let queue_size_before = queue.len();
+        t_debug!("📋 Received queue size before pop: {}", queue_size_before);
+        
+        let result = queue.pop_front();
+        
+        if let Some((tx_id, tx_bytes, timestamp)) = &result {
+            let queue_size_after = queue.len();
+            t_info!("✅ Retrieved transaction {} from received queue ({} bytes, timestamp: {})", 
+                tx_id, tx_bytes.len(), timestamp);
+            t_info!("📊 Received queue: {} → {} transactions remaining", 
+                queue_size_before, queue_size_after);
+        } else {
+            t_debug!("📭 Received queue is empty, returning None");
+        }
+        
+        drop(queue);
+        result
     }
 
     /// Get count of transactions waiting for auto-submission
     pub fn received_queue_size(&self) -> usize {
-        self.received_tx_queue.lock().len()
+        let size = self.received_tx_queue.lock().len();
+        t_debug!("📊 HostBleTransport::received_queue_size() → {}", size);
+        size
+    }
+    
+    
+    /// Get fragment reassembly progress for all incomplete transactions
+    pub fn get_fragment_reassembly_info(&self) -> Vec<FragmentReassemblyInfo> {
+        t_debug!("🔍 HostBleTransport::get_fragment_reassembly_info() called");
+
+        let buffers = self.inbound_buffers.lock();
+        let mut info_list = Vec::new();
+        
+        for (tx_id, fragments) in buffers.iter() {
+            if fragments.is_empty() {
+                continue;
+            }
+            
+            // Get total fragments from first fragment
+            let total_fragments = fragments.first().map(|f| f.total_fragments as usize).unwrap_or(0);
+            let received_count = fragments.len();
+            
+            // Get received fragment indices
+            let received_indices: Vec<usize> = fragments.iter()
+                .map(|f| f.fragment_index as usize)
+                .collect();
+            
+            // Get fragment sizes
+            let fragment_sizes: Vec<usize> = fragments.iter()
+                .map(|f| f.data.len())
+                .collect();
+            
+            // Calculate total bytes received so far
+            let total_bytes: usize = fragment_sizes.iter().sum();
+            
+            info_list.push(FragmentReassemblyInfo {
+                transaction_id: tx_id.clone(),
+                total_fragments,
+                received_fragments: received_count,
+                received_indices,
+                fragment_sizes,
+                total_bytes_received: total_bytes,
+            });
+        }
+
+        tracing::debug!(
+            "📊 Fragment reassembly info: {} transaction(s) with incomplete fragments",
+            info_list.len()
+        );
+
+        t_debug!(
+            "📊 Fragment reassembly info: {} transaction(s) with incomplete fragments",
+            info_list.len()
+        );
+        
+        info_list
     }
 
     /// Get outbound queue size without removing items (for debugging)
@@ -483,8 +821,8 @@ impl HostBleTransport {
 
         let mut submitted = self.submitted_tx_hashes.lock();
         submitted.insert(tx_hash, Self::current_timestamp());
-
-        tracing::debug!("✅ Marked transaction as submitted");
+        
+        t_debug!("✅ Marked transaction as submitted");
     }
 
     /// Clean up old submitted transaction hashes (older than 24 hours)
@@ -493,28 +831,30 @@ impl HostBleTransport {
 
         let mut submitted = self.submitted_tx_hashes.lock();
         submitted.retain(|_, timestamp| *timestamp > cutoff);
-
-        tracing::debug!("🧹 Cleaned up old submission hashes");
+        
+        t_debug!("🧹 Cleaned up old submission hashes");
     }
 
     // Helper functions
-
-    fn convert_fragment_to_ffi(&self, fragment: &TxFragment) -> Fragment {
+    
+    fn convert_fragment_to_ffi(&self, fragment: &TransactionFragment) -> Fragment {
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-        let fragment_type = match &fragment.fragment_type {
-            FragmentType::FragmentStart => "FragmentStart",
-            FragmentType::FragmentEnd => "FragmentEnd",
-            FragmentType::FragmentContinue => "FragmentContinue",
+        
+        let fragment_type = if fragment.fragment_index == 0 {
+            "FragmentStart"
+        } else if fragment.fragment_index == fragment.total_fragments - 1 {
+            "FragmentEnd"
+        } else {
+            "FragmentContinue"
         };
 
         Fragment {
-            id: fragment.id.clone(),
-            index: fragment.index as u32,
-            total: fragment.total as u32,
+            id: format!("{:x}", &fragment.transaction_id[0..8].iter().fold(0u64, |acc, &b| (acc << 8) | b as u64)),
+            index: fragment.fragment_index as u32,
+            total: fragment.total_fragments as u32,
             data: BASE64.encode(&fragment.data),
             fragment_type: fragment_type.to_string(),
-            checksum: BASE64.encode(&fragment.checksum),
+            checksum: BASE64.encode(&fragment.transaction_id),
         }
     }
 

@@ -85,6 +85,16 @@ object PolliNetFFI {
      */
     external fun createUnsignedSplTransaction(handle: Long, requestJson: ByteArray): String
 
+    /**
+     * Create unsigned governance vote transaction for MWA or manual signing.
+     * Uses a nonce account on-chain (online: fetches nonce data via RPC).
+     *
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded CastUnsignedVoteRequest
+     * @return JSON FfiResult with base64-encoded unsigned vote transaction
+     */
+    external fun castUnsignedVote(handle: Long, requestJson: ByteArray): String
+
     // =========================================================================
     // Signature helpers
     // =========================================================================
@@ -124,9 +134,10 @@ object PolliNetFFI {
     /**
      * Fragment a transaction for BLE transmission
      * @param txBytes Transaction bytes to fragment
+     * @param maxPayload Optional maximum payload size (MTU - 10). Pass 0 to use default
      * @return JSON FfiResult with FragmentList
      */
-    external fun fragment(handle: Long, txBytes: ByteArray): String
+    external fun fragment(handle: Long, txBytes: ByteArray, maxPayload: Long = 0): String
 
     // =========================================================================
     // Offline Bundle Management (Core PolliNet Features)
@@ -167,6 +178,16 @@ object PolliNetFFI {
      * @return JSON FfiResult with base64-encoded unsigned transaction
      */
     external fun createUnsignedOfflineTransaction(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing
+     * Uses cached nonce data from the offline bundle (no network required).
+     *
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded CreateUnsignedOfflineSplTransactionRequest
+     * @return JSON FfiResult with base64-encoded unsigned SPL transaction
+     */
+    external fun createUnsignedOfflineSplTransaction(handle: Long, requestJson: ByteArray): String
 
     /**
      * Get transaction message bytes that need to be signed by MWA
@@ -211,7 +232,33 @@ object PolliNetFFI {
      */
     external fun cacheNonceAccounts(handle: Long, requestJson: ByteArray): String
     
+    /**
+     * Refresh all cached nonce data in the offline bundle
+     * 
+     * Fetches latest on-chain nonce state for all cached nonce accounts and updates
+     * the stored OfflineTransactionBundle in secure storage. Marks all nonces as
+     * available (used = false) after refresh.
+     * 
+     * @param handle SDK handle
+     * @return JSON FfiResult with { refreshedCount: Int }
+     */
+    external fun refreshOfflineBundle(handle: Long): String
+
+    external fun getAvailableNonce(handle: Long): String
+
     external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
+    
+    /**
+     * Refresh the blockhash in an unsigned transaction.
+     * 
+     * Use this right before sending an unsigned transaction to MWA for signing
+     * to ensure the blockhash is fresh and won't expire during the signing process.
+     * 
+     * @param handle SDK handle
+     * @param unsignedTxBase64 Base64-encoded unsigned transaction
+     * @return JSON FfiResult with refreshed transaction (base64-encoded)
+     */
+    external fun refreshBlockhashInUnsignedTransaction(handle: Long, unsignedTxBase64: String): String
     
     // =========================================================================
     // BLE Mesh Operations
@@ -273,6 +320,13 @@ object PolliNetFFI {
     external fun getReceivedQueueSize(handle: Long): String
     
     /**
+     * Get fragment reassembly info for all incomplete transactions
+     * @param handle SDK handle
+     * @return JSON FfiResult with FragmentReassemblyInfoList
+     */
+    external fun getFragmentReassemblyInfo(handle: Long): String
+    
+    /**
      * Mark a transaction as successfully submitted (for deduplication)
      * @param handle SDK handle
      * @param transactionBytes Submitted transaction bytes
@@ -287,12 +341,6 @@ object PolliNetFFI {
      */
     external fun cleanupOldSubmissions(handle: Long): String
     
-    /**
-     * Get outbound queue size (non-destructive peek)
-     * @param handle SDK handle
-     * @return JSON FfiResult with queue size
-     */
-    external fun getOutboundQueueSize(handle: Long): String
     
     /**
      * Debug outbound queue (non-destructive peek)
@@ -300,5 +348,114 @@ object PolliNetFFI {
      * @return JSON FfiResult with queue debug info
      */
     external fun debugOutboundQueue(handle: Long): String
+    
+    // =========================================================================
+    // Queue Management (Phase 2)
+    // =========================================================================
+    
+    /**
+     * Push transaction to outbound queue
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded PushOutboundRequest
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun pushOutboundTransaction(handle: Long, requestJson: String): String
+    
+    /**
+     * Pop next transaction from outbound queue
+     * @param handle SDK handle
+     * @return JSON FfiResult<OutboundTransactionFFI?>
+     */
+    external fun popOutboundTransaction(handle: Long): String
+    
+    /**
+     * Get outbound queue size
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueSizeResponse>
+     */
+    external fun getOutboundQueueSize(handle: Long): String
+    
+    /**
+     * Add transaction to retry queue
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded AddToRetryRequest
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun addToRetryQueue(handle: Long, requestJson: String): String
+    
+    /**
+     * Pop next ready retry item
+     * @param handle SDK handle
+     * @return JSON FfiResult<RetryItemFFI?>
+     */
+    external fun popReadyRetry(handle: Long): String
+    
+    /**
+     * Get retry queue size
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueSizeResponse>
+     */
+    external fun getRetryQueueSize(handle: Long): String
+    
+    /**
+     * Queue confirmation for relay
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded QueueConfirmationRequest
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun queueConfirmation(handle: Long, requestJson: String): String
+    
+    /**
+     * Pop next confirmation from queue
+     * @param handle SDK handle
+     * @return JSON FfiResult<ConfirmationFFI?>
+     */
+    external fun popConfirmation(handle: Long): String
+    
+    /**
+     * Get confirmation queue size
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueSizeResponse>
+     */
+    external fun getConfirmationQueueSize(handle: Long): String
+    
+    /**
+     * Get metrics for all queues
+     * @param handle SDK handle
+     * @return JSON FfiResult<QueueMetricsFFI>
+     */
+    external fun getQueueMetrics(handle: Long): String
+    
+    /**
+     * Cleanup stale fragments from reassembly buffer
+     * @param handle SDK handle
+     * @return JSON FfiResult with cleanup stats
+     */
+    external fun cleanupStaleFragments(handle: Long): String
+    
+    /**
+     * Cleanup expired confirmations and retry items
+     * @param handle SDK handle
+     * @return JSON FfiResult with cleanup stats
+     */
+    external fun cleanupExpired(handle: Long): String
+    
+    // =========================================================================
+    // Queue Persistence (Phase 5)
+    // =========================================================================
+    
+    /**
+     * Save all queues to disk (force save, bypass debouncing)
+     * @param handle SDK handle
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun saveQueues(handle: Long): String
+    
+    /**
+     * Auto-save queues if needed (with debouncing)
+     * @param handle SDK handle
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun autoSaveQueues(handle: Long): String
 }
 

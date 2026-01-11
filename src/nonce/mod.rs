@@ -217,8 +217,8 @@ pub async fn find_nonce_accounts_by_authority(
 
     // Create a filter to match accounts where authority equals our pubkey
     let filters = vec![
-        // Filter 1: Account must be exactly 80 bytes (nonce account size)
-        RpcFilterType::DataSize(80),
+        // Filter 1: Account must be exactly 128 bytes (nonce account size)
+        RpcFilterType::DataSize(128),
         // Filter 2: Match authority pubkey at offset 4
         RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
             4, // Offset: skip first 4 bytes (version)

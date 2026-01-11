@@ -5,6 +5,7 @@
 
 pub mod ble;
 pub mod nonce;
+pub mod queue;
 pub mod storage;
 pub mod transaction;
 pub mod util;
@@ -15,6 +16,30 @@ pub mod ffi;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+
+/// Format for BLE device discovery results
+#[derive(Debug, Clone, Copy)]
+pub enum DiscoveryFormat {
+    /// Return detailed PeerInfo objects
+    PeerInfo,
+    /// Return just device addresses as strings
+    Addresses,
+}
+
+/// Result of BLE device discovery
+#[derive(Debug)]
+pub enum DiscoveryResult {
+    /// Detailed peer information
+    PeerInfo(Vec<ble::PeerInfo>),
+    /// Device addresses only
+    Addresses(Vec<String>),
+}
+
+/// Trait for transaction input types that can be submitted to Solana
+/// Allows unified `submit_transaction()` method to accept both base64 strings and raw bytes
+pub trait TransactionInput {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError>;
+}
 
 /// Core PolliNet SDK instance using new platform-agnostic BLE adapter
 pub struct PolliNetSDK {
@@ -28,6 +53,8 @@ pub struct PolliNetSDK {
     local_cache: Arc<RwLock<transaction::TransactionCache>>,
     /// Currently connected peer address (for central mode)
     connected_peer: Arc<RwLock<Option<String>>>,
+    /// Queue manager for all queue operations (Phase 2)
+    queue_manager: Arc<queue::QueueManager>,
 }
 
 impl PolliNetSDK {
@@ -44,13 +71,28 @@ impl PolliNetSDK {
 
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-
+        
+        // Initialize queue manager with persistence (Phase 5)
+        // Use default app data directory for queue storage
+        let queue_manager = if let Ok(storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+            tracing::info!("Using persistent queue storage: {}", storage_dir);
+            Arc::new(queue::QueueManager::with_storage(storage_dir)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
+                    queue::QueueManager::new()
+                }))
+        } else {
+            tracing::info!("No persistent storage configured, queues will not persist");
+            Arc::new(queue::QueueManager::new())
+        };
+        
         Ok(Self {
             ble_bridge,
             transaction_service,
             nonce_manager: Arc::new(nonce::NonceManager::new().await?),
             local_cache,
             connected_peer: Arc::new(RwLock::new(None)),
+            queue_manager,
         })
     }
 
@@ -68,14 +110,47 @@ impl PolliNetSDK {
 
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-
+        
+        // Initialize queue manager with persistence (Phase 5)
+        let queue_manager = if let Ok(storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+            tracing::info!("Using persistent queue storage: {}", storage_dir);
+            Arc::new(queue::QueueManager::with_storage(storage_dir)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
+                    queue::QueueManager::new()
+                }))
+        } else {
+            tracing::info!("No persistent storage configured, queues will not persist");
+            Arc::new(queue::QueueManager::new())
+        };
+        
         Ok(Self {
             ble_bridge,
             transaction_service,
             nonce_manager: Arc::new(nonce::NonceManager::new().await?),
             local_cache,
             connected_peer: Arc::new(RwLock::new(None)),
+            queue_manager,
         })
+    }
+    
+    // =========================================================================
+    // Queue Management Methods (Phase 2)
+    // =========================================================================
+    
+    /// Get queue manager reference
+    pub fn queue_manager(&self) -> &Arc<queue::QueueManager> {
+        &self.queue_manager
+    }
+    
+    /// Get queue metrics
+    pub async fn get_queue_metrics(&self) -> queue::QueueMetrics {
+        self.queue_manager.get_metrics().await
+    }
+    
+    /// Get queue health status
+    pub async fn get_queue_health(&self) -> queue::HealthStatus {
+        self.queue_manager.get_health().await
     }
 
     /// Start BLE advertising and scanning
@@ -92,17 +167,28 @@ impl PolliNetSDK {
     /// Create an unsigned transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned transaction
     /// Sender is used as nonce authority
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn create_unsigned_transaction(
         &self,
         sender: &str,
         recipient: &str,
         fee_payer: &str,
         amount: u64,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&transaction::CachedNonceData>,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
-            .create_unsigned_transaction(sender, recipient, fee_payer, amount, nonce_account)
+            .create_unsigned_transaction(
+                sender,
+                recipient,
+                fee_payer,
+                amount,
+                nonce_account,
+                nonce_data,
+            )
             .await?)
     }
 
@@ -110,6 +196,9 @@ impl PolliNetSDK {
     /// Returns base64 encoded uncompressed, unsigned SPL token transaction
     /// Automatically derives ATAs from wallet pubkeys and mint address
     /// Sender is used as nonce authority
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn create_unsigned_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -117,7 +206,8 @@ impl PolliNetSDK {
         fee_payer: &str,
         mint_address: &str,
         amount: u64,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&transaction::CachedNonceData>,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
@@ -128,13 +218,43 @@ impl PolliNetSDK {
                 mint_address,
                 amount,
                 nonce_account,
+                nonce_data,
             )
             .await?)
     }
-
+    
+    /// Create an UNSIGNED offline SPL token transfer transaction using cached nonce data
+    /// This variant is designed for MWA/Seed Vault workflows where private keys do not
+    /// leave the device and nonce/blockhash data comes from an offline bundle.
+    ///
+    /// Returns base64-encoded unsigned transaction suitable for MWA signing.
+    pub fn create_unsigned_offline_spl_transaction(
+        &self,
+        sender_wallet: &str,
+        recipient_wallet: &str,
+        fee_payer: &str,
+        mint_address: &str,
+        amount: u64,
+        cached_nonce: &transaction::CachedNonceData,
+    ) -> Result<String, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .create_unsigned_offline_spl_transaction(
+                sender_wallet,
+                recipient_wallet,
+                fee_payer,
+                mint_address,
+                amount,
+                cached_nonce,
+            )?)
+    }
+    
     /// Create an unsigned governance vote transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned vote transaction
     /// Voter is used as nonce authority
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn cast_unsigned_vote(
         &self,
         voter: &str,
@@ -142,7 +262,8 @@ impl PolliNetSDK {
         vote_account: &str,
         choice: u8,
         fee_payer: &str,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&transaction::CachedNonceData>,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
@@ -153,6 +274,7 @@ impl PolliNetSDK {
                 choice,
                 fee_payer,
                 nonce_account,
+                nonce_data,
             )
             .await?)
     }
@@ -171,7 +293,27 @@ impl PolliNetSDK {
             .prepare_offline_nonce_data(nonce_account)
             .await?)
     }
-
+    
+    /// Get an available nonce account from cached bundle
+    /// 
+    /// Loads the bundle from the specified file path and returns the first
+    /// available (unused) nonce account data.
+    /// 
+    /// This allows users to either manage their own nonce accounts or let
+    /// PolliNet manage them automatically.
+    /// 
+    /// Returns None if:
+    /// - Bundle file doesn't exist
+    /// - Bundle has no available nonces (all are used)
+    pub fn get_available_nonce_from_bundle(
+        &self,
+        bundle_file: &str,
+    ) -> Result<Option<transaction::CachedNonceData>, PolliNetError> {
+        Ok(self
+            .transaction_service
+            .get_available_nonce_from_bundle(bundle_file)?)
+    }
+    
     /// Prepare multiple nonce accounts for offline use
     /// Smart bundle management: refreshes used nonces (FREE!), creates new ones only when necessary
     ///
@@ -323,16 +465,61 @@ impl PolliNetSDK {
             .transaction_service
             .add_signature(base64_tx, signer_pubkey, signature)?)
     }
-
-    /// Send and confirm a base64 encoded transaction
-    /// Decodes, deserializes, validates, and submits to Solana
-    pub async fn send_and_confirm_transaction(
+    
+    /// Submit a transaction to Solana
+    /// 
+    /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
+    /// Automatically detects the input format and processes accordingly.
+    /// 
+    /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
+    /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
+    /// 
+    /// Returns transaction signature if successful.
+    /// 
+    /// # Examples
+    /// ```rust,no_run
+    /// // Submit from base64 string
+    /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
+    /// 
+    /// // Submit from raw bytes
+    /// let signature = sdk.submit_transaction(&tx_bytes).await?;
+    /// ```
+    /// Submit a transaction to Solana
+    /// 
+    /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
+    /// Automatically detects the input format and processes accordingly.
+    /// 
+    /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
+    /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
+    /// 
+    /// Returns transaction signature if successful.
+    /// 
+    /// # Examples
+    /// ```rust,no_run
+    /// // Submit from base64 string
+    /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
+    /// 
+    /// // Submit from raw bytes
+    /// let signature = sdk.submit_transaction(&tx_bytes).await?;
+    /// ```
+    pub async fn submit_transaction(
         &self,
-        base64_tx: &str,
+        transaction: impl TransactionInput,
+    ) -> Result<String, PolliNetError> {
+        transaction.submit(self).await
+    }
+    
+    /// Refresh the blockhash in an unsigned transaction
+    /// 
+    /// Use this right before sending an unsigned transaction to MWA for signing
+    /// to ensure the blockhash is fresh and won't expire during the signing process.
+    pub async fn refresh_blockhash_in_unsigned_transaction(
+        &self,
+        unsigned_tx_base64: &str,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
-            .send_and_confirm_transaction(base64_tx)
+            .refresh_blockhash_in_unsigned_transaction(unsigned_tx_base64)
             .await?)
     }
 
@@ -489,17 +676,6 @@ impl PolliNetSDK {
         */
     }
 
-    /// Submit a transaction to Solana when online
-    pub async fn submit_transaction_to_solana(
-        &self,
-        transaction: &[u8],
-    ) -> Result<String, PolliNetError> {
-        Ok(self
-            .transaction_service
-            .submit_to_solana(transaction)
-            .await?)
-    }
-
     /// Broadcast confirmation after successful submission
     pub async fn broadcast_confirmation(&self, signature: &str) -> Result<(), PolliNetError> {
         Ok(self
@@ -532,37 +708,92 @@ impl PolliNetSDK {
     }
 
     /// Discover nearby BLE peers
-    pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
-        tracing::info!("🔍 Starting BLE peer discovery...");
-
+    /// 
+    /// Scans for BLE devices and returns them in the specified format.
+    /// Automatically stops scanning after discovery completes.
+    /// 
+    /// # Arguments
+    /// * `wait_seconds` - How long to wait for devices to be discovered (default: 3 seconds)
+    /// * `format` - Return format: `PeerInfo` (detailed) or `String` (addresses only)
+    /// 
+    /// # Examples
+    /// ```rust,no_run
+    /// // Get detailed peer information
+    /// let peers = sdk.discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo).await?;
+    /// 
+    /// // Get just device addresses
+    /// let addresses = sdk.discover_ble_peers_with_format(5, DiscoveryFormat::Addresses).await?;
+    /// ```
+    pub async fn discover_ble_peers_with_format(
+        &self,
+        wait_seconds: u64,
+        format: DiscoveryFormat,
+    ) -> Result<DiscoveryResult, PolliNetError> {
+        tracing::info!("🔍 Starting BLE peer discovery (wait: {}s)...", wait_seconds);
+        
         // Start scanning
         self.ble_bridge.start_scanning().await?;
-
-        // Wait a moment for devices to be discovered
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
+        
+        // Wait for devices to be discovered
+        tokio::time::sleep(tokio::time::Duration::from_secs(wait_seconds)).await;
+        
         // Get discovered devices
         let discovered = self.ble_bridge.get_discovered_devices().await?;
-
-        tracing::info!("✅ Found {} BLE peers", discovered.len());
-
-        // Convert to PeerInfo format
-        let peers: Vec<ble::PeerInfo> = discovered
-            .into_iter()
-            .map(|device| ble::PeerInfo {
-                peer_id: device.address.clone(),
-                device_uuid: None,
-                capabilities: vec!["CAN_RELAY".to_string()],
-                rssi: device.rssi.unwrap_or(-100),
-                first_seen: device.last_seen,
-                last_seen: device.last_seen,
-                state: ble::PeerState::Discovered,
-                connection_attempts: 0,
-                last_attempt: None,
-            })
-            .collect();
-
-        Ok(peers)
+        
+        // Stop scanning
+        self.ble_bridge.stop_scanning().await?;
+        
+        tracing::info!("✅ Found {} BLE devices", discovered.len());
+        
+        // Convert to requested format
+        let result = match format {
+            DiscoveryFormat::PeerInfo => {
+                let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
+                    ble::PeerInfo {
+                        peer_id: device.address.clone(),
+                        device_uuid: None,
+                        capabilities: vec!["CAN_RELAY".to_string()],
+                        rssi: device.rssi.unwrap_or(-100),
+                        first_seen: device.last_seen,
+                        last_seen: device.last_seen,
+                        state: ble::PeerState::Discovered,
+                        connection_attempts: 0,
+                        last_attempt: None,
+                    }
+                }).collect();
+                DiscoveryResult::PeerInfo(peers)
+            }
+            DiscoveryFormat::Addresses => {
+                let addresses: Vec<String> = discovered.into_iter()
+                    .map(|d| d.address.clone())
+                    .collect();
+                DiscoveryResult::Addresses(addresses)
+            }
+        };
+        
+        Ok(result)
+    }
+    
+    /// Discover nearby BLE peers (returns detailed PeerInfo)
+    /// 
+    /// Convenience method that calls `discover_ble_peers_with_format()` with default settings.
+    /// Scans for 3 seconds and returns detailed peer information.
+    pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
+        match self.discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo).await? {
+            DiscoveryResult::PeerInfo(peers) => Ok(peers),
+            DiscoveryResult::Addresses(_) => unreachable!(),
+        }
+    }
+    
+    /// Scan all BLE devices (returns device addresses)
+    /// 
+    /// Convenience method that calls `discover_ble_peers_with_format()` with address format.
+    /// Scans for 5 seconds and returns device addresses as strings.
+    pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
+        match self.discover_ble_peers_with_format(5, DiscoveryFormat::Addresses).await? {
+            DiscoveryResult::PeerInfo(_) => unreachable!(),
+            DiscoveryResult::Addresses(addresses) => Ok(addresses),
+        }
     }
 
     /// Connect to a discovered BLE peer and establish GATT session
@@ -584,12 +815,7 @@ impl PolliNetSDK {
         self.ble_bridge.write_to_device(peer_address, data).await?;
         Ok(())
     }
-
-    /// Get number of connected peers
-    pub async fn get_connected_peer_count(&self) -> usize {
-        self.ble_bridge.connected_clients_count().await
-    }
-
+    
     /// Get BLE status and debugging information
     pub async fn get_ble_status(&self) -> Result<String, PolliNetError> {
         let adapter_info = self.ble_bridge.get_adapter_info();
@@ -615,27 +841,7 @@ impl PolliNetSDK {
 
         Ok(status)
     }
-
-    pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
-        tracing::info!("🔍 Starting BLE device scan...");
-
-        // Start scanning
-        self.ble_bridge.start_scanning().await?;
-
-        // Wait a bit for devices to be discovered
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-        // Get discovered devices
-        let devices = self.ble_bridge.get_discovered_devices().await?;
-        let device_addresses: Vec<String> = devices.iter().map(|d| d.address.clone()).collect();
-
-        // Stop scanning
-        self.ble_bridge.stop_scanning().await?;
-
-        tracing::info!("📱 Discovered {} BLE devices", device_addresses.len());
-        Ok(device_addresses)
-    }
-
+    
     /// Start continuous BLE scanning
     pub async fn start_ble_scanning(&self) -> Result<(), PolliNetError> {
         self.ble_bridge.start_scanning().await?;
@@ -768,6 +974,43 @@ impl PolliNetSDK {
     /// Clear fragments for a specific transaction
     pub async fn clear_fragments(&self, tx_id: &str) {
         self.ble_bridge.clear_fragments(tx_id).await;
+    }
+}
+
+// TransactionInput trait implementations for unified submit_transaction() method
+impl TransactionInput for &str {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .send_and_confirm_transaction(self)
+            .await?)
+    }
+}
+
+impl TransactionInput for String {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .send_and_confirm_transaction(self.as_str())
+            .await?)
+    }
+}
+
+impl TransactionInput for &[u8] {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .submit_to_solana(self)
+            .await?)
+    }
+}
+
+impl TransactionInput for Vec<u8> {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .submit_to_solana(self.as_slice())
+            .await?)
     }
 }
 

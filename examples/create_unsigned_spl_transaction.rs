@@ -86,7 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &fee_payer,
             &mint_address,
             token_amount,
-            &nonce_account,
+            Some(&nonce_account),
+            None, // nonce_data - will fetch from nonce_account
         )
         .await?;
 
@@ -179,10 +180,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Submit the SPL transaction
         info!("\n=== Submitting Fully Signed SPL Transaction ===");
-        info!("Submitting to Solana using send_and_confirm_transaction...");
+        info!("Submitting to Solana using submit_transaction...");
 
         let signature = sdk
-            .send_and_confirm_transaction(&partially_signed_tx)
+            .submit_transaction(partially_signed_tx.as_str())
             .await?;
         info!("✅ SPL token transfer submitted successfully!");
         info!("   Transaction signature: {}", signature);
@@ -204,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("3. Owner signs using add_signature()");
     info!("4. If fee payer differs, send to fee payer");
     info!("5. Fee payer signs using add_signature()");
-    info!("6. Submit when fully signed using send_and_confirm_transaction()");
+    info!("6. Submit when fully signed using submit_transaction()");
 
     // 9. Summary
     info!("\n=== Complete Unsigned SPL Transaction Summary ===");
@@ -232,7 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("• Transaction type: SPL Token Transfer (unsigned)");
     info!("• Transaction returns as base64 encoded string");
     info!("• add_signature() takes and returns base64");
-    info!("• send_and_confirm_transaction() takes base64");
+    info!("• submit_transaction() takes base64 string or raw bytes");
     info!("• ATAs derived automatically from wallets + mint");
     info!("• Sender is used as nonce authority AND token owner");
     info!("• If sender = fee payer: Only one signature needed");

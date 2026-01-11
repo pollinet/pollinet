@@ -17,7 +17,25 @@ use sha2::{Digest, Sha256};
 /// # Returns
 /// Vector of TransactionFragment ready for mesh transmission
 pub fn fragment_transaction(transaction_bytes: &[u8]) -> Vec<TransactionFragment> {
-    tracing::info!("Fragmenting transaction: {} bytes", transaction_bytes.len());
+    fragment_transaction_with_max_payload(transaction_bytes, MAX_FRAGMENT_DATA)
+}
+
+/// Fragment a signed Solana transaction for BLE transmission with MTU-aware payload size
+///
+/// Takes a complete signed transaction and splits it into fragments
+/// that fit within the specified max_payload size (derived from negotiated MTU).
+///
+/// # Arguments
+/// * `transaction_bytes` - Complete signed Solana transaction (serialized)
+/// * `max_payload` - Maximum payload size (typically MTU - 10 for safety margin)
+///
+/// # Returns
+/// Vector of TransactionFragment ready for mesh transmission
+pub fn fragment_transaction_with_max_payload(
+    transaction_bytes: &[u8],
+    max_payload: usize,
+) -> Vec<TransactionFragment> {
+    tracing::info!("Fragmenting transaction: {} bytes (max_payload: {})", transaction_bytes.len(), max_payload);
 
     // Calculate transaction ID (SHA256 hash)
     let mut hasher = Sha256::new();
@@ -28,18 +46,38 @@ pub fn fragment_transaction(transaction_bytes: &[u8]) -> Vec<TransactionFragment
 
     tracing::debug!("Transaction ID: {}", hex::encode(&transaction_id));
 
+    // Calculate max data size per fragment based on actual BLE constraints
+    // The max_payload comes from Android's (MTU - 10)
+    // We need to account for bincode serialization overhead:
+    // - transaction_id: 32 bytes (fixed array)
+    // - fragment_index: 2-3 bytes (u16 + varint overhead)
+    // - total_fragments: 2-3 bytes (u16 + varint overhead)
+    // - data length prefix: 1-4 bytes (Vec<u8> length)
+    // - bincode container overhead: ~2-4 bytes
+    // Total overhead: ~45-50 bytes (measured: 44 bytes actual, using 50 for safety margin)
+    let bincode_overhead = 50; // Increased from 40 to account for actual measured overhead
+    let max_data = max_payload.saturating_sub(bincode_overhead);
+    
+    // Ensure minimum fragment size (but allow much larger with good MTU)
+    let max_data = max_data.max(20).min(512); // 20 bytes min, 512 bytes max
+    
     // Calculate number of fragments needed
     let total_fragments = (transaction_bytes.len() + MAX_FRAGMENT_DATA - 1) / MAX_FRAGMENT_DATA;
 
     tracing::info!(
-        "Transaction requires {} fragments ({} bytes per fragment max)",
-        total_fragments,
-        MAX_FRAGMENT_DATA
+        "MTU-aware fragmentation: {} bytes → {} fragments",
+        transaction_bytes.len(),
+        total_fragments
+    );
+    tracing::info!(
+        "  max_payload={} bytes, max_data={} bytes/fragment",
+        max_payload,
+        max_data
     );
 
     // Create fragments
     let mut fragments = Vec::new();
-    for (index, chunk) in transaction_bytes.chunks(MAX_FRAGMENT_DATA).enumerate() {
+    for (index, chunk) in transaction_bytes.chunks(max_data).enumerate() {
         let fragment = TransactionFragment {
             transaction_id,
             fragment_index: index as u16,

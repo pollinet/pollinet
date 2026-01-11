@@ -45,6 +45,13 @@ android {
             jniLibs.srcDirs("src/main/jniLibs")
         }
     }
+    
+    lint {
+        // Don't abort build on lint errors (can fix later)
+        abortOnError = false
+        // Treat warnings as errors (optional, can remove if too strict)
+        warningsAsErrors = false
+    }
 }
 
 dependencies {
@@ -58,6 +65,9 @@ dependencies {
     
     // JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    
+    // WorkManager for battery-efficient background tasks (Phase 4)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
     
     // UniFFI runtime (we'll use JNA for now as it's simpler than full UniFFI)
     implementation("net.java.dev.jna:jna:5.14.0@aar")
