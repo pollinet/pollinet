@@ -14,11 +14,15 @@
 //! 4. Add sender signature
 //! 5. Submit to Solana (if fully signed)
 
+mod wallet_utils;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
+
+mod nonce_bundle_helper;
+use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
+
 use base64;
-use bs58;
 use chrono;
 use pollinet::PolliNetSDK;
-use pollinet::nonce;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -34,44 +38,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet Unsigned SPL Token Transaction Example ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key
-    info!("\n=== Loading Sender Keypair ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
+    // 2. Create new wallet and request airdrop
+    info!("\n=== Creating New Wallet ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 5.0).await?;
     info!("✅ Sender loaded: {}", sender_keypair.pubkey());
 
-    // 3. Check sender balance
-    info!("\n=== Checking Sender Balance ===");
-    let sender_balance = rpc_client.get_balance(&sender_keypair.pubkey())?;
-    info!(
-        "Sender balance: {} lamports ({} SOL)",
-        sender_balance,
-        sender_balance as f64 / LAMPORTS_PER_SOL as f64
-    );
+    // 4. Load nonce from bundle
+    info!("\n=== Loading Nonce from Bundle ===");
+    let mut bundle = load_bundle()?;
+    let (nonce_account, cached_nonce, nonce_index) = get_next_nonce(&mut bundle)?;
 
-    if sender_balance == 0 {
-        return Err("Sender has no balance. Please fund the wallet first.".into());
-    }
-
-    // 4. Set up nonce account
-    info!("\n=== Setting Up Nonce Account ===");
-    let nonce_account = "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK";
-    info!("Using nonce account: {}", nonce_account);
-    info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
+    info!("✅ Loaded nonce from bundle: {}", nonce_account);
+    info!("   Nonce authority: {}", cached_nonce.authority);
+    info!("   Blockhash: {}", cached_nonce.blockhash);
 
     // 5. Set SPL token transfer parameters
     info!("\n=== SPL Token Transfer Parameters ===");
@@ -106,6 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
+    // Mark nonce as used after creating transaction
+    save_bundle_after_use(&mut bundle, nonce_index)?;
+
     info!("✅ Unsigned SPL transaction created");
     info!("   Size: {} characters (base64 encoded)", unsigned_tx.len());
     info!("   Format: base64(bincode(Transaction))");
@@ -116,7 +104,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Transaction is ready for signing!");
     info!("   Instructions: [1] Advance nonce, [2] SPL Token Transfer");
     info!("   Required signers:");
-    info!("     - Sender/Token owner (as nonce authority): {}", sender_wallet);
+    info!(
+        "     - Sender/Token owner (as nonce authority): {}",
+        sender_wallet
+    );
     info!("     - Fee payer: {}", fee_payer);
     info!("   Blockhash: From nonce account (durable)");
     info!("\nBase64 transaction (first 60 chars):");
@@ -182,7 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let final_time = chrono::Local::now();
-        info!("✅ Wait complete | Time: {}", final_time.format("%Y-%m-%d %H:%M:%S"));
+        info!(
+            "✅ Wait complete | Time: {}",
+            final_time.format("%Y-%m-%d %H:%M:%S")
+        );
 
         // Submit the SPL transaction
         info!("\n=== Submitting Fully Signed SPL Transaction ===");
@@ -256,4 +250,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

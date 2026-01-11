@@ -1,5 +1,5 @@
 //! Host-driven BLE transport layer
-//! 
+//!
 //! This module provides a transport mechanism where the host platform (Android)
 //! drives BLE operations, and Rust only handles packetization, reassembly, and
 //! protocol state.
@@ -8,6 +8,7 @@ use crate::transaction::TransactionService;
 use crate::ble::MeshHealthMonitor;
 use crate::ble::mesh::TransactionFragment;
 use crate::storage::SecureStorage;
+use crate::transaction::{Fragment as TxFragment, FragmentType, TransactionService};
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -81,26 +82,26 @@ const MAX_MTU: usize = 512;
 pub struct HostBleTransport {
     /// Queue of outbound frames ready to send
     outbound_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    
+
     /// Inbound reassembly buffers keyed by transaction ID
     inbound_buffers: Arc<Mutex<HashMap<String, Vec<TransactionFragment>>>>,
     
     /// Completed transactions ready for processing
     completed_transactions: Arc<Mutex<VecDeque<(String, Vec<u8>)>>>,
-    
+
     /// Queue of received transactions ready for auto-submission
     /// (tx_id, tx_bytes, received_at_timestamp)
     received_tx_queue: Arc<Mutex<VecDeque<(String, Vec<u8>, u64)>>>,
-    
+
     /// Set of transaction hashes that have been submitted (for deduplication)
     submitted_tx_hashes: Arc<Mutex<HashMap<Vec<u8>, u64>>>,
-    
+
     /// Metrics
     metrics: Arc<Mutex<TransportMetrics>>,
-    
+
     /// Transaction service for fragmentation and building
     transaction_service: Arc<TransactionService>,
-    
+
     /// Secure storage for nonce bundles (optional)
     secure_storage: Option<Arc<SecureStorage>>,
 
@@ -165,7 +166,7 @@ impl HostBleTransport {
         t_info!("✅ HostBleTransport::new() initialized");
         Ok(transport)
     }
-    
+
     /// Create with an RPC client and optional secure storage
     pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, String> {
         t_info!(
@@ -205,7 +206,7 @@ impl HostBleTransport {
         t_info!("✅ HostBleTransport::new_with_rpc() initialized");
         Ok(transport)
     }
-    
+
     /// Set secure storage directory for nonce bundle persistence
     /// Also loads the received queue from disk if storage is available
     pub fn set_secure_storage(&mut self, storage_dir: &str) -> Result<(), String> {
@@ -267,7 +268,7 @@ impl HostBleTransport {
         
         Ok(())
     }
-    
+
     /// Get secure storage if available
     pub fn secure_storage(&self) -> Option<&Arc<SecureStorage>> {
         if self.secure_storage.is_some() {
@@ -311,7 +312,7 @@ impl HostBleTransport {
             tx_id,
             data.len()
         );
-        
+
         let mut buffers = self.inbound_buffers.lock();
         
         // Store TransactionFragment directly (no conversion needed)
@@ -346,17 +347,17 @@ impl HostBleTransport {
             t_debug!("⏳ Waiting for {} more fragments for tx {}", total_fragments - fragments_received, tx_id);
             None
         };
-        
+
         // Calculate metrics count
         let fragments_buffered_count = buffers.values().map(|v| v.len() as u32).sum();
         drop(buffers); // Release buffers lock
-        
+
         // Update metrics
         let mut metrics = self.metrics.lock();
         metrics.fragments_buffered = fragments_buffered_count;
         metrics.updated_at = Self::current_timestamp();
         drop(metrics); // Release metrics lock
-        
+
         if let Some(fragments) = fragments_to_reassemble {
         t_info!("🔧 Starting reassembly for tx {} with {} fragments", tx_id, fragments.len());
             
@@ -418,10 +419,10 @@ impl HostBleTransport {
                     metrics.reassembly_failures += 1;
                     metrics.last_error = error_msg.clone();
                     metrics.updated_at = Self::current_timestamp();
-                    
+
                     // Remove failed fragments
                     self.inbound_buffers.lock().remove(&tx_id);
-                    
+
                     Err(error_msg)
                 }
             }
@@ -467,11 +468,19 @@ impl HostBleTransport {
     }
 
     /// Convert a BLE mesh TransactionFragment to FFI Fragment
-    fn convert_mesh_fragment_to_ffi(&self, mesh_fragment: &crate::ble::mesh::TransactionFragment) -> Fragment {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        
+    fn convert_mesh_fragment_to_ffi(
+        &self,
+        mesh_fragment: &crate::ble::mesh::TransactionFragment,
+    ) -> Fragment {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+
         Fragment {
-            id: format!("{:x}", &mesh_fragment.transaction_id[0..8].iter().fold(0u64, |acc, &b| (acc << 8) | b as u64)),
+            id: format!(
+                "{:x}",
+                &mesh_fragment.transaction_id[0..8]
+                    .iter()
+                    .fold(0u64, |acc, &b| (acc << 8) | b as u64)
+            ),
             index: mesh_fragment.fragment_index as u32,
             total: mesh_fragment.total_fragments as u32,
             data: STANDARD.encode(&mesh_fragment.data),
@@ -516,7 +525,7 @@ impl HostBleTransport {
         // We serialize the mesh TransactionFragment which is much more compact
         let mut queue = self.outbound_queue.lock();
         let queue_size_before = queue.len();
-        
+
         for fragment in &mesh_fragments {
             // Use bincode1 for compact binary serialization
             // TransactionFragment is: transaction_id[32] + fragment_index(u16) + total_fragments(u16) + data(Vec<u8>)
@@ -530,16 +539,16 @@ impl HostBleTransport {
                 fragment.fragment_index,
                 fragment.total_fragments
             );
-            
+
             queue.push_back(binary_bytes);
         }
-        
+
         // Convert mesh fragments to FFI fragments for return value
         let ffi_fragments: Vec<Fragment> = mesh_fragments
             .iter()
             .map(|mf| self.convert_mesh_fragment_to_ffi(mf))
             .collect();
-        
+
         let queue_size_after = queue.len();
         let total_bytes: usize = queue.iter().map(|data| data.len()).sum();
         
@@ -554,7 +563,7 @@ impl HostBleTransport {
             queue_size_after,
             total_bytes
         );
-        
+
         // Log each fragment in queue for debugging
         for (idx, data) in queue.iter().enumerate() {
             t_debug!("  Fragment [{}]: {} bytes", idx, data.len());
@@ -701,7 +710,7 @@ impl HostBleTransport {
         t_info!("✅ push_received_transaction() returning true (successfully queued)");
         true
     }
-    
+
     /// Get next received transaction for auto-submission
     /// Returns (tx_id, tx_bytes, received_at_timestamp)
     pub fn next_received_transaction(&self) -> Option<(String, Vec<u8>, u64)> {
@@ -726,7 +735,7 @@ impl HostBleTransport {
         drop(queue);
         result
     }
-    
+
     /// Get count of transactions waiting for auto-submission
     pub fn received_queue_size(&self) -> usize {
         let size = self.received_tx_queue.lock().len();
@@ -786,39 +795,40 @@ impl HostBleTransport {
         
         info_list
     }
-    
+
     /// Get outbound queue size without removing items (for debugging)
     pub fn outbound_queue_size(&self) -> usize {
         self.outbound_queue.lock().len()
     }
-    
+
     /// Get outbound queue debug info without removing items
     pub fn outbound_queue_debug(&self) -> Vec<(usize, usize)> {
         let queue = self.outbound_queue.lock();
-        queue.iter()
+        queue
+            .iter()
             .enumerate()
             .map(|(idx, data)| (idx, data.len()))
             .collect()
     }
-    
+
     /// Mark a transaction as successfully submitted (for deduplication)
     pub fn mark_transaction_submitted(&self, tx_bytes: &[u8]) {
-        use sha2::{Sha256, Digest};
-        
+        use sha2::{Digest, Sha256};
+
         let mut hasher = Sha256::new();
         hasher.update(tx_bytes);
         let tx_hash = hasher.finalize().to_vec();
-        
+
         let mut submitted = self.submitted_tx_hashes.lock();
         submitted.insert(tx_hash, Self::current_timestamp());
         
         t_debug!("✅ Marked transaction as submitted");
     }
-    
+
     /// Clean up old submitted transaction hashes (older than 24 hours)
     pub fn cleanup_old_submissions(&self) {
         let cutoff = Self::current_timestamp() - (24 * 60 * 60); // 24 hours ago
-        
+
         let mut submitted = self.submitted_tx_hashes.lock();
         submitted.retain(|_, timestamp| *timestamp > cutoff);
         
@@ -856,7 +866,6 @@ impl HostBleTransport {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -875,4 +884,3 @@ mod tests {
         assert_eq!(metrics.fragments_buffered, 0);
     }
 }
-

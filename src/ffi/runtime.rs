@@ -1,5 +1,5 @@
 //! Async runtime management for FFI
-//! 
+//!
 //! Maintains a single-threaded Tokio runtime that is initialized once and
 //! used for all async operations from the FFI boundary.
 
@@ -19,7 +19,7 @@ pub fn init_runtime() -> Result<(), String> {
         .enable_all()
         .build()
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
-    
+
     RUNTIME
         .set(Arc::new(Mutex::new(runtime)))
         .map_err(|_| "Runtime already initialized".to_string())
@@ -50,4 +50,3 @@ where
     let rt = runtime.lock();
     rt.spawn(future)
 }
-

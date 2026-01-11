@@ -2,12 +2,12 @@
 //!
 //! Manages BLE peer discovery, connection establishment, and connection pooling
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 /// Minimum number of connections to maintain
 pub const MIN_CONNECTIONS: usize = 1;
@@ -185,9 +185,9 @@ impl PeerManager {
     /// Add or update a discovered peer
     pub async fn add_peer(&self, peer_id: String, rssi: i16) {
         let mut peers = self.peers.write().await;
-        
+
         let is_new = !peers.contains_key(&peer_id);
-        
+
         let peer = peers.entry(peer_id.clone()).or_insert_with(|| {
             tracing::info!("🔍 Discovered new peer: {} (RSSI: {})", peer_id, rssi);
             PeerInfo::new(peer_id.clone(), rssi)
@@ -219,7 +219,8 @@ impl PeerManager {
     /// Get connected peers
     pub async fn get_connected_peers(&self) -> Vec<PeerInfo> {
         let peers = self.peers.read().await;
-        peers.values()
+        peers
+            .values()
             .filter(|p| p.state == PeerState::Connected)
             .cloned()
             .collect()
@@ -270,7 +271,8 @@ impl PeerManager {
     /// Get number of connected peers
     pub async fn get_connected_count(&self) -> usize {
         let peers = self.peers.read().await;
-        peers.values()
+        peers
+            .values()
             .filter(|p| p.state == PeerState::Connected)
             .count()
     }
@@ -286,7 +288,11 @@ impl PeerManager {
         if let Some(peer) = peers.get_mut(peer_id) {
             peer.state = PeerState::Connecting;
             peer.mark_attempt();
-            tracing::info!("🔄 Connecting to peer: {} (attempt {})", peer_id, peer.connection_attempts);
+            tracing::info!(
+                "🔄 Connecting to peer: {} (attempt {})",
+                peer_id,
+                peer.connection_attempts
+            );
         }
     }
 
@@ -328,7 +334,11 @@ impl PeerManager {
         let mut peers = self.peers.write().await;
         if let Some(peer) = peers.get_mut(peer_id) {
             peer.state = PeerState::Failed;
-            tracing::error!("⚠️  Connection failed: {} (attempt {})", peer_id, peer.connection_attempts);
+            tracing::error!(
+                "⚠️  Connection failed: {} (attempt {})",
+                peer_id,
+                peer.connection_attempts
+            );
         }
     }
 
@@ -347,11 +357,20 @@ impl PeerManager {
     /// Get peer manager statistics
     pub async fn get_stats(&self) -> PeerManagerStats {
         let peers = self.peers.read().await;
-        
+
         let total_peers = peers.len();
-        let connected_peers = peers.values().filter(|p| p.state == PeerState::Connected).count();
-        let connecting_peers = peers.values().filter(|p| p.state == PeerState::Connecting).count();
-        let failed_peers = peers.values().filter(|p| p.state == PeerState::Failed).count();
+        let connected_peers = peers
+            .values()
+            .filter(|p| p.state == PeerState::Connected)
+            .count();
+        let connecting_peers = peers
+            .values()
+            .filter(|p| p.state == PeerState::Connecting)
+            .count();
+        let failed_peers = peers
+            .values()
+            .filter(|p| p.state == PeerState::Failed)
+            .count();
 
         let avg_rssi = if !peers.is_empty() {
             peers.values().map(|p| p.rssi as i32).sum::<i32>() / peers.len() as i32
@@ -393,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn test_peer_discovery() {
         let manager = PeerManager::new(Uuid::new_v4());
-        
+
         // Add some peers
         manager.add_peer("peer1".to_string(), -60).await;
         manager.add_peer("peer2".to_string(), -80).await;
@@ -405,7 +424,7 @@ mod tests {
         // Check connection candidates (peer3 should be excluded due to low RSSI)
         let candidates = manager.get_connection_candidates().await;
         assert_eq!(candidates.len(), 2);
-        
+
         // First candidate should be peer1 (best RSSI)
         assert_eq!(candidates[0].peer_id, "peer1");
     }
@@ -413,9 +432,9 @@ mod tests {
     #[tokio::test]
     async fn test_connection_state_transitions() {
         let manager = PeerManager::new(Uuid::new_v4());
-        
+
         manager.add_peer("peer1".to_string(), -60).await;
-        
+
         // Mark connecting
         manager.mark_connecting("peer1").await;
         let peer = manager.get_peer("peer1").await.unwrap();
@@ -434,9 +453,9 @@ mod tests {
     #[tokio::test]
     async fn test_retry_logic() {
         let manager = PeerManager::new(Uuid::new_v4());
-        
+
         manager.add_peer("peer1".to_string(), -60).await;
-        
+
         // Mark multiple failed attempts
         for _ in 0..MAX_RETRIES {
             manager.mark_connecting("peer1").await;
@@ -452,4 +471,3 @@ mod tests {
         assert_eq!(candidates.len(), 0);
     }
 }
-

@@ -3,8 +3,8 @@
 //! Handles splitting large Solana transactions into BLE-friendly fragments
 //! and reconstructing them on the receiving side.
 
-use sha2::{Sha256, Digest};
 use crate::ble::mesh::{TransactionFragment, MAX_FRAGMENT_DATA};
+use sha2::{Digest, Sha256};
 
 /// Fragment a signed Solana transaction for BLE transmission
 ///
@@ -62,8 +62,8 @@ pub fn fragment_transaction_with_max_payload(
     let max_data = max_data.max(20).min(512); // 20 bytes min, 512 bytes max
     
     // Calculate number of fragments needed
-    let total_fragments = (transaction_bytes.len() + max_data - 1) / max_data;
-    
+    let total_fragments = (transaction_bytes.len() + MAX_FRAGMENT_DATA - 1) / MAX_FRAGMENT_DATA;
+
     tracing::info!(
         "MTU-aware fragmentation: {} bytes → {} fragments",
         transaction_bytes.len(),
@@ -153,8 +153,7 @@ pub fn reconstruct_transaction(fragments: &[TransactionFragment]) -> Result<Vec<
         if fragment.fragment_index != expected_index as u16 {
             return Err(format!(
                 "Missing fragment at index {}, found {}",
-                expected_index,
-                fragment.fragment_index
+                expected_index, fragment.fragment_index
             ));
         }
     }
@@ -165,7 +164,10 @@ pub fn reconstruct_transaction(fragments: &[TransactionFragment]) -> Result<Vec<
         reconstructed.extend_from_slice(&fragment.data);
     }
 
-    tracing::info!("✅ Reconstructed transaction: {} bytes", reconstructed.len());
+    tracing::info!(
+        "✅ Reconstructed transaction: {} bytes",
+        reconstructed.len()
+    );
 
     // Verify the transaction ID matches
     let mut hasher = Sha256::new();
@@ -198,14 +200,14 @@ impl FragmentationStats {
     pub fn calculate(transaction_bytes: &[u8]) -> Self {
         let original_size = transaction_bytes.len();
         let fragment_count = (original_size + MAX_FRAGMENT_DATA - 1) / MAX_FRAGMENT_DATA;
-        
+
         // Each fragment has overhead: mesh header (42) + fragment header (38)
         let per_fragment_overhead = 42 + 38;
         let total_overhead = per_fragment_overhead * fragment_count;
-        
+
         let max_fragment_size = MAX_FRAGMENT_DATA;
         let avg_fragment_size = original_size / fragment_count;
-        
+
         let total_bytes = original_size + total_overhead;
         let efficiency = (original_size as f32 / total_bytes as f32) * 100.0;
 
@@ -238,9 +240,9 @@ mod tests {
     fn test_fragment_small_transaction() {
         // Small transaction that fits in one fragment
         let tx_bytes = vec![1u8; 200];
-        
+
         let fragments = fragment_transaction(&tx_bytes);
-        
+
         assert_eq!(fragments.len(), 1);
         assert_eq!(fragments[0].fragment_index, 0);
         assert_eq!(fragments[0].total_fragments, 1);
@@ -251,19 +253,19 @@ mod tests {
     fn test_fragment_large_transaction() {
         // Transaction that requires multiple fragments
         let tx_bytes = vec![42u8; 1000];
-        
+
         let fragments = fragment_transaction(&tx_bytes);
-        
+
         // Should need 3 fragments (468 bytes max per fragment)
         assert_eq!(fragments.len(), 3);
-        
+
         // All fragments should have the same transaction ID
         let tx_id = fragments[0].transaction_id;
         for fragment in &fragments {
             assert_eq!(fragment.transaction_id, tx_id);
             assert_eq!(fragment.total_fragments, 3);
         }
-        
+
         // First two fragments should be full, last one smaller
         assert_eq!(fragments[0].data.len(), MAX_FRAGMENT_DATA);
         assert_eq!(fragments[1].data.len(), MAX_FRAGMENT_DATA);
@@ -273,10 +275,10 @@ mod tests {
     #[test]
     fn test_reconstruct_in_order() {
         let original = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        
+
         let fragments = fragment_transaction(&original);
         let reconstructed = reconstruct_transaction(&fragments).unwrap();
-        
+
         assert_eq!(original, reconstructed);
     }
 
@@ -287,28 +289,28 @@ mod tests {
         for i in 0..1000 {
             original.push((i % 256) as u8);
         }
-        
+
         let mut fragments = fragment_transaction(&original);
-        
+
         // Shuffle fragments
         fragments.reverse();
-        
+
         let reconstructed = reconstruct_transaction(&fragments).unwrap();
-        
+
         assert_eq!(original, reconstructed);
     }
 
     #[test]
     fn test_reconstruct_missing_fragment() {
         let original = vec![1u8; 1000];
-        
+
         let mut fragments = fragment_transaction(&original);
-        
+
         // Remove one fragment
         fragments.remove(1);
-        
+
         let result = reconstruct_transaction(&fragments);
-        
+
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing fragments"));
     }
@@ -316,15 +318,15 @@ mod tests {
     #[test]
     fn test_reconstruct_duplicate_fragment() {
         let original = vec![1u8; 1000];
-        
+
         let mut fragments = fragment_transaction(&original);
-        
+
         // Duplicate a fragment (but correct count)
         let dup = fragments[0].clone();
         fragments[1] = dup;
-        
+
         let result = reconstruct_transaction(&fragments);
-        
+
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing fragment"));
     }
@@ -332,9 +334,9 @@ mod tests {
     #[test]
     fn test_fragmentation_stats() {
         let tx_bytes = vec![1u8; 1000];
-        
+
         let stats = FragmentationStats::calculate(&tx_bytes);
-        
+
         assert_eq!(stats.original_size, 1000);
         assert_eq!(stats.fragment_count, 3);
         assert!(stats.efficiency < 100.0);
@@ -345,12 +347,12 @@ mod tests {
     fn test_realistic_solana_transaction() {
         // Typical Solana transaction size is ~300-500 bytes
         let realistic_tx = vec![42u8; 350];
-        
+
         let fragments = fragment_transaction(&realistic_tx);
-        
+
         // Should fit in 1 fragment
         assert_eq!(fragments.len(), 1);
-        
+
         let reconstructed = reconstruct_transaction(&fragments).unwrap();
         assert_eq!(realistic_tx, reconstructed);
     }
@@ -359,15 +361,15 @@ mod tests {
     fn test_max_size_transaction() {
         // Solana max transaction size is ~1232 bytes
         let max_tx = vec![255u8; 1232];
-        
+
         let fragments = fragment_transaction(&max_tx);
-        
+
         // Should need 3 fragments
         assert_eq!(fragments.len(), 3);
-        
+
         let reconstructed = reconstruct_transaction(&fragments).unwrap();
         assert_eq!(max_tx, reconstructed);
-        
+
         let stats = FragmentationStats::calculate(&max_tx);
         stats.print();
     }
@@ -375,18 +377,17 @@ mod tests {
     #[test]
     fn test_hash_verification() {
         let original = vec![1u8; 500];
-        
+
         let fragments = fragment_transaction(&original);
-        
+
         // Corrupt a fragment's data
         let mut corrupted_fragments = fragments.clone();
         corrupted_fragments[0].data[0] = 255;
-        
+
         let result = reconstruct_transaction(&corrupted_fragments);
-        
+
         // Should fail hash verification
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("hash mismatch"));
     }
 }
-

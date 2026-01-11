@@ -51,9 +51,6 @@ impl Lz4Compressor {
             return Ok(Vec::new());
         }
 
-        // Use real LZ4 decompression
-        // Note: LZ4 block compression doesn't store original size, so we need to estimate
-        // In production, you might want to store the original size in a header
         let decompressed = lz4::block::decompress(compressed_data, None)
             .map_err(|e| Lz4Error::DecompressionFailed(e.to_string()))?;
 
@@ -72,9 +69,6 @@ impl Lz4Compressor {
 
     /// Check if data is compressed
     pub fn is_compressed(&self, data: &[u8]) -> bool {
-        // For LZ4 block compression, we can't easily detect if data is compressed
-        // In production, you might want to add a header or use a different approach
-        // For now, we'll assume any non-empty data could be compressed
         !data.is_empty()
     }
 
@@ -123,7 +117,10 @@ impl Lz4Compressor {
 
         // Check LZ4 header (3 bytes: "LZ4")
         if &compressed_data[..3] != b"LZ4" {
-            tracing::error!("Invalid LZ4 header. Expected 'LZ4', got: {:02x?}", &compressed_data[..3.min(compressed_data.len())]);
+            tracing::error!(
+                "Invalid LZ4 header. Expected 'LZ4', got: {:02x?}",
+                &compressed_data[..3.min(compressed_data.len())]
+            );
             return Err(Lz4Error::InvalidData("Invalid LZ4 header".to_string()));
         }
 
@@ -140,7 +137,11 @@ impl Lz4Compressor {
         // Extract compressed data (starts at byte 7)
         let data = &compressed_data[7..];
 
-        tracing::info!("Decompressing {} bytes to {} bytes", data.len(), original_size);
+        tracing::info!(
+            "Decompressing {} bytes to {} bytes",
+            data.len(),
+            original_size
+        );
 
         // Decompress
         let decompressed = lz4::block::decompress(data, Some(original_size as i32))

@@ -75,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Test BLE initialization and adapter discovery
 async fn test_ble_initialization() -> Result<(), Box<dyn std::error::Error>> {
     info!("Initializing PolliNet SDK...");
-    
+
     // Initialize SDK without RPC (offline mode)
     let sdk = PolliNetSDK::new().await?;
     info!("✅ PolliNet SDK initialized successfully");
@@ -118,7 +118,7 @@ async fn test_ble_initialization() -> Result<(), Box<dyn std::error::Error>> {
 /// Test BLE advertising and scanning functionality
 async fn test_ble_advertising_scanning() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting BLE advertising and scanning...");
-    
+
     let sdk = PolliNetSDK::new().await?;
 
     // Start BLE networking (advertising + scanning)
@@ -165,7 +165,7 @@ async fn test_ble_advertising_scanning() -> Result<(), Box<dyn std::error::Error
 /// Test peer discovery and connection functionality
 async fn test_peer_discovery_connection() -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing peer discovery and connection...");
-    
+
     let sdk = PolliNetSDK::new().await?;
 
     // Discover peers
@@ -187,13 +187,13 @@ async fn test_peer_discovery_connection() -> Result<(), Box<dyn std::error::Erro
     // Try to connect to the first peer
     let first_peer = &peers[0];
     info!("Attempting to connect to peer: {}", first_peer.peer_id);
-    
+
     match sdk.connect_to_ble_peer(&first_peer.peer_id).await {
         Ok(_) => {
             info!("✅ Successfully connected to peer: {}", first_peer.peer_id);
-            
-    // Check peer count using public API
-    info!("✅ Peer connection attempt completed");
+
+            // Check peer count using public API
+            info!("✅ Peer connection attempt completed");
         }
         Err(e) => {
             warn!("⚠️  Failed to connect to peer: {}", e);
@@ -207,13 +207,16 @@ async fn test_peer_discovery_connection() -> Result<(), Box<dyn std::error::Erro
 /// Test transaction fragmentation for BLE transmission
 async fn test_transaction_fragmentation() -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing transaction fragmentation for BLE transmission...");
-    
+
     let sdk = PolliNetSDK::new().await?;
 
     // Create a mock transaction for testing
     info!("Creating mock transaction for fragmentation testing...");
     let mock_transaction = create_mock_transaction()?;
-    info!("✅ Mock transaction created: {} bytes", mock_transaction.len());
+    info!(
+        "✅ Mock transaction created: {} bytes",
+        mock_transaction.len()
+    );
 
     // Fragment the transaction
     info!("Fragmenting transaction for BLE transmission...");
@@ -230,14 +233,20 @@ async fn test_transaction_fragmentation() -> Result<(), Box<dyn std::error::Erro
         info!("    Data size: {} bytes", fragment.data.len());
         info!("    Type: {:?}", fragment.fragment_type);
         info!("    Checksum: {}", hex::encode(&fragment.checksum[..8]));
-        
+
         // Verify fragment size is within BLE MTU
         if fragment.data.len() <= pollinet::BLE_MTU_SIZE {
-            info!("    ✅ Size within BLE MTU limit ({} <= {})", 
-                  fragment.data.len(), pollinet::BLE_MTU_SIZE);
+            info!(
+                "    ✅ Size within BLE MTU limit ({} <= {})",
+                fragment.data.len(),
+                pollinet::BLE_MTU_SIZE
+            );
         } else {
-            warn!("    ⚠️  Size exceeds BLE MTU limit ({} > {})", 
-                  fragment.data.len(), pollinet::BLE_MTU_SIZE);
+            warn!(
+                "    ⚠️  Size exceeds BLE MTU limit ({} > {})",
+                fragment.data.len(),
+                pollinet::BLE_MTU_SIZE
+            );
         }
     }
 
@@ -246,7 +255,7 @@ async fn test_transaction_fragmentation() -> Result<(), Box<dyn std::error::Erro
     match sdk.relay_transaction(fragments.clone()).await {
         Ok(_) => {
             info!("✅ Fragments relayed successfully");
-            
+
             // Relay completed successfully
             info!("✅ Relay operation completed");
         }
@@ -262,7 +271,7 @@ async fn test_transaction_fragmentation() -> Result<(), Box<dyn std::error::Erro
 /// Test fragment reassembly and verification
 async fn test_fragment_reassembly() -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing fragment reassembly and verification...");
-    
+
     let sdk = PolliNetSDK::new().await?;
 
     // Create and fragment a transaction
@@ -283,7 +292,9 @@ async fn test_fragment_reassembly() -> Result<(), Box<dyn std::error::Error>> {
             if reassembled == original_tx {
                 info!("✅ Integrity verification passed: reassembled data matches original");
             } else {
-                error!("❌ Integrity verification failed: reassembled data does not match original");
+                error!(
+                    "❌ Integrity verification failed: reassembled data does not match original"
+                );
                 return Err("Fragment reassembly integrity check failed".into());
             }
         }
@@ -299,7 +310,7 @@ async fn test_fragment_reassembly() -> Result<(), Box<dyn std::error::Error>> {
     if !corrupted_fragments.is_empty() {
         // Corrupt the first fragment's data
         corrupted_fragments[0].data[0] = !corrupted_fragments[0].data[0];
-        
+
         match sdk.reassemble_fragments(&corrupted_fragments) {
             Ok(_) => {
                 warn!("⚠️  Reassembly succeeded with corrupted data (this might be a bug)");
@@ -316,7 +327,7 @@ async fn test_fragment_reassembly() -> Result<(), Box<dyn std::error::Error>> {
 /// Test BLE status monitoring and debugging
 async fn test_ble_status_monitoring() -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing BLE status monitoring and debugging...");
-    
+
     let sdk = PolliNetSDK::new().await?;
 
     // Get comprehensive BLE status
@@ -339,7 +350,10 @@ async fn test_ble_status_monitoring() -> Result<(), Box<dyn std::error::Error>> 
     info!("Testing BLE adapter capabilities...");
     match sdk.scan_all_devices().await {
         Ok(devices) => {
-            info!("✅ BLE adapter is functional - found {} devices", devices.len());
+            info!(
+                "✅ BLE adapter is functional - found {} devices",
+                devices.len()
+            );
         }
         Err(e) => {
             warn!("⚠️  BLE adapter issue: {}", e);
@@ -352,7 +366,7 @@ async fn test_ble_status_monitoring() -> Result<(), Box<dyn std::error::Error>> 
 /// Test continuous BLE operations
 async fn test_continuous_ble_operations() -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing continuous BLE operations...");
-    
+
     let sdk = PolliNetSDK::new().await?;
 
     // Start BLE networking
@@ -412,14 +426,13 @@ async fn test_continuous_ble_operations() -> Result<(), Box<dyn std::error::Erro
 fn create_mock_transaction() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // Create a simple mock transaction
     let mock_data = b"Mock transaction data for BLE testing - this simulates a real Solana transaction that would be fragmented and transmitted over BLE mesh network";
-    
+
     // Repeat the data to make it larger for better fragmentation testing
     let mut mock_tx = Vec::new();
     for _ in 0..10 {
         mock_tx.extend_from_slice(mock_data);
     }
-    
+
     info!("Created mock transaction: {} bytes", mock_tx.len());
     Ok(mock_tx)
 }
-

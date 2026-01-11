@@ -1,10 +1,10 @@
 //! Android BLE implementation stub
-//! 
+//!
 //! This module provides a stub implementation for Android.
 //! In host-driven mode, the Android BleService handles all BLE operations,
 //! so this adapter is a no-op stub that allows SDK initialization to succeed.
 
-use super::adapter::{BleAdapter, BleError, AdapterInfo};
+use super::adapter::{AdapterInfo, BleAdapter, BleError};
 use async_trait::async_trait;
 use tracing;
 
