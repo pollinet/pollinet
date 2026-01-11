@@ -89,4 +89,23 @@ impl BleAdapter for AndroidBleAdapter {
         tracing::debug!("🔇 get_discovered_devices called on Android stub (no-op, host-driven mode)");
         Ok(Vec::new())
     }
+    
+    // Optional trait methods - provide default implementations for host-driven mode
+    async fn connect_to_device(&self, _address: &str) -> Result<(), BleError> {
+        // No-op: BLE operations are handled by Android BleService in host-driven mode
+        tracing::debug!("🔇 connect_to_device called on Android stub (no-op, host-driven mode)");
+        Ok(())
+    }
+    
+    async fn write_to_device(&self, _address: &str, _data: &[u8]) -> Result<(), BleError> {
+        // No-op: BLE operations are handled by Android BleService in host-driven mode
+        tracing::debug!("🔇 write_to_device called on Android stub (no-op, host-driven mode)");
+        Ok(())
+    }
+    
+    async fn read_from_device(&self, _address: &str) -> Result<Vec<u8>, BleError> {
+        // No-op: BLE operations are handled by Android BleService in host-driven mode
+        tracing::debug!("🔇 read_from_device called on Android stub (no-op, host-driven mode)");
+        Ok(Vec::new())
+    }
 }

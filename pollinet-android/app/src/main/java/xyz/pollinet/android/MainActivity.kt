@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import xyz.pollinet.android.ui.DiagnosticsScreen
@@ -55,6 +56,23 @@ class MainActivity : ComponentActivity() {
             val binder = service as? BleService.LocalBinder
             bleService = binder?.getService()
             isBound = true
+            
+            // Initialize SDK in BleService when service is connected
+            lifecycleScope.launch {
+                bleService?.initializeSdk(
+                    SdkConfig(
+                        // Use Helius devnet RPC for BLE service operations
+                        rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
+                        enableLogging = true,
+                        logLevel = "info",
+                        storageDirectory = filesDir.absolutePath
+                    )
+                )?.onSuccess {
+                    Log.d(TAG, "BLE Service SDK initialized successfully")
+                }?.onFailure { e ->
+                    Log.e(TAG, "Failed to initialize BLE Service SDK: ${e.message}", e)
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {

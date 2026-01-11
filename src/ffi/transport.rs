@@ -207,11 +207,64 @@ impl HostBleTransport {
     }
     
     /// Set secure storage directory for nonce bundle persistence
+    /// Also loads the received queue from disk if storage is available
     pub fn set_secure_storage(&mut self, storage_dir: &str) -> Result<(), String> {
         let storage = SecureStorage::new(storage_dir)
             .map_err(|e| format!("Failed to create secure storage: {}", e))?;
         self.secure_storage = Some(Arc::new(storage));
         t_info!("🔒 Secure storage enabled for nonce bundles");
+        
+        // Load received queue from disk if storage is available
+        let queue_storage_dir = format!("{}/queues", storage_dir);
+        if let Err(e) = self.load_received_queue(&queue_storage_dir) {
+            t_warn!("⚠️ Failed to load received queue: {} (will start fresh)", e);
+        }
+        
+        Ok(())
+    }
+    
+    /// Save received queue to disk
+    pub fn save_received_queue(&self, storage_dir: &str) -> Result<(), String> {
+        use crate::queue::storage::QueueStorage;
+        
+        let storage = QueueStorage::new(storage_dir)
+            .map_err(|e| format!("Failed to create queue storage: {}", e))?;
+        
+        let queue = self.received_tx_queue.lock();
+        let queue_vec: Vec<(String, Vec<u8>, u64)> = queue.iter().cloned().collect();
+        drop(queue);
+        
+        storage.save_received_queue(&queue_vec)
+            .map_err(|e| format!("Failed to save received queue: {}", e))?;
+        
+        t_info!("💾 Saved received queue: {} transactions", queue_vec.len());
+        Ok(())
+    }
+    
+    /// Load received queue from disk
+    pub fn load_received_queue(&self, storage_dir: &str) -> Result<(), String> {
+        use crate::queue::storage::QueueStorage;
+        
+        let storage = QueueStorage::new(storage_dir)
+            .map_err(|e| format!("Failed to create queue storage: {}", e))?;
+        
+        let queue_vec = storage.load_received_queue()
+            .map_err(|e| format!("Failed to load received queue: {}", e))?;
+        
+        if !queue_vec.is_empty() {
+            let mut queue = self.received_tx_queue.lock();
+            queue.clear();
+            for item in queue_vec {
+                queue.push_back(item);
+            }
+            let queue_size = queue.len();
+            drop(queue);
+            
+            t_info!("📥 Loaded received queue: {} transactions", queue_size);
+        } else {
+            t_debug!("📭 No saved received queue found, starting fresh");
+        }
+        
         Ok(())
     }
     

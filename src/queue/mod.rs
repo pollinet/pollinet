@@ -72,8 +72,8 @@ impl QueueManager {
     pub fn with_storage(storage_dir: impl AsRef<std::path::Path>) -> Result<Self, StorageError> {
         let storage = storage::QueueStorage::new(storage_dir)?;
         
-        // Load existing queues from disk
-        let (outbound, retry, confirmation) = storage.load_all()?;
+        // Load existing queues from disk (received queue is handled separately by transport)
+        let (outbound, retry, confirmation, _received) = storage.load_all()?;
         
         Ok(Self {
             outbound: Arc::new(RwLock::new(outbound)),
@@ -98,12 +98,13 @@ impl QueueManager {
             return Ok(()); // Skip save (debounce)
         }
         
-        // Save all queues
+        // Save all queues (received queue is handled separately by transport)
         let outbound = self.outbound.read().await;
         let retry = self.retries.read().await;
         let confirmation = self.confirmations.read().await;
         
-        storage.save_all(&outbound, &retry, &confirmation)?;
+        // Empty received queue slice since it's managed by transport
+        storage.save_all(&outbound, &retry, &confirmation, &[])?;
         
         *last_save = Instant::now();
         
@@ -121,7 +122,8 @@ impl QueueManager {
         let retry = self.retries.read().await;
         let confirmation = self.confirmations.read().await;
         
-        storage.save_all(&outbound, &retry, &confirmation)?;
+        // Empty received queue slice since it's managed by transport
+        storage.save_all(&outbound, &retry, &confirmation, &[])?;
         
         let mut last_save = self.last_save.write().await;
         *last_save = Instant::now();

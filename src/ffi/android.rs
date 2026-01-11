@@ -472,6 +472,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
         }
 
         // Build unsigned vote transaction (uses cached nonce data if provided, otherwise fetches from RPC)
+        // Convert optional nonce data from FFI type to transaction type
+        let nonce_data_opt = request.nonce_data.as_ref().map(|ffi_nonce| {
+            crate::transaction::CachedNonceData {
+                nonce_account: ffi_nonce.nonce_account.clone(),
+                authority: ffi_nonce.authority.clone(),
+                blockhash: ffi_nonce.blockhash.clone(),
+                lamports_per_signature: ffi_nonce.lamports_per_signature,
+                cached_at: ffi_nonce.cached_at,
+                used: ffi_nonce.used,
+            }
+        });
+
         let base64_tx = runtime::block_on(async {
             transport
                 .transaction_service()
@@ -482,7 +494,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
                     request.choice,
                     &request.fee_payer,
                     request.nonce_account.as_deref(),
-                    request.nonce_data.as_ref(),
+                    nonce_data_opt.as_ref(),
                 )
                 .await
         })
@@ -2388,8 +2400,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_saveQueues(
         let transport = get_transport(handle)?;
         
         runtime::block_on(async {
+            // Save queue manager queues (outbound, retry, confirmation)
             transport.sdk.queue_manager().force_save().await
                 .map_err(|e| format!("Failed to save queues: {}", e))?;
+            
+            // Save received queue if storage directory is available
+            if let Ok(queue_storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+                if let Err(e) = transport.save_received_queue(&queue_storage_dir) {
+                    log::warn!("⚠️ Failed to save received queue: {}", e);
+                    // Don't fail the entire operation if received queue save fails
+                }
+            }
+            
             Ok::<(), String>(())
         })?;
         
@@ -2412,8 +2434,19 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_autoSaveQueues(
         let transport = get_transport(handle)?;
         
         runtime::block_on(async {
+            // Auto-save queue manager queues (outbound, retry, confirmation)
             transport.sdk.queue_manager().save_if_needed().await
                 .map_err(|e| format!("Failed to auto-save queues: {}", e))?;
+            
+            // Auto-save received queue if storage directory is available
+            // Note: Received queue uses the same debouncing as queue manager
+            if let Ok(queue_storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+                if let Err(e) = transport.save_received_queue(&queue_storage_dir) {
+                    log::warn!("⚠️ Failed to auto-save received queue: {}", e);
+                    // Don't fail the entire operation if received queue save fails
+                }
+            }
+            
             Ok::<(), String>(())
         })?;
         

@@ -184,35 +184,86 @@ impl QueueStorage {
         Ok(queue)
     }
     
+    /// Save received queue to disk (atomic write)
+    /// The received queue is a VecDeque<(tx_id, tx_bytes, received_at_timestamp)>
+    pub fn save_received_queue(&self, queue: &[(String, Vec<u8>, u64)]) -> Result<(), StorageError> {
+        let path = self.queue_path("received_queue");
+        let temp_path = self.temp_path("received_queue");
+        
+        let persistable = ReceivedQueuePersist::from_queue(queue);
+        let json = serde_json::to_string_pretty(&persistable)
+            .map_err(|e| StorageError::SerializationError(format!("Failed to serialize received queue: {}", e)))?;
+        
+        {
+            let mut file = fs::File::create(&temp_path)
+                .map_err(|e| StorageError::IoError(format!("Failed to create temp file: {}", e)))?;
+            file.write_all(json.as_bytes())
+                .map_err(|e| StorageError::IoError(format!("Failed to write temp file: {}", e)))?;
+            file.sync_all()
+                .map_err(|e| StorageError::IoError(format!("Failed to sync temp file: {}", e)))?;
+        }
+        
+        fs::rename(&temp_path, &path)
+            .map_err(|e| StorageError::IoError(format!("Failed to rename temp file: {}", e)))?;
+        
+        tracing::debug!("Saved received queue to {}", path.display());
+        Ok(())
+    }
+    
+    /// Load received queue from disk
+    pub fn load_received_queue(&self) -> Result<Vec<(String, Vec<u8>, u64)>, StorageError> {
+        let path = self.queue_path("received_queue");
+        
+        if !path.exists() {
+            tracing::debug!("No saved received queue found, starting fresh");
+            return Ok(Vec::new());
+        }
+        
+        let json = fs::read_to_string(&path)
+            .map_err(|e| StorageError::IoError(format!("Failed to read received queue: {}", e)))?;
+        
+        let persistable: ReceivedQueuePersist = serde_json::from_str(&json)
+            .map_err(|e| StorageError::DeserializationError(format!("Failed to deserialize received queue: {}", e)))?;
+        
+        let queue = persistable.to_queue();
+        tracing::info!("Loaded received queue: {} transactions", queue.len());
+        
+        Ok(queue)
+    }
+    
     /// Save all queues
     pub fn save_all(
         &self,
         outbound: &OutboundQueue,
         retry: &RetryQueue,
         confirmation: &ConfirmationQueue,
+        received: &[(String, Vec<u8>, u64)],
     ) -> Result<(), StorageError> {
         self.save_outbound_queue(outbound)?;
         self.save_retry_queue(retry)?;
         self.save_confirmation_queue(confirmation)?;
+        self.save_received_queue(received)?;
         
         tracing::info!("Saved all queues to disk");
         Ok(())
     }
     
     /// Load all queues
-    pub fn load_all(&self) -> Result<(OutboundQueue, RetryQueue, ConfirmationQueue), StorageError> {
+    pub fn load_all(&self) -> Result<(OutboundQueue, RetryQueue, ConfirmationQueue, Vec<(String, Vec<u8>, u64)>), StorageError> {
         let outbound = self.load_outbound_queue()?;
         let retry = self.load_retry_queue()?;
         let confirmation = self.load_confirmation_queue()?;
+        let received = self.load_received_queue()?;
         
         tracing::info!(
-            "Loaded all queues: {} outbound, {} retry, {} confirmation",
+            "Loaded all queues: {} outbound, {} retry, {} confirmation, {} received",
             outbound.len(),
             retry.len(),
-            confirmation.len()
+            confirmation.len(),
+            received.len()
         );
         
-        Ok((outbound, retry, confirmation))
+        Ok((outbound, retry, confirmation, received))
     }
 }
 
@@ -436,6 +487,63 @@ impl ConfirmationQueuePersist {
         
         queue
     }
+}
+
+/// Persistable received queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReceivedQueuePersist {
+    version: u32,
+    transactions: Vec<ReceivedTransactionPersist>,
+    saved_at: u64,
+}
+
+impl ReceivedQueuePersist {
+    fn from_queue(queue: &[(String, Vec<u8>, u64)]) -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let transactions: Vec<ReceivedTransactionPersist> = queue
+            .iter()
+            .map(|(tx_id, tx_bytes, timestamp)| ReceivedTransactionPersist {
+                tx_id: tx_id.clone(),
+                tx_bytes: base64::encode(tx_bytes),
+                received_at: *timestamp,
+            })
+            .collect();
+        
+        Self {
+            version: 1,
+            transactions,
+            saved_at: now,
+        }
+    }
+    
+    fn to_queue(self) -> Vec<(String, Vec<u8>, u64)> {
+        self.transactions
+            .into_iter()
+            .filter_map(|tx| {
+                match base64::decode(&tx.tx_bytes) {
+                    Ok(tx_bytes) => Some((tx.tx_id, tx_bytes, tx.received_at)),
+                    Err(e) => {
+                        tracing::warn!("Failed to decode received transaction bytes: {}", e);
+                        None
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// Persistable received transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReceivedTransactionPersist {
+    tx_id: String,
+    tx_bytes: String, // base64 encoded
+    received_at: u64,
 }
 
 /// Storage errors

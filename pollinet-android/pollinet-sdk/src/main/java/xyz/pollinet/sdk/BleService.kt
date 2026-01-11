@@ -201,6 +201,10 @@ class BleService : Service() {
     private var wasAdvertisingBeforeDisable = false
     private var wasScanningBeforeDisable = false
     
+    // Permission monitoring
+    private var permissionMonitoringJob: Job? = null
+    private var lastKnownPermissionState = false
+    
     // Bonding state receiver
     private val bondStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -278,20 +282,44 @@ class BleService : Service() {
                     }
                     
                     BluetoothAdapter.STATE_ON -> {
-                        appendLog("📶 Bluetooth enabled - resuming operations")
+                        appendLog("📶 Bluetooth enabled - recovering operations")
                         
-                        // Resume alternating mesh mode after Bluetooth is re-enabled
-                        appendLog("   Resuming alternating mesh mode...")
-                            mainHandler.postDelayed({
-                            if (_connectionState.value == ConnectionState.DISCONNECTED && 
-                                connectedDevice == null && clientGatt == null) {
-                                startAlternatingMeshMode()
-                                appendLog("✅ Alternating mesh mode resumed after BT re-enable")
+                        // Check if we have permissions before attempting recovery
+                        if (!hasRequiredPermissions()) {
+                            appendLog("⚠️ Permissions not granted - cannot recover operations")
+                            appendLog("   Please grant Bluetooth permissions in Settings")
+                            return@onReceive
+                        }
+                        
+                        // Re-initialize Bluetooth components after re-enable
+                        appendLog("   Re-initializing Bluetooth components...")
+                        serviceScope.launch {
+                            try {
+                                // Give BT stack a moment to fully initialize
+                                delay(1500)
+                                
+                                // Re-initialize all Bluetooth components
+                                initializeBluetooth()
+                                appendLog("✅ Bluetooth components re-initialized successfully")
+                                
+                                // Resume alternating mesh mode after Bluetooth is re-enabled
+                                appendLog("   Resuming alternating mesh mode...")
+                                if (_connectionState.value == ConnectionState.DISCONNECTED && 
+                                    connectedDevice == null && clientGatt == null) {
+                                    startAlternatingMeshMode()
+                                    appendLog("✅ Alternating mesh mode resumed after BT re-enable")
+                                }
+                                
+                                // Reset saved state flags
+                                wasAdvertisingBeforeDisable = false
+                                wasScanningBeforeDisable = false
+                            } catch (e: Exception) {
+                                android.util.Log.e("BleService", "Failed to recover after BT re-enable", e)
+                                appendLog("❌ Failed to recover operations: ${e.message}")
+                                appendLog("   Will retry on next state change")
+                                _connectionState.value = ConnectionState.ERROR
                             }
-                            // Reset saved state flags
-                            wasAdvertisingBeforeDisable = false
-                            wasScanningBeforeDisable = false
-                        }, 1000)
+                        }
                     }
                     
                     BluetoothAdapter.STATE_TURNING_OFF -> {
@@ -364,6 +392,9 @@ class BleService : Service() {
         val btStateFilter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
         registerReceiver(bluetoothStateReceiver, btStateFilter)
         appendLog("✅ Bluetooth state monitor registered - will handle BT on/off gracefully")
+        
+        // Start permission monitoring to detect when permissions are granted
+        startPermissionMonitoring()
         
         // Only start foreground if we have required permissions
         if (hasRequiredPermissions()) {
@@ -1818,6 +1849,10 @@ class BleService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         appendLog("🧹 Cancelled all pending handler callbacks")
         
+        // Stop permission monitoring
+        permissionMonitoringJob?.cancel()
+        permissionMonitoringJob = null
+        
         // Phase 5: Force save queues before shutdown
         serviceScope.launch {
             try {
@@ -2495,6 +2530,8 @@ class BleService : Service() {
 
     private fun initializeBluetooth() {
         android.util.Log.d("BleService", "initializeBluetooth: Getting Bluetooth manager")
+        
+        // Re-acquire Bluetooth manager (may have changed)
         bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         
         if (bluetoothManager == null) {
@@ -2502,6 +2539,7 @@ class BleService : Service() {
             throw IllegalStateException("BluetoothManager not available")
         }
         
+        // Re-acquire Bluetooth adapter (may have changed)
         bluetoothAdapter = bluetoothManager?.adapter
         if (bluetoothAdapter == null) {
             android.util.Log.e("BleService", "initializeBluetooth: BluetoothAdapter is null")
@@ -2515,6 +2553,7 @@ class BleService : Service() {
             throw IllegalStateException("Bluetooth is not enabled. Please enable Bluetooth in device settings.")
         }
         
+        // Re-acquire BLE components (may have changed after BT off/on)
         bleScanner = bluetoothAdapter?.bluetoothLeScanner
         bleAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
         
@@ -2536,6 +2575,128 @@ class BleService : Service() {
         appendLog("✅ Bluetooth initialized")
         appendLog("   Scanner: ${if (bleScanner != null) "✅" else "❌"}")
         appendLog("   Advertiser: ${if (bleAdvertiser != null) "✅" else "❌"}")
+    }
+    
+    /**
+     * Start monitoring for permission changes
+     * Detects when permissions are newly granted and recovers service operations
+     */
+    private fun startPermissionMonitoring() {
+        // Cancel existing monitoring if any
+        permissionMonitoringJob?.cancel()
+        
+        // Check initial permission state
+        lastKnownPermissionState = hasRequiredPermissions()
+        
+        if (!lastKnownPermissionState) {
+            appendLog("⚠️ Permissions not granted - monitoring for permission grant")
+            appendLog("   Service will automatically recover when permissions are granted")
+        }
+        
+        // Monitor permissions periodically (every 5 seconds)
+        permissionMonitoringJob = serviceScope.launch {
+            while (isActive) {
+                delay(5000) // Check every 5 seconds
+                
+                val currentPermissionState = hasRequiredPermissions()
+                
+                // Detect permission grant transition (false -> true)
+                if (!lastKnownPermissionState && currentPermissionState) {
+                    android.util.Log.d("BleService", "Permission monitoring: Permissions granted!")
+                    appendLog("✅ Permissions granted - recovering service operations")
+                    
+                    // Restart service operations
+                    handlePermissionGranted()
+                }
+                
+                // Detect permission revocation (true -> false)
+                if (lastKnownPermissionState && !currentPermissionState) {
+                    android.util.Log.w("BleService", "Permission monitoring: Permissions revoked!")
+                    appendLog("⚠️ Permissions revoked - pausing service operations")
+                    
+                    // Stop operations
+                    handlePermissionRevoked()
+                }
+                
+                lastKnownPermissionState = currentPermissionState
+            }
+        }
+    }
+    
+    /**
+     * Handle recovery when permissions are newly granted
+     */
+    private fun handlePermissionGranted() {
+        serviceScope.launch {
+            try {
+                // Start foreground service if not already started
+                if (!isForegroundServiceRunning()) {
+                    startForeground()
+                }
+                
+                // Request battery optimization exemption
+                requestBatteryOptimizationExemption()
+                
+                // Initialize Bluetooth if enabled
+                if (bluetoothAdapter?.isEnabled == true) {
+                    android.util.Log.d("BleService", "handlePermissionGranted: Initializing Bluetooth")
+                    initializeBluetooth()
+                    android.util.Log.d("BleService", "handlePermissionGranted: Bluetooth initialized successfully")
+                    
+                    // Auto-start alternating mesh mode
+                    appendLog("🚀 Auto-starting alternating mesh mode")
+                    startAlternatingMeshMode()
+                } else {
+                    appendLog("ℹ️ Bluetooth not enabled - operations will resume when BT is turned on")
+                }
+                
+                // Reset error state
+                if (_connectionState.value == ConnectionState.ERROR) {
+                    _connectionState.value = ConnectionState.DISCONNECTED
+                }
+                
+                appendLog("✅ Service recovered successfully after permission grant")
+            } catch (e: Exception) {
+                android.util.Log.e("BleService", "Failed to recover after permission grant", e)
+                appendLog("❌ Failed to recover operations: ${e.message}")
+                _connectionState.value = ConnectionState.ERROR
+            }
+        }
+    }
+    
+    /**
+     * Handle service pause when permissions are revoked
+     */
+    private fun handlePermissionRevoked() {
+        // Stop all BLE operations
+        stopScanning()
+        stopAdvertising()
+        closeGattConnection()
+        
+        // Clear Bluetooth components (they require permissions to use)
+        bleScanner = null
+        bleAdvertiser = null
+        // Note: Keep bluetoothAdapter and bluetoothManager for state checking
+        
+        // Update connection state
+        _connectionState.value = ConnectionState.ERROR
+        
+        appendLog("⏸️ Service paused due to permission revocation")
+        appendLog("   Operations will resume automatically when permissions are re-granted")
+    }
+    
+    /**
+     * Check if foreground service is running
+     */
+    private fun isForegroundServiceRunning(): Boolean {
+        return try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            activityManager?.getRunningServices(Integer.MAX_VALUE)?.any { service ->
+                service.service.className == this::class.java.name && service.foreground
+            } ?: false
+        } catch (e: Exception) {
+            false
+        }
     }
 
     @SuppressLint("MissingPermission")
