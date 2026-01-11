@@ -126,7 +126,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &fee_payer,
             &mint_address,
             token_amount,
-            &nonce_account,
+            Some(&nonce_account),
+            None, // nonce_data - will fetch from nonce_account
         )
         .await?;
 
@@ -217,11 +218,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 10. Submit the transaction
         info!("\n=== Submitting Fully Signed SPL Transaction ===");
-        info!("Submitting to Solana using send_and_confirm_transaction...");
+        info!("Submitting to Solana using submit_transaction...");
         info!("This will test the idempotent ATA creation in a real transaction");
 
         let signature = sdk
-            .send_and_confirm_transaction(&signed_tx)
+            .submit_transaction(signed_tx.as_str())
             .await?;
         
         info!("✅ SPL token transfer submitted successfully!");

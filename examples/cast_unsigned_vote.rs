@@ -95,7 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &vote_account,
             vote_choice,
             &fee_payer,
-            nonce_account,
+            Some(nonce_account),
+            None, // nonce_data - will fetch from nonce_account
         )
         .await?;
 
@@ -176,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n=== Submitting Vote to Solana ===");
     info!("Decoding base64 and submitting vote transaction to blockchain...");
 
-    let signature = sdk.send_and_confirm_transaction(&fully_signed_tx).await?;
+    let signature = sdk.submit_transaction(fully_signed_tx.as_str()).await?;
     info!("✅ Governance vote submitted successfully!");
     info!("   Transaction signature: {}", signature);
     info!(

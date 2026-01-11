@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Transaction will NOT be signed or compressed");
 
     let unsigned_tx = sdk
-        .create_unsigned_transaction(&sender, &recipient, &fee_payer, amount, &nonce_account)
+        .create_unsigned_transaction(&sender, &recipient, &fee_payer, amount, Some(&nonce_account), None)
         .await?;
 
     info!("✅ Unsigned transaction created");
@@ -161,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Demonstrate submission
         info!("\n=== Submitting Fully Signed Transaction ===");
-        info!("Submitting to Solana using send_and_confirm_transaction...");
+        info!("Submitting to Solana using submit_transaction...");
 
         let total_minutes = 5;
         for remaining_minutes in (1..=total_minutes).rev() {
@@ -175,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let signature = sdk
-            .send_and_confirm_transaction(&partially_signed_tx)
+            .submit_transaction(partially_signed_tx.as_str())
             .await?;
         info!("✅ Transaction submitted successfully!");
         info!("   Transaction signature: {}", signature);
@@ -222,7 +222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n=== Implementation Notes ===");
     info!("• Transaction returns as base64 encoded string");
     info!("• add_signature() takes and returns base64");
-    info!("• send_and_confirm_transaction() takes base64");
+    info!("• submit_transaction() takes base64 string or raw bytes");
     info!("• Sender is used as nonce authority");
     info!("• If sender = fee payer: Only one signature needed");
     info!("• If sender ≠ fee payer: Two signatures needed");

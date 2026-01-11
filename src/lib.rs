@@ -17,6 +17,30 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
+/// Format for BLE device discovery results
+#[derive(Debug, Clone, Copy)]
+pub enum DiscoveryFormat {
+    /// Return detailed PeerInfo objects
+    PeerInfo,
+    /// Return just device addresses as strings
+    Addresses,
+}
+
+/// Result of BLE device discovery
+#[derive(Debug)]
+pub enum DiscoveryResult {
+    /// Detailed peer information
+    PeerInfo(Vec<ble::PeerInfo>),
+    /// Device addresses only
+    Addresses(Vec<String>),
+}
+
+/// Trait for transaction input types that can be submitted to Solana
+/// Allows unified `submit_transaction()` method to accept both base64 strings and raw bytes
+pub trait TransactionInput {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError>;
+}
+
 /// Core PolliNet SDK instance using new platform-agnostic BLE adapter
 pub struct PolliNetSDK {
     /// BLE adapter bridge for mesh networking
@@ -448,16 +472,47 @@ impl PolliNetSDK {
             .add_signature(base64_tx, signer_pubkey, signature)?)
     }
     
-    /// Send and confirm a base64 encoded transaction
-    /// Decodes, deserializes, validates, and submits to Solana
-    pub async fn send_and_confirm_transaction(
+    /// Submit a transaction to Solana
+    /// 
+    /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
+    /// Automatically detects the input format and processes accordingly.
+    /// 
+    /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
+    /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
+    /// 
+    /// Returns transaction signature if successful.
+    /// 
+    /// # Examples
+    /// ```rust,no_run
+    /// // Submit from base64 string
+    /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
+    /// 
+    /// // Submit from raw bytes
+    /// let signature = sdk.submit_transaction(&tx_bytes).await?;
+    /// ```
+    /// Submit a transaction to Solana
+    /// 
+    /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
+    /// Automatically detects the input format and processes accordingly.
+    /// 
+    /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
+    /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
+    /// 
+    /// Returns transaction signature if successful.
+    /// 
+    /// # Examples
+    /// ```rust,no_run
+    /// // Submit from base64 string
+    /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
+    /// 
+    /// // Submit from raw bytes
+    /// let signature = sdk.submit_transaction(&tx_bytes).await?;
+    /// ```
+    pub async fn submit_transaction(
         &self,
-        base64_tx: &str,
+        transaction: impl TransactionInput,
     ) -> Result<String, PolliNetError> {
-        Ok(self
-            .transaction_service
-            .send_and_confirm_transaction(base64_tx)
-            .await?)
+        transaction.submit(self).await
     }
     
     /// Refresh the blockhash in an unsigned transaction
@@ -624,17 +679,6 @@ impl PolliNetSDK {
         */
     }
 
-    /// Submit a transaction to Solana when online
-    pub async fn submit_transaction_to_solana(
-        &self,
-        transaction: &[u8],
-    ) -> Result<String, PolliNetError> {
-        Ok(self
-            .transaction_service
-            .submit_to_solana(transaction)
-            .await?)
-    }
-
     /// Broadcast confirmation after successful submission
     pub async fn broadcast_confirmation(&self, signature: &str) -> Result<(), PolliNetError> {
         Ok(self
@@ -661,36 +705,92 @@ impl PolliNetSDK {
     }
 
     /// Discover nearby BLE peers
-    pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
-        tracing::info!("🔍 Starting BLE peer discovery...");
+    /// 
+    /// Scans for BLE devices and returns them in the specified format.
+    /// Automatically stops scanning after discovery completes.
+    /// 
+    /// # Arguments
+    /// * `wait_seconds` - How long to wait for devices to be discovered (default: 3 seconds)
+    /// * `format` - Return format: `PeerInfo` (detailed) or `String` (addresses only)
+    /// 
+    /// # Examples
+    /// ```rust,no_run
+    /// // Get detailed peer information
+    /// let peers = sdk.discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo).await?;
+    /// 
+    /// // Get just device addresses
+    /// let addresses = sdk.discover_ble_peers_with_format(5, DiscoveryFormat::Addresses).await?;
+    /// ```
+    pub async fn discover_ble_peers_with_format(
+        &self,
+        wait_seconds: u64,
+        format: DiscoveryFormat,
+    ) -> Result<DiscoveryResult, PolliNetError> {
+        tracing::info!("🔍 Starting BLE peer discovery (wait: {}s)...", wait_seconds);
         
         // Start scanning
         self.ble_bridge.start_scanning().await?;
         
-        // Wait a moment for devices to be discovered
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        // Wait for devices to be discovered
+        tokio::time::sleep(tokio::time::Duration::from_secs(wait_seconds)).await;
         
         // Get discovered devices
         let discovered = self.ble_bridge.get_discovered_devices().await?;
         
-        tracing::info!("✅ Found {} BLE peers", discovered.len());
+        // Stop scanning
+        self.ble_bridge.stop_scanning().await?;
         
-        // Convert to PeerInfo format
-        let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
-            ble::PeerInfo {
-                peer_id: device.address.clone(),
-                device_uuid: None,
-                capabilities: vec!["CAN_RELAY".to_string()],
-                rssi: device.rssi.unwrap_or(-100),
-                first_seen: device.last_seen,
-                last_seen: device.last_seen,
-                state: ble::PeerState::Discovered,
-                connection_attempts: 0,
-                last_attempt: None,
+        tracing::info!("✅ Found {} BLE devices", discovered.len());
+        
+        // Convert to requested format
+        let result = match format {
+            DiscoveryFormat::PeerInfo => {
+                let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
+                    ble::PeerInfo {
+                        peer_id: device.address.clone(),
+                        device_uuid: None,
+                        capabilities: vec!["CAN_RELAY".to_string()],
+                        rssi: device.rssi.unwrap_or(-100),
+                        first_seen: device.last_seen,
+                        last_seen: device.last_seen,
+                        state: ble::PeerState::Discovered,
+                        connection_attempts: 0,
+                        last_attempt: None,
+                    }
+                }).collect();
+                DiscoveryResult::PeerInfo(peers)
             }
-        }).collect();
+            DiscoveryFormat::Addresses => {
+                let addresses: Vec<String> = discovered.into_iter()
+                    .map(|d| d.address.clone())
+                    .collect();
+                DiscoveryResult::Addresses(addresses)
+            }
+        };
         
-        Ok(peers)
+        Ok(result)
+    }
+    
+    /// Discover nearby BLE peers (returns detailed PeerInfo)
+    /// 
+    /// Convenience method that calls `discover_ble_peers_with_format()` with default settings.
+    /// Scans for 3 seconds and returns detailed peer information.
+    pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
+        match self.discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo).await? {
+            DiscoveryResult::PeerInfo(peers) => Ok(peers),
+            DiscoveryResult::Addresses(_) => unreachable!(),
+        }
+    }
+    
+    /// Scan all BLE devices (returns device addresses)
+    /// 
+    /// Convenience method that calls `discover_ble_peers_with_format()` with address format.
+    /// Scans for 5 seconds and returns device addresses as strings.
+    pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
+        match self.discover_ble_peers_with_format(5, DiscoveryFormat::Addresses).await? {
+            DiscoveryResult::PeerInfo(_) => unreachable!(),
+            DiscoveryResult::Addresses(addresses) => Ok(addresses),
+        }
     }
     
     /// Connect to a discovered BLE peer and establish GATT session
@@ -713,11 +813,6 @@ impl PolliNetSDK {
         Ok(())
     }
     
-    /// Get number of connected peers
-    pub async fn get_connected_peer_count(&self) -> usize {
-        self.ble_bridge.connected_clients_count().await
-    }
-
     /// Get BLE status and debugging information
     pub async fn get_ble_status(&self) -> Result<String, PolliNetError> {
         let adapter_info = self.ble_bridge.get_adapter_info();
@@ -742,26 +837,6 @@ impl PolliNetSDK {
         );
         
         Ok(status)
-    }
-    
-    pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
-        tracing::info!("🔍 Starting BLE device scan...");
-        
-        // Start scanning
-        self.ble_bridge.start_scanning().await?;
-        
-        // Wait a bit for devices to be discovered
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        
-        // Get discovered devices
-        let devices = self.ble_bridge.get_discovered_devices().await?;
-        let device_addresses: Vec<String> = devices.iter().map(|d| d.address.clone()).collect();
-        
-        // Stop scanning
-        self.ble_bridge.stop_scanning().await?;
-        
-        tracing::info!("📱 Discovered {} BLE devices", device_addresses.len());
-        Ok(device_addresses)
     }
     
     /// Start continuous BLE scanning
@@ -883,6 +958,43 @@ impl PolliNetSDK {
     /// Clear fragments for a specific transaction
     pub async fn clear_fragments(&self, tx_id: &str) {
         self.ble_bridge.clear_fragments(tx_id).await;
+    }
+}
+
+// TransactionInput trait implementations for unified submit_transaction() method
+impl TransactionInput for &str {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .send_and_confirm_transaction(self)
+            .await?)
+    }
+}
+
+impl TransactionInput for String {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .send_and_confirm_transaction(self.as_str())
+            .await?)
+    }
+}
+
+impl TransactionInput for &[u8] {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .submit_to_solana(self)
+            .await?)
+    }
+}
+
+impl TransactionInput for Vec<u8> {
+    async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
+        Ok(sdk
+            .transaction_service
+            .submit_to_solana(self.as_slice())
+            .await?)
     }
 }
 
