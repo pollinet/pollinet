@@ -132,6 +132,34 @@ class PolliNetSDK private constructor(
     }
 
     /**
+     * Create an unsigned SOL transfer transaction (convenience method)
+     * 
+     * @param sender Sender wallet public key
+     * @param recipient Recipient wallet public key
+     * @param feePayer Fee payer wallet public key
+     * @param amount Amount in lamports
+     * @param nonceAccount Optional nonce account public key (fetches from blockchain if provided)
+     * @param nonceData Optional cached nonce data (uses directly, no RPC call)
+     */
+    suspend fun createUnsignedTransaction(
+        sender: String,
+        recipient: String,
+        feePayer: String,
+        amount: Long,
+        nonceAccount: String? = null,
+        nonceData: CachedNonceData? = null
+    ): Result<String> = createUnsignedTransaction(
+        CreateUnsignedTransactionRequest(
+            sender = sender,
+            recipient = recipient,
+            feePayer = feePayer,
+            amount = amount,
+            nonceAccount = nonceAccount,
+            nonceData = nonceData
+        )
+    )
+
+    /**
      * Create an unsigned SPL token transfer transaction
      */
     suspend fun createUnsignedSplTransaction(
@@ -145,6 +173,37 @@ class PolliNetSDK private constructor(
             Result.failure(e)
         }
     }
+
+    /**
+     * Create an unsigned SPL token transfer transaction (convenience method)
+     * 
+     * @param senderWallet Sender wallet public key
+     * @param recipientWallet Recipient wallet public key
+     * @param feePayer Fee payer wallet public key
+     * @param mintAddress Token mint address
+     * @param amount Token amount (in token's smallest unit, e.g., lamports for SOL, or decimals for tokens)
+     * @param nonceAccount Optional nonce account public key (fetches from blockchain if provided)
+     * @param nonceData Optional cached nonce data (uses directly, no RPC call)
+     */
+    suspend fun createUnsignedSplTransaction(
+        senderWallet: String,
+        recipientWallet: String,
+        feePayer: String,
+        mintAddress: String,
+        amount: Long,
+        nonceAccount: String? = null,
+        nonceData: CachedNonceData? = null
+    ): Result<String> = createUnsignedSplTransaction(
+        CreateUnsignedSplTransactionRequest(
+            senderWallet = senderWallet,
+            recipientWallet = recipientWallet,
+            feePayer = feePayer,
+            mintAddress = mintAddress,
+            amount = amount,
+            nonceAccount = nonceAccount,
+            nonceData = nonceData
+        )
+    )
 
     // =========================================================================
     // Signature helpers
@@ -384,14 +443,16 @@ class PolliNetSDK private constructor(
         senderPubkey: String,
         nonceAuthorityPubkey: String,
         recipient: String,
-        amount: Long
+        amount: Long,
+        nonceData: CachedNonceData? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val request = CreateUnsignedOfflineTransactionRequest(
                 senderPubkey = senderPubkey,
                 nonceAuthorityPubkey = nonceAuthorityPubkey,
                 recipient = recipient,
-                amount = amount
+                amount = amount,
+                nonceData = nonceData
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
             val resultJson = PolliNetFFI.createUnsignedOfflineTransaction(handle, requestJson)
@@ -414,7 +475,8 @@ class PolliNetSDK private constructor(
         recipientWallet: String,
         mintAddress: String,
         amount: Long,
-        feePayer: String
+        feePayer: String,
+        nonceData: CachedNonceData? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val request = CreateUnsignedOfflineSplTransactionRequest(
@@ -422,7 +484,8 @@ class PolliNetSDK private constructor(
                 recipientWallet = recipientWallet,
                 mintAddress = mintAddress,
                 amount = amount,
-                feePayer = feePayer
+                feePayer = feePayer,
+                nonceData = nonceData
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
             val resultJson = PolliNetFFI.createUnsignedOfflineSplTransaction(handle, requestJson)
@@ -496,7 +559,8 @@ class PolliNetSDK private constructor(
         voteAccount: String,
         choice: Int,
         feePayer: String,
-        nonceAccount: String
+        nonceAccount: String? = null,
+        nonceData: CachedNonceData? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val request = CastUnsignedVoteRequest(
@@ -505,7 +569,8 @@ class PolliNetSDK private constructor(
                 voteAccount = voteAccount,
                 choice = choice.toUByte(),
                 feePayer = feePayer,
-                nonceAccount = nonceAccount
+                nonceAccount = nonceAccount,
+                nonceData = nonceData
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
             val resultJson = PolliNetFFI.castUnsignedVote(handle, requestJson)
@@ -1256,7 +1321,8 @@ data class CreateUnsignedTransactionRequest(
     val recipient: String,
     val feePayer: String,
     val amount: Long,
-    val nonceAccount: String
+    val nonceAccount: String? = null,
+    val nonceData: CachedNonceData? = null
 )
 
 @Serializable
@@ -1267,7 +1333,8 @@ data class CreateUnsignedSplTransactionRequest(
     val feePayer: String,
     val mintAddress: String,
     val amount: Long,
-    val nonceAccount: String
+    val nonceAccount: String? = null,
+    val nonceData: CachedNonceData? = null
 )
 
 @Serializable
@@ -1372,7 +1439,9 @@ data class CreateUnsignedOfflineTransactionRequest(
     val senderPubkey: String,
     val nonceAuthorityPubkey: String,
     val recipient: String,
-    val amount: Long
+    val amount: Long,
+    val nonceData: CachedNonceData? = null
+    // NOTE: If nonceData is not provided, nonce is picked automatically from stored bundle
 )
 
 @Serializable
@@ -1382,7 +1451,9 @@ data class CreateUnsignedOfflineSplTransactionRequest(
     val recipientWallet: String,
     val mintAddress: String,
     val amount: Long,
-    val feePayer: String
+    val feePayer: String,
+    val nonceData: CachedNonceData? = null
+    // NOTE: If nonceData is not provided, nonce is picked automatically from stored bundle
 )
 
 @Serializable
@@ -1439,7 +1510,8 @@ data class CastUnsignedVoteRequest(
     @SerialName("vote_account") val voteAccount: String,
     val choice: UByte,
     @SerialName("fee_payer") val feePayer: String,
-    @SerialName("nonce_account") val nonceAccount: String
+    @SerialName("nonceAccount") val nonceAccount: String? = null,
+    @SerialName("nonceData") val nonceData: CachedNonceData? = null
 )
 
 @Serializable

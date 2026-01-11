@@ -142,13 +142,17 @@ impl PolliNetSDK {
     /// Create an unsigned transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned transaction
     /// Sender is used as nonce authority
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn create_unsigned_transaction(
         &self,
         sender: &str,
         recipient: &str,
         fee_payer: &str,
         amount: u64,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&transaction::CachedNonceData>,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
@@ -158,6 +162,7 @@ impl PolliNetSDK {
                 fee_payer,
                 amount,
                 nonce_account,
+                nonce_data,
             )
             .await?)
     }
@@ -166,6 +171,9 @@ impl PolliNetSDK {
     /// Returns base64 encoded uncompressed, unsigned SPL token transaction
     /// Automatically derives ATAs from wallet pubkeys and mint address
     /// Sender is used as nonce authority
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn create_unsigned_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -173,7 +181,8 @@ impl PolliNetSDK {
         fee_payer: &str,
         mint_address: &str,
         amount: u64,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&transaction::CachedNonceData>,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
@@ -184,6 +193,7 @@ impl PolliNetSDK {
                 mint_address,
                 amount,
                 nonce_account,
+                nonce_data,
             )
             .await?)
     }
@@ -217,6 +227,9 @@ impl PolliNetSDK {
     /// Create an unsigned governance vote transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned vote transaction
     /// Voter is used as nonce authority
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn cast_unsigned_vote(
         &self,
         voter: &str,
@@ -224,7 +237,8 @@ impl PolliNetSDK {
         vote_account: &str,
         choice: u8,
         fee_payer: &str,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&transaction::CachedNonceData>,
     ) -> Result<String, PolliNetError> {
         Ok(self
             .transaction_service
@@ -235,6 +249,7 @@ impl PolliNetSDK {
                 choice,
                 fee_payer,
                 nonce_account,
+                nonce_data,
             )
             .await?)
     }

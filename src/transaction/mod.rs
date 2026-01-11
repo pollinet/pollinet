@@ -845,7 +845,8 @@ impl TransactionService {
         fee_payer: &str,
         mint_address: &str,
         amount: u64,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&CachedNonceData>,
     ) -> Result<String, TransactionError> {
         // Validate public keys
         let sender_pubkey = Pubkey::from_str(sender_wallet).map_err(|e| {
@@ -858,9 +859,6 @@ impl TransactionService {
             .map_err(|e| TransactionError::InvalidPublicKey(format!("Invalid fee payer: {}", e)))?;
         let mint_pubkey = Pubkey::from_str(mint_address).map_err(|e| {
             TransactionError::InvalidPublicKey(format!("Invalid mint address: {}", e))
-        })?;
-        let nonce_account_pubkey = Pubkey::from_str(nonce_account).map_err(|e| {
-            TransactionError::InvalidPublicKey(format!("Invalid nonce account: {}", e))
         })?;
 
         // Derive Associated Token Accounts
@@ -878,21 +876,62 @@ impl TransactionService {
         tracing::info!("  Recipient ATA: {}", recipient_token_account);
         tracing::info!("  Mint: {}", mint_pubkey);
 
-        // Fetch nonce account data to get the blockhash
-        tracing::info!("Fetching nonce account data from blockchain...");
-        let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+        // Get nonce data: use provided cached data, or fetch from blockchain
+        let (nonce_account_pubkey, nonce_blockhash, nonce_authority_pubkey) = if let Some(cached_nonce) = nonce_data {
+            // Use provided cached nonce data
+            tracing::info!("Using provided cached nonce data");
+            let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid nonce account in cached data: {}", e))
+            })?;
+            let blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid blockhash in cached data: {}", e))
+            })?;
+            let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid authority in cached data: {}", e))
+            })?;
+            
+            // Verify authority matches sender
+            if authority != sender_pubkey {
+                return Err(TransactionError::InvalidPublicKey(
+                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
+                ));
+            }
+            
+            (nonce_pubkey, blockhash, authority)
+        } else if let Some(nonce_account_str) = nonce_account {
+            // Fetch nonce account data from blockchain
+            tracing::info!("Fetching nonce account data from blockchain...");
+            let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
+            })?;
+            let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+            let authority = nonce_data.authority;
+            
+            // Verify authority matches sender
+            if authority != sender_pubkey {
+                return Err(TransactionError::InvalidPublicKey(
+                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
+                ));
+            }
+            
+            (nonce_account_pubkey, nonce_data.blockhash(), authority)
+        } else {
+            return Err(TransactionError::InvalidPublicKey(
+                "Either nonce_account or nonce_data must be provided".to_string()
+            ));
+        };
 
         tracing::info!("Building unsigned SPL token transfer instructions...");
 
         // Create advance nonce instruction (must be first instruction)
-        // Use sender as nonce authority
+        // Use sender as nonce authority (already verified above)
         let advance_nonce_ix = system_instruction::advance_nonce_account(
             &nonce_account_pubkey,
-            &sender_pubkey, // Sender is the nonce authority
+            &nonce_authority_pubkey, // Sender is the nonce authority
         );
         tracing::info!("✅ Instruction 1: Advance nonce account");
         tracing::info!("   Nonce account: {}", nonce_account_pubkey);
-        tracing::info!("   Authority: {} (sender)", sender_pubkey);
+        tracing::info!("   Authority: {} (sender)", nonce_authority_pubkey);
 
         // Create idempotent ATA creation instruction for recipient
         // This instruction is idempotent - it won't fail if the account already exists
@@ -935,7 +974,7 @@ impl TransactionService {
         );
 
         // Use the nonce account's stored blockhash
-        transaction.message.recent_blockhash = nonce_data.blockhash();
+        transaction.message.recent_blockhash = nonce_blockhash;
         tracing::info!("Transaction blockhash set from nonce account");
 
         // Serialize the UNSIGNED transaction using bincode 1.x (Solana wire format)
@@ -1082,6 +1121,10 @@ impl TransactionService {
 
     /// Create an unsigned governance vote transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned vote transaction
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
+    /// If neither is provided, it will return an error.
     pub async fn cast_unsigned_vote(
         &self,
         voter: &str,
@@ -1089,7 +1132,8 @@ impl TransactionService {
         vote_account: &str,
         choice: u8,
         fee_payer: &str,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&CachedNonceData>,
     ) -> Result<String, TransactionError> {
         // Validate public keys
         let voter_pubkey = Pubkey::from_str(voter).map_err(|e| {
@@ -1104,13 +1148,51 @@ impl TransactionService {
         let fee_payer_pubkey = Pubkey::from_str(fee_payer).map_err(|e| {
             TransactionError::InvalidPublicKey(format!("Invalid fee payer public key: {}", e))
         })?;
-        let nonce_account_pubkey = Pubkey::from_str(nonce_account).map_err(|e| {
-            TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
-        })?;
 
-        // Fetch nonce account data to get the blockhash
-        tracing::info!("Fetching nonce account data from blockchain...");
-        let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+        // Get nonce data: use provided cached data, or fetch from blockchain
+        let (nonce_account_pubkey, nonce_blockhash) = if let Some(cached_nonce) = nonce_data {
+            // Use provided cached nonce data
+            tracing::info!("Using provided cached nonce data for vote transaction");
+            let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid nonce account in cached data: {}", e))
+            })?;
+            let blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid blockhash in cached data: {}", e))
+            })?;
+            let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid authority in cached data: {}", e))
+            })?;
+            
+            // Verify authority matches voter (voter is the nonce authority for vote transactions)
+            if authority != voter_pubkey {
+                return Err(TransactionError::InvalidPublicKey(
+                    format!("Nonce authority {} does not match voter {}", authority, voter_pubkey)
+                ));
+            }
+            
+            (nonce_pubkey, blockhash)
+        } else if let Some(nonce_account_str) = nonce_account {
+            // Fetch nonce account data from blockchain
+            tracing::info!("Fetching nonce account data from blockchain...");
+            let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
+            })?;
+            let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+            let authority = nonce_data.authority;
+            
+            // Verify authority matches voter
+            if authority != voter_pubkey {
+                return Err(TransactionError::InvalidPublicKey(
+                    format!("Nonce authority {} does not match voter {}", authority, voter_pubkey)
+                ));
+            }
+            
+            (nonce_account_pubkey, nonce_data.blockhash())
+        } else {
+            return Err(TransactionError::InvalidPublicKey(
+                "Either nonce_account or nonce_data must be provided".to_string()
+            ));
+        };
 
         tracing::info!("Building unsigned governance vote instructions...");
 
@@ -1143,7 +1225,7 @@ impl TransactionService {
         );
 
         // Use the nonce account's stored blockhash
-        transaction.message.recent_blockhash = nonce_data.blockhash();
+        transaction.message.recent_blockhash = nonce_blockhash;
         tracing::info!("Transaction blockhash set from nonce account");
 
         // Serialize the UNSIGNED transaction using bincode 1.x (Solana wire format)
@@ -1165,13 +1247,18 @@ impl TransactionService {
 
     /// Create an unsigned transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned transaction
+    /// 
+    /// If `nonce_data` is provided, it will be used directly (no RPC call).
+    /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
+    /// If neither is provided, it will try to get an available nonce from storage.
     pub async fn create_unsigned_transaction(
         &self,
         sender: &str,
         recipient: &str,
         fee_payer: &str,
         amount: u64,
-        nonce_account: &str,
+        nonce_account: Option<&str>,
+        nonce_data: Option<&CachedNonceData>,
     ) -> Result<String, TransactionError> {
         // Validate public keys
         let sender_pubkey = Pubkey::from_str(sender).map_err(|e| {
@@ -1183,13 +1270,51 @@ impl TransactionService {
         let fee_payer_pubkey = Pubkey::from_str(fee_payer).map_err(|e| {
             TransactionError::InvalidPublicKey(format!("Invalid fee payer public key: {}", e))
         })?;
-        let nonce_account_pubkey = Pubkey::from_str(nonce_account).map_err(|e| {
-            TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
-        })?;
 
-        // Fetch nonce account data to get the blockhash
-        tracing::info!("Fetching nonce account data from blockchain...");
-        let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+        // Get nonce data: use provided cached data, or fetch from blockchain, or get from storage
+        let (nonce_account_pubkey, nonce_blockhash, nonce_authority_pubkey) = if let Some(cached_nonce) = nonce_data {
+            // Use provided cached nonce data
+            tracing::info!("Using provided cached nonce data");
+            let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid nonce account in cached data: {}", e))
+            })?;
+            let blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid blockhash in cached data: {}", e))
+            })?;
+            let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid authority in cached data: {}", e))
+            })?;
+            
+            // Verify authority matches sender
+            if authority != sender_pubkey {
+                return Err(TransactionError::InvalidPublicKey(
+                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
+                ));
+            }
+            
+            (nonce_pubkey, blockhash, authority)
+        } else if let Some(nonce_account_str) = nonce_account {
+            // Fetch nonce account data from blockchain
+            tracing::info!("Fetching nonce account data from blockchain...");
+            let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
+            })?;
+            let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+            let authority = nonce_data.authority;
+            
+            // Verify authority matches sender
+            if authority != sender_pubkey {
+                return Err(TransactionError::InvalidPublicKey(
+                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
+                ));
+            }
+            
+            (nonce_account_pubkey, nonce_data.blockhash(), authority)
+        } else {
+            return Err(TransactionError::InvalidPublicKey(
+                "Either nonce_account or nonce_data must be provided".to_string()
+            ));
+        };
 
         tracing::info!("Building unsigned transaction instructions...");
 
@@ -1221,7 +1346,7 @@ impl TransactionService {
         );
 
         // Use the nonce account's stored blockhash
-        transaction.message.recent_blockhash = nonce_data.blockhash();
+        transaction.message.recent_blockhash = nonce_blockhash;
         tracing::info!("Transaction blockhash set from nonce account");
 
         // Serialize the UNSIGNED transaction using bincode 1.x (Solana wire format)

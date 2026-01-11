@@ -492,11 +492,14 @@ fun MwaTransactionDemo(
                                 
                                 statusMessage = "Creating transaction: ${randomAmount / 1_000_000_000.0} SOL to ${randomRecipient.take(8)}..."
                                 
+                                // Create offline transaction - can optionally pass nonceData
+                                // If nonceData is not provided, it will auto-pick from bundle
                                 val result = sdk!!.createUnsignedOfflineTransaction(
                                     senderPubkey = authorizedPubkey!!,
                                     nonceAuthorityPubkey = authorizedPubkey!!, // Same as sender for demo
                                     recipient = randomRecipient,
                                     amount = randomAmount
+                                    // Optional: nonceData = cachedNonceData (uses specific nonce)
                                 )
                                 
                                 result.fold(

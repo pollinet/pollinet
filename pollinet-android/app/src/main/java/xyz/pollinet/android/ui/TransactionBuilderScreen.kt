@@ -133,26 +133,26 @@ fun TransactionBuilderScreen(
                     
                     val result = when (transactionType) {
                         TransactionType.SOL -> {
+                            // Use convenience method - can optionally pass nonceData for better performance
                             sdk.createUnsignedTransaction(
-                                CreateUnsignedTransactionRequest(
-                                    sender = solSender,
-                                    recipient = solRecipient,
-                                    feePayer = solFeePayer,
-                                    amount = solAmount.toLongOrNull() ?: 0,
-                                    nonceAccount = solNonceAccount
-                                )
+                                sender = solSender,
+                                recipient = solRecipient,
+                                feePayer = solFeePayer,
+                                amount = solAmount.toLongOrNull() ?: 0,
+                                nonceAccount = solNonceAccount.takeIf { it.isNotBlank() }
+                                // Optional: nonceData = cachedNonceData (no RPC call needed)
                             )
                         }
                         TransactionType.SPL -> {
+                            // Use convenience method - can optionally pass nonceData for better performance
                             sdk.createUnsignedSplTransaction(
-                                CreateUnsignedSplTransactionRequest(
-                                    senderWallet = splSenderWallet,
-                                    recipientWallet = splRecipientWallet,
-                                    feePayer = splFeePayer,
-                                    mintAddress = splMintAddress,
-                                    amount = splAmount.toLongOrNull() ?: 0,
-                                    nonceAccount = splNonceAccount
-                                )
+                                senderWallet = splSenderWallet,
+                                recipientWallet = splRecipientWallet,
+                                feePayer = splFeePayer,
+                                mintAddress = splMintAddress,
+                                amount = splAmount.toLongOrNull() ?: 0,
+                                nonceAccount = splNonceAccount.takeIf { it.isNotBlank() }
+                                // Optional: nonceData = cachedNonceData (no RPC call needed)
                             )
                         }
                     }

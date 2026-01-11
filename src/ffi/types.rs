@@ -47,7 +47,11 @@ pub struct CreateUnsignedTransactionRequest {
     pub fee_payer: String,
     pub amount: u64,
     #[serde(rename = "nonceAccount")]
-    pub nonce_account: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_account: Option<String>,
+    #[serde(rename = "nonceData")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_data: Option<CachedNonceData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +68,11 @@ pub struct CreateUnsignedSplTransactionRequest {
     pub mint_address: String,
     pub amount: u64,
     #[serde(rename = "nonceAccount")]
-    pub nonce_account: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_account: Option<String>,
+    #[serde(rename = "nonceData")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_data: Option<CachedNonceData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +83,12 @@ pub struct CastUnsignedVoteRequest {
     pub vote_account: String,
     pub choice: u8,
     pub fee_payer: String,
-    pub nonce_account: String,
+    #[serde(rename = "nonceAccount")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_account: Option<String>,
+    #[serde(rename = "nonceData")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_data: Option<CachedNonceData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +127,10 @@ pub struct CreateUnsignedOfflineTransactionRequest {
     pub nonce_authority_pubkey: String,
     pub recipient: String,
     pub amount: u64,
-    // NOTE: Nonce is picked automatically from stored bundle
+    #[serde(rename = "nonceData")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_data: Option<CachedNonceData>,
+    // NOTE: If nonce_data is not provided, nonce is picked automatically from stored bundle
 }
 
 /// Request to create an UNSIGNED offline SPL token transfer for MWA signing
@@ -131,6 +147,10 @@ pub struct CreateUnsignedOfflineSplTransactionRequest {
     pub amount: u64,
     #[serde(rename = "feePayer")]
     pub fee_payer: String,
+    #[serde(rename = "nonceData")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_data: Option<CachedNonceData>,
+    // NOTE: If nonce_data is not provided, nonce is picked automatically from stored bundle
 }
 
 // Get message to sign for MWA

@@ -703,14 +703,15 @@ private fun FFITestButtons(
                         val result = PolliNetSDK.initialize(config)
                         
                         result.onSuccess { sdk ->
+                            // Example: Using nonceAccount (fetches from blockchain)
+                            // For better performance, you can use nonceData instead (no RPC call)
                             val txResult = sdk.createUnsignedTransaction(
-                                CreateUnsignedTransactionRequest(
-                                    sender = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
-                                    recipient = "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE",
-                                    feePayer = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
-                                    amount = 1000000,
-                                    nonceAccount = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq"
-                                )
+                                sender = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
+                                recipient = "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE",
+                                feePayer = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
+                                amount = 1000000,
+                                nonceAccount = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq"
+                                // Alternative: nonceData = cachedNonceData (no RPC call needed)
                             )
                             
                             txResult.onSuccess { txBase64 ->
@@ -870,6 +871,10 @@ private fun SplVoteNonceTestContent(
     
     var isTesting by remember { mutableStateOf(false) }
     var isAuthorizing by remember { mutableStateOf(false) }
+    
+    // Nonce picking state (declared early so it can be used in transaction creation)
+    var pickedNonce by remember { mutableStateOf<xyz.pollinet.sdk.CachedNonceData?>(null) }
+    var isPickingNonce by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -951,13 +956,33 @@ private fun SplVoteNonceTestContent(
                             return@launch
                         }
                         
+                        // Optionally use picked nonce data if available
+                        val nonceData = pickedNonce?.let { nonce ->
+                            xyz.pollinet.sdk.CachedNonceData(
+                                version = 1,
+                                nonceAccount = nonce.nonceAccount,
+                                authority = nonce.authority,
+                                blockhash = nonce.blockhash,
+                                lamportsPerSignature = nonce.lamportsPerSignature,
+                                cachedAt = nonce.cachedAt,
+                                used = nonce.used
+                            )
+                        }
+                        
                         val result = sdk.createUnsignedOfflineSplTransaction(
                             senderWallet = splSenderWallet,
                             recipientWallet = splRecipientWallet,
                             mintAddress = splMintAddress,
                             amount = amountLong,
-                            feePayer = splFeePayer.ifEmpty { splSenderWallet }
+                            feePayer = splFeePayer.ifEmpty { splSenderWallet },
+                            nonceData = nonceData
                         )
+                        
+                        if (nonceData != null) {
+                            onLog("📌 Using picked nonce account: ${nonceData.nonceAccount.take(16)}...")
+                        } else {
+                            onLog("📌 Auto-picking nonce from bundle...")
+                        }
                         
                         result.onSuccess { txBase64 ->
                             createdSplTransaction = txBase64
@@ -1127,10 +1152,19 @@ private fun SplVoteNonceTestContent(
             value = voteNonceAccount,
             onValueChange = { voteNonceAccount = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Nonce Account (base58)") },
-            placeholder = { Text("Enter nonce account pubkey") },
+            label = { Text("Nonce Account (base58, optional)") },
+            placeholder = { Text("Enter nonce account pubkey or use picked nonce") },
             enabled = !isTesting && sdk != null
         )
+        
+        if (pickedNonce != null) {
+            Text(
+                text = "💡 Tip: Picked nonce available - will be used if nonce account field is empty",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
         
         Button(
             onClick = {
@@ -1144,17 +1178,46 @@ private fun SplVoteNonceTestContent(
                         onLog("🗳️ Testing vote transaction...")
                         val choice = voteChoice.toIntOrNull()?.toUByte() ?: 0u
                         
+                        // Optionally use picked nonce data if available and nonce account field is empty
+                        val nonceData = if (voteNonceAccount.isBlank() && pickedNonce != null) {
+                            onLog("📌 Using picked nonce data (no RPC call)")
+                            xyz.pollinet.sdk.CachedNonceData(
+                                version = 1,
+                                nonceAccount = pickedNonce!!.nonceAccount,
+                                authority = pickedNonce!!.authority,
+                                blockhash = pickedNonce!!.blockhash,
+                                lamportsPerSignature = pickedNonce!!.lamportsPerSignature,
+                                cachedAt = pickedNonce!!.cachedAt,
+                                used = pickedNonce!!.used
+                            )
+                        } else null
+                        
+                        val nonceAccountStr = if (voteNonceAccount.isNotBlank()) voteNonceAccount else null
+                        
+                        // Verify that if using picked nonce, the authority matches the voter
+                        if (nonceData != null && nonceData.authority != voteVoter) {
+                            onLog("❌ Vote transaction failed: Nonce authority (${nonceData.authority.take(16)}...) does not match voter (${voteVoter.take(16)}...)")
+                            onLog("   💡 The nonce authority must match the voter for vote transactions")
+                            return@launch
+                        }
+                        
                         val result = sdk.createUnsignedVote(
                             voter = voteVoter,
                             proposalId = voteProposalId,
                             voteAccount = voteAccount,
                             choice = choice.toInt(),
                             feePayer = voteFeePayer.ifEmpty { voteVoter },
-                            nonceAccount = voteNonceAccount
+                            nonceAccount = nonceAccountStr,
+                            nonceData = nonceData
                         )
                         
                         result.onSuccess { txBase64 ->
                             onLog("✅ Vote transaction created!")
+                            if (nonceData != null) {
+                                onLog("   ✅ Used cached nonce data (no RPC call)")
+                            } else {
+                                onLog("   ✅ Fetched nonce data from blockchain")
+                            }
                             onLog("   Length: ${txBase64.length} chars")
                             onLog("   Preview: ${txBase64.take(80)}...")
                             onLog("   Ready for signing")
@@ -1168,7 +1231,7 @@ private fun SplVoteNonceTestContent(
                     }
                 }
             },
-            enabled = !isTesting && sdk != null && voteVoter.isNotBlank() && voteProposalId.isNotBlank() && voteAccount.isNotBlank() && voteNonceAccount.isNotBlank(),
+            enabled = !isTesting && sdk != null && voteVoter.isNotBlank() && voteProposalId.isNotBlank() && voteAccount.isNotBlank() && (voteNonceAccount.isNotBlank() || pickedNonce != null),
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(if (isTesting) "Creating..." else "Create Vote Transaction")
@@ -1429,9 +1492,6 @@ private fun SplVoteNonceTestContent(
             modifier = Modifier.padding(bottom = 4.dp)
         )
         
-        var pickedNonce by remember { mutableStateOf<xyz.pollinet.sdk.CachedNonceData?>(null) }
-        var isPickingNonce by remember { mutableStateOf(false) }
-        
         if (pickedNonce != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1544,6 +1604,242 @@ private fun SplVoteNonceTestContent(
         }
         
         if (pickedNonce != null) {
+            Text(
+                text = "💡 This nonce will be used when creating offline transactions above",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+            
+            // Test buttons: Create online transactions using picked nonce data
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Test SOL transaction
+                Button(
+                    onClick = {
+                        if (sdk == null) {
+                            onLog("❌ SDK not initialized")
+                            return@Button
+                        }
+                        if (pickedNonce == null) {
+                            onLog("❌ No nonce picked")
+                            return@Button
+                        }
+                        isTesting = true
+                        scope.launch {
+                            try {
+                                onLog("🧪 Testing ONLINE SOL transaction with picked nonce data...")
+                                onLog("   This demonstrates using nonceData (no RPC call needed)")
+                                
+                                // Convert picked nonce to SDK type
+                                val nonceData = xyz.pollinet.sdk.CachedNonceData(
+                                    version = 1,
+                                    nonceAccount = pickedNonce!!.nonceAccount,
+                                    authority = pickedNonce!!.authority,
+                                    blockhash = pickedNonce!!.blockhash,
+                                    lamportsPerSignature = pickedNonce!!.lamportsPerSignature,
+                                    cachedAt = pickedNonce!!.cachedAt,
+                                    used = pickedNonce!!.used
+                                )
+                                
+                                // Use nonce authority as sender (required - authority must match sender)
+                                val sender = pickedNonce!!.authority
+                                val recipient = "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE"
+                                
+                                onLog("   Sender (nonce authority): ${sender.take(16)}...")
+                                onLog("   Nonce Account: ${pickedNonce!!.nonceAccount.take(16)}...")
+                                onLog("   Using cached nonce data (no RPC call)")
+                                
+                                val result = sdk.createUnsignedTransaction(
+                                    sender = sender,
+                                    recipient = recipient,
+                                    feePayer = sender,
+                                    amount = 1000000, // 0.001 SOL
+                                    nonceAccount = null, // Not needed when using nonceData
+                                    nonceData = nonceData
+                                )
+                                
+                                result.onSuccess { txBase64 ->
+                                    onLog("✅ SOL transaction created using picked nonce!")
+                                    onLog("   Transaction length: ${txBase64.length} chars")
+                                    onLog("   Preview: ${txBase64.take(80)}...")
+                                    onLog("   ✅ No RPC call was made - used cached nonce data")
+                                    onLog("   ✅ Authority validation passed")
+                                }.onFailure { e ->
+                                    onLog("❌ Transaction creation failed: ${e.message}")
+                                    if (e.message?.contains("authority") == true) {
+                                        onLog("   💡 Nonce authority must match sender")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                onLog("❌ Exception: ${e.message}")
+                            } finally {
+                                isTesting = false
+                            }
+                        }
+                    },
+                    enabled = !isTesting && sdk != null && pickedNonce != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Text("🧪 Test: Create Online SOL TX with Picked Nonce")
+                }
+                
+                // Test SPL transaction
+                Button(
+                    onClick = {
+                        if (sdk == null) {
+                            onLog("❌ SDK not initialized")
+                            return@Button
+                        }
+                        if (pickedNonce == null) {
+                            onLog("❌ No nonce picked")
+                            return@Button
+                        }
+                        isTesting = true
+                        scope.launch {
+                            try {
+                                onLog("🧪 Testing ONLINE SPL transaction with picked nonce data...")
+                                onLog("   This demonstrates using nonceData for SPL tokens (no RPC call)")
+                                
+                                // Convert picked nonce to SDK type
+                                val nonceData = xyz.pollinet.sdk.CachedNonceData(
+                                    version = 1,
+                                    nonceAccount = pickedNonce!!.nonceAccount,
+                                    authority = pickedNonce!!.authority,
+                                    blockhash = pickedNonce!!.blockhash,
+                                    lamportsPerSignature = pickedNonce!!.lamportsPerSignature,
+                                    cachedAt = pickedNonce!!.cachedAt,
+                                    used = pickedNonce!!.used
+                                )
+                                
+                                // Use nonce authority as sender (required - authority must match sender)
+                                val sender = pickedNonce!!.authority
+                                val recipient = "EufFKpRgwpdXMuXpEG6Nh2bb77tFnj9d6FgSAEnsSMQy"
+                                val mintAddress = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" // USDC on devnet
+                                
+                                onLog("   Sender (nonce authority): ${sender.take(16)}...")
+                                onLog("   Nonce Account: ${pickedNonce!!.nonceAccount.take(16)}...")
+                                onLog("   Mint: USDC on devnet")
+                                onLog("   Using cached nonce data (no RPC call)")
+                                
+                                val result = sdk.createUnsignedSplTransaction(
+                                    senderWallet = sender,
+                                    recipientWallet = recipient,
+                                    feePayer = sender,
+                                    mintAddress = mintAddress,
+                                    amount = 100_000, // 0.1 USDC (6 decimals)
+                                    nonceAccount = null, // Not needed when using nonceData
+                                    nonceData = nonceData
+                                )
+                                
+                                result.onSuccess { txBase64 ->
+                                    onLog("✅ SPL transaction created using picked nonce!")
+                                    onLog("   Transaction length: ${txBase64.length} chars")
+                                    onLog("   Preview: ${txBase64.take(80)}...")
+                                    onLog("   ✅ No RPC call was made - used cached nonce data")
+                                    onLog("   ✅ Authority validation passed")
+                                    onLog("   ✅ Includes idempotent ATA creation")
+                                }.onFailure { e ->
+                                    onLog("❌ SPL transaction creation failed: ${e.message}")
+                                    if (e.message?.contains("authority") == true) {
+                                        onLog("   💡 Nonce authority must match sender wallet")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                onLog("❌ Exception: ${e.message}")
+                            } finally {
+                                isTesting = false
+                            }
+                        }
+                    },
+                    enabled = !isTesting && sdk != null && pickedNonce != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text("🧪 Test: Create Online SPL TX with Picked Nonce")
+                }
+                
+                // Test Vote transaction
+                Button(
+                    onClick = {
+                        if (sdk == null) {
+                            onLog("❌ SDK not initialized")
+                            return@Button
+                        }
+                        if (pickedNonce == null) {
+                            onLog("❌ No nonce picked")
+                            return@Button
+                        }
+                        isTesting = true
+                        scope.launch {
+                            try {
+                                onLog("🗳️ Testing ONLINE vote transaction with picked nonce data...")
+                                onLog("   This demonstrates using nonceData for votes (no RPC call)")
+                                
+                                // Convert picked nonce to SDK type
+                                val nonceData = xyz.pollinet.sdk.CachedNonceData(
+                                    version = 1,
+                                    nonceAccount = pickedNonce!!.nonceAccount,
+                                    authority = pickedNonce!!.authority,
+                                    blockhash = pickedNonce!!.blockhash,
+                                    lamportsPerSignature = pickedNonce!!.lamportsPerSignature,
+                                    cachedAt = pickedNonce!!.cachedAt,
+                                    used = pickedNonce!!.used
+                                )
+                                
+                                // Use nonce authority as voter (required - authority must match voter)
+                                val voter = pickedNonce!!.authority
+                                val proposalId = "11111111111111111111111111111111" // Example proposal ID
+                                val voteAccount = "Vote111111111111111111111111111111111111111" // Example vote account
+                                val feePayer = voter
+                                
+                                onLog("   Voter (nonce authority): ${voter.take(16)}...")
+                                onLog("   Nonce Account: ${pickedNonce!!.nonceAccount.take(16)}...")
+                                onLog("   Using cached nonce data (no RPC call)")
+                                
+                                val result = sdk.createUnsignedVote(
+                                    voter = voter,
+                                    proposalId = proposalId,
+                                    voteAccount = voteAccount,
+                                    choice = 1, // Yes vote
+                                    feePayer = feePayer,
+                                    nonceAccount = null, // Not needed when using nonceData
+                                    nonceData = nonceData
+                                )
+                                
+                                result.onSuccess { txBase64 ->
+                                    onLog("✅ Vote transaction created using picked nonce!")
+                                    onLog("   Transaction length: ${txBase64.length} chars")
+                                    onLog("   Preview: ${txBase64.take(80)}...")
+                                    onLog("   ✅ No RPC call was made - used cached nonce data")
+                                    onLog("   ✅ Authority validation passed")
+                                }.onFailure { e ->
+                                    onLog("❌ Vote transaction creation failed: ${e.message}")
+                                    if (e.message?.contains("authority") == true) {
+                                        onLog("   💡 Nonce authority must match voter wallet")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                onLog("❌ Exception: ${e.message}")
+                            } finally {
+                                isTesting = false
+                            }
+                        }
+                    },
+                    enabled = !isTesting && sdk != null && pickedNonce != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("🧪 Test: Create Online Vote TX with Picked Nonce")
+                }
+            }
+            
             OutlinedButton(
                 onClick = {
                     pickedNonce = null

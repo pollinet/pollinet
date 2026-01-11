@@ -30,5 +30,19 @@ Thumbs.db
 # Optional: if you use Clippy lints cache
 .clippy/
 
+# Android / Gradle build folders
+.gradle/
+pollinet-android/.gradle/
+pollinet-android/**/build/
+pollinet-android/**/.cxx/
+pollinet-android/**/local.properties
+pollinet-android/**/*.iml
+pollinet-android/.idea/
+pollinet-android/app/build/
+pollinet-android/pollinet-sdk/build/
+
+# Android build artifacts
+pollinet-android/pollinet-sdk/src/main/jniLibs/
+pollinet-android/app/src/main/jniLibs/
 
 docs/

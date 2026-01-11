@@ -346,6 +346,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedTransaction(
             serde_json::from_slice(&request_data)
                 .map_err(|e| format!("Failed to parse request: {}", e))?;
 
+        // Convert optional nonce data from FFI type to transaction type
+        let nonce_data_opt = request.nonce_data.as_ref().map(|ffi_nonce| {
+            crate::transaction::CachedNonceData {
+                nonce_account: ffi_nonce.nonce_account.clone(),
+                authority: ffi_nonce.authority.clone(),
+                blockhash: ffi_nonce.blockhash.clone(),
+                lamports_per_signature: ffi_nonce.lamports_per_signature,
+                cached_at: ffi_nonce.cached_at,
+                used: ffi_nonce.used,
+            }
+        });
+
         // Build unsigned transaction
         let base64_tx = runtime::block_on(async {
             transport
@@ -355,7 +367,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedTransaction(
                     &request.recipient,
                     &request.fee_payer,
                     request.amount,
-                    &request.nonce_account,
+                    request.nonce_account.as_deref(),
+                    nonce_data_opt.as_ref(),
                 )
                 .await
         })
@@ -389,6 +402,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedSplTransaction
             serde_json::from_slice(&request_data)
                 .map_err(|e| format!("Failed to parse request: {}", e))?;
 
+        // Convert optional nonce data from FFI type to transaction type
+        let nonce_data_opt = request.nonce_data.as_ref().map(|ffi_nonce| {
+            crate::transaction::CachedNonceData {
+                nonce_account: ffi_nonce.nonce_account.clone(),
+                authority: ffi_nonce.authority.clone(),
+                blockhash: ffi_nonce.blockhash.clone(),
+                lamports_per_signature: ffi_nonce.lamports_per_signature,
+                cached_at: ffi_nonce.cached_at,
+                used: ffi_nonce.used,
+            }
+        });
+
         // Build unsigned SPL transaction
         let base64_tx = runtime::block_on(async {
             transport
@@ -399,7 +424,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedSplTransaction
                     &request.fee_payer,
                     &request.mint_address,
                     request.amount,
-                    &request.nonce_account,
+                    request.nonce_account.as_deref(),
+                    nonce_data_opt.as_ref(),
                 )
                 .await
         })
@@ -439,8 +465,13 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
         tracing::info!("   Proposal: {}", request.proposal_id);
         tracing::info!("   Vote account: {}", request.vote_account);
         tracing::info!("   Choice: {}", request.choice);
+        if let Some(ref nonce_data) = request.nonce_data {
+            tracing::info!("   Using cached nonce data (no RPC call)");
+        } else if let Some(ref nonce_account) = request.nonce_account {
+            tracing::info!("   Fetching nonce data from blockchain: {}", nonce_account);
+        }
 
-        // Build unsigned vote transaction (uses RPC to fetch nonce data)
+        // Build unsigned vote transaction (uses cached nonce data if provided, otherwise fetches from RPC)
         let base64_tx = runtime::block_on(async {
             transport
                 .transaction_service()
@@ -450,7 +481,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
                     &request.vote_account,
                     request.choice,
                     &request.fee_payer,
-                    &request.nonce_account,
+                    request.nonce_account.as_deref(),
+                    request.nonce_data.as_ref(),
                 )
                 .await
         })
@@ -1069,47 +1101,63 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedOfflineSplTran
         tracing::info!("   Sender wallet: {}", request.sender_wallet);
         tracing::info!("   Recipient wallet: {}", request.recipient_wallet);
 
-        // Load bundle from secure storage
-        let storage = transport
-            .secure_storage()
-            .ok_or_else(|| "Secure storage not configured".to_string())?;
+        // Get nonce data: use provided cached data, or get from bundle
+        let cached_nonce = if let Some(ref ffi_nonce) = request.nonce_data {
+            // Use provided nonce data
+            tracing::info!("Using provided cached nonce data");
+            crate::transaction::CachedNonceData {
+                nonce_account: ffi_nonce.nonce_account.clone(),
+                authority: ffi_nonce.authority.clone(),
+                blockhash: ffi_nonce.blockhash.clone(),
+                lamports_per_signature: ffi_nonce.lamports_per_signature,
+                cached_at: ffi_nonce.cached_at,
+                used: ffi_nonce.used,
+            }
+        } else {
+            // Load bundle from secure storage and get available nonce
+            let storage = transport
+                .secure_storage()
+                .ok_or_else(|| "Secure storage not configured".to_string())?;
 
-        let mut bundle = storage
-            .load_bundle()
-            .map_err(|e| format!("Failed to load bundle: {}", e))?
-            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+            let mut bundle = storage
+                .load_bundle()
+                .map_err(|e| format!("Failed to load bundle: {}", e))?
+                .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
 
-        tracing::info!(
-            "📂 Loaded bundle: {} total nonces, {} available",
-            bundle.nonce_caches.len(),
-            bundle.available_nonces()
-        );
+            tracing::info!(
+                "📂 Loaded bundle: {} total nonces, {} available",
+                bundle.nonce_caches.len(),
+                bundle.available_nonces()
+            );
 
-        // Find first available (unused) nonce
-        let nonce_to_use = bundle
-            .nonce_caches
-            .iter_mut()
-            .find(|n| !n.used)
-            .ok_or_else(|| {
-                "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
-                    .to_string()
-            })?;
+            // Find first available (unused) nonce
+            let nonce_to_use = bundle
+                .nonce_caches
+                .iter_mut()
+                .find(|n| !n.used)
+                .ok_or_else(|| {
+                    "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
+                        .to_string()
+                })?;
 
-        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+            tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
 
-        // Clone the nonce data
-        let cached_nonce = nonce_to_use.clone();
+            // Clone the nonce data
+            let cached_nonce = nonce_to_use.clone();
 
-        // Mark as used and save bundle
-        nonce_to_use.used = true;
-        storage
-            .save_bundle(&bundle)
-            .map_err(|e| format!("Failed to save bundle: {}", e))?;
+            // Mark as used and save bundle
+            nonce_to_use.used = true;
+            storage
+                .save_bundle(&bundle)
+                .map_err(|e| format!("Failed to save bundle: {}", e))?;
 
-        tracing::info!(
-            "💾 Bundle saved (available nonces remaining: {})",
-            bundle.available_nonces()
-        );
+            tracing::info!(
+                "💾 Bundle saved (available nonces remaining: {})",
+                bundle.available_nonces()
+            );
+            
+            cached_nonce
+        };
 
         // Create UNSIGNED offline SPL transaction
         let unsigned_tx = transport
