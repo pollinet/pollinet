@@ -653,7 +653,7 @@ private fun FFITestButtons(
                     try {
                         onLog("Testing SDK initialization...")
                         val config = SdkConfig(
-                            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
+                            rpcUrl = "https://api.devnet.solana.com",
                             enableLogging = true,
                             logLevel = "debug",
                             storageDirectory = context.filesDir.absolutePath
@@ -697,7 +697,7 @@ private fun FFITestButtons(
                     try {
                         onLog("Testing transaction builder...")
                         val config = SdkConfig(
-                            rpcUrl = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6",
+                            rpcUrl = "https://api.devnet.solana.com",
                             storageDirectory = context.filesDir.absolutePath
                         )
                         val result = PolliNetSDK.initialize(config)

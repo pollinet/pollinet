@@ -12,8 +12,8 @@
 //! Run with: cargo run --example text_message_test
 
 use pollinet::PolliNetSDK;
-use tracing::{info, warn, error};
 use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send some test messages
     info!("\n📤 Sending test messages...");
-    
+
     // Send a few test messages
     let test_messages = vec![
         "Hello from PolliNet!",
@@ -56,21 +56,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error!("❌ Failed to send message {}: {}", i + 1, e);
             }
         }
-        
+
         // Wait a bit between messages
         sleep(Duration::from_millis(500)).await;
     }
 
     // Check for incoming messages
     info!("\n📨 Checking for incoming messages...");
-    
+
     for i in 0..10 {
         info!("Check {}: Looking for incoming messages...", i + 1);
-        
+
         // Check if there are pending messages
         if sdk.has_pending_messages().await {
             info!("📬 Pending messages detected!");
-            
+
             // Retrieve messages
             match sdk.check_incoming_messages().await {
                 Ok(messages) => {
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             info!("📭 No pending messages");
         }
-        
+
         // Wait before next check
         sleep(Duration::from_secs(2)).await;
     }

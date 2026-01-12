@@ -1,25 +1,27 @@
 //! macOS BLE implementation using btleplug
-//! 
+//!
 //! This module provides BLE Central role support on macOS using btleplug.
-//! 
+//!
 //! **Current Status:**
 //! - ✅ Scanning/Discovery: FULLY WORKING - can discover Linux PolliNet devices
 //! - ✅ Connecting: FULLY WORKING - can connect to discovered devices  
 //! - ❌ Advertising: NOT SUPPORTED - btleplug doesn't support Peripheral role
-//! 
+//!
 //! **Limitation:** macOS devices can act as clients (discover Linux servers) but cannot
 //! advertise themselves as GATT servers. For full bidirectional support, native CoreBluetooth
 //! FFI would be needed (see macOS_Implementation_Notes.md for details).
 
-use super::adapter::{BleAdapter, BleError, AdapterInfo, DiscoveredDevice, POLLINET_SERVICE_UUID};
+use super::adapter::{AdapterInfo, BleAdapter, BleError, DiscoveredDevice, POLLINET_SERVICE_UUID};
 use async_trait::async_trait;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::time::Instant;
-use uuid::Uuid;
-use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType, Characteristic};
+use btleplug::api::{
+    Central, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
+};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::StreamExt;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use uuid::Uuid;
 
 /// macOS BLE adapter using btleplug (Central role only)
 pub struct MacOSBleAdapter {
@@ -45,7 +47,7 @@ impl MacOSBleAdapter {
     /// Create a new macOS BLE adapter
     pub async fn new() -> Result<Self, BleError> {
         tracing::info!("🍎 Initializing macOS BLE adapter (btleplug - Central role only)");
-        
+
         let manager = Manager::new()
             .await
             .map_err(|e| BleError::PlatformError(format!("Failed to create BLE manager: {}", e)))?;
@@ -81,24 +83,29 @@ impl MacOSBleAdapter {
             let guard = self.adapter.lock().unwrap();
             guard.clone()
         };
-        
+
         if let Some(adapter) = adapter_opt {
             return Ok(adapter);
         }
-        
+
         // Initialize adapter
-        let adapters = self.manager.adapters().await
+        let adapters = self
+            .manager
+            .adapters()
+            .await
             .map_err(|e| BleError::PlatformError(format!("Failed to get adapters: {}", e)))?;
-        
-        let adapter = adapters.into_iter().next()
+
+        let adapter = adapters
+            .into_iter()
+            .next()
             .ok_or_else(|| BleError::AdapterNotAvailable)?;
-        
+
         // Store and return
         {
             let mut guard = self.adapter.lock().unwrap();
             *guard = Some(adapter.clone());
         }
-        
+
         tracing::info!("📡 BLE adapter initialized");
         Ok(adapter)
     }
@@ -106,22 +113,26 @@ impl MacOSBleAdapter {
     /// Update discovered devices from scan
     async fn update_discovered_devices(&self) -> Result<(), BleError> {
         let adapter = self.get_adapter().await?;
-        let peripherals = adapter.peripherals().await
+        let peripherals = adapter
+            .peripherals()
+            .await
             .map_err(|e| BleError::PlatformError(format!("Failed to get peripherals: {}", e)))?;
 
         let mut new_devices = HashMap::new();
-        
+
         for peripheral in peripherals {
-            let properties = peripheral.properties().await
+            let properties = peripheral
+                .properties()
+                .await
                 .map_err(|e| BleError::PlatformError(format!("Failed to get properties: {}", e)))?;
-            
+
             if let Some(props) = properties {
                 // Check if device advertises PolliNet service
                 let has_pollinet_service = props.services.contains(&self.service_uuid);
-                
+
                 if has_pollinet_service {
                     let address = peripheral.id().to_string();
-                    
+
                     tracing::info!("🎯 Found PolliNet device:");
                     tracing::info!("   Address: {}", address);
                     if let Some(ref name) = props.local_name {
@@ -130,7 +141,7 @@ impl MacOSBleAdapter {
                     if let Some(rssi) = props.rssi {
                         tracing::info!("   RSSI: {} dBm", rssi);
                     }
-                    
+
                     let device = DiscoveredDevice {
                         address: address.clone(),
                         name: props.local_name,
@@ -138,18 +149,18 @@ impl MacOSBleAdapter {
                         rssi: props.rssi,
                         last_seen: Instant::now(),
                     };
-                    
+
                     new_devices.insert(address, device);
                 }
             }
         }
-        
+
         // Update the cache after all awaits are done
         {
             let mut devices_guard = self.discovered_devices.lock().unwrap();
             devices_guard.extend(new_devices);
         }
-        
+
         Ok(())
     }
 
@@ -158,43 +169,55 @@ impl MacOSBleAdapter {
         tracing::info!("🔗 Connecting to peripheral: {}", address);
 
         let adapter = self.get_adapter().await?;
-        let peripherals = adapter.peripherals().await
+        let peripherals = adapter
+            .peripherals()
+            .await
             .map_err(|e| BleError::PlatformError(format!("Failed to get peripherals: {}", e)))?;
 
         // Find peripheral by address
-        let peripheral = peripherals.iter()
+        let peripheral = peripherals
+            .iter()
             .find(|p| p.id().to_string() == address)
             .ok_or_else(|| BleError::PeripheralNotFound)?;
 
         // Connect to peripheral
-        peripheral.connect().await
+        peripheral
+            .connect()
+            .await
             .map_err(|e| BleError::ConnectionFailed(format!("Failed to connect: {}", e)))?;
 
         tracing::info!("✅ Connected to {}", address);
 
         // Discover services and characteristics
-        peripheral.discover_services().await
+        peripheral
+            .discover_services()
+            .await
             .map_err(|e| BleError::PlatformError(format!("Failed to discover services: {}", e)))?;
 
         tracing::info!("🔍 Discovering services...");
 
         // Find PolliNet service
         let services = peripheral.services();
-        let pollinet_service = services.iter()
+        let pollinet_service = services
+            .iter()
             .find(|s| s.uuid == self.service_uuid)
             .ok_or_else(|| BleError::ServiceNotFound)?;
 
         tracing::info!("✅ Found PolliNet service");
 
         // Find data characteristic
-        let characteristic = pollinet_service.characteristics.iter()
+        let characteristic = pollinet_service
+            .characteristics
+            .iter()
             .find(|c| c.uuid == self.characteristic_uuid)
             .ok_or_else(|| BleError::CharacteristicNotFound)?;
 
         tracing::info!("✅ Found data characteristic");
 
         // Subscribe to notifications
-        peripheral.subscribe(characteristic).await
+        peripheral
+            .subscribe(characteristic)
+            .await
             .map_err(|e| BleError::PlatformError(format!("Failed to subscribe: {}", e)))?;
 
         tracing::info!("📥 Subscribed to notifications");
@@ -219,11 +242,11 @@ impl MacOSBleAdapter {
 
         tokio::spawn(async move {
             let mut notification_stream = peripheral.notifications().await.unwrap();
-            
+
             while let Some(notification) = notification_stream.next().await {
                 if notification.uuid == characteristic_uuid {
                     tracing::info!("📥 Received {} bytes via GATT", notification.value.len());
-                    
+
                     if let Some(ref callback) = *receive_callback.lock().unwrap() {
                         callback(notification.value);
                     }
@@ -237,26 +260,32 @@ impl MacOSBleAdapter {
         // Get peripheral and characteristic without holding lock across await
         let (peripheral, characteristic) = {
             let peripherals = self.connected_peripherals.lock().unwrap();
-            let peripheral = peripherals.get(address)
+            let peripheral = peripherals
+                .get(address)
                 .ok_or_else(|| BleError::PeripheralNotFound)?
                 .clone();
 
             // Find the characteristic
             let services = peripheral.services();
-            let pollinet_service = services.iter()
+            let pollinet_service = services
+                .iter()
                 .find(|s| s.uuid == self.service_uuid)
                 .ok_or_else(|| BleError::ServiceNotFound)?;
 
-            let characteristic = pollinet_service.characteristics.iter()
+            let characteristic = pollinet_service
+                .characteristics
+                .iter()
                 .find(|c| c.uuid == self.characteristic_uuid)
                 .ok_or_else(|| BleError::CharacteristicNotFound)?
                 .clone();
-            
+
             (peripheral, characteristic)
         };
 
         // Write data
-        peripheral.write(&characteristic, data, WriteType::WithResponse).await
+        peripheral
+            .write(&characteristic, data, WriteType::WithResponse)
+            .await
             .map_err(|e| BleError::TransmissionFailed(format!("Write failed: {}", e)))?;
 
         tracing::debug!("📤 Wrote {} bytes to {}", data.len(), address);
@@ -266,7 +295,11 @@ impl MacOSBleAdapter {
 
 #[async_trait]
 impl BleAdapter for MacOSBleAdapter {
-    async fn start_advertising(&self, service_uuid: &str, service_name: &str) -> Result<(), BleError> {
+    async fn start_advertising(
+        &self,
+        service_uuid: &str,
+        service_name: &str,
+    ) -> Result<(), BleError> {
         tracing::warn!("⚠️  BLE advertising not supported on macOS (btleplug limitation)");
         tracing::info!("   Service UUID: {}", service_uuid);
         tracing::info!("   Service Name: {}", service_name);
@@ -276,7 +309,7 @@ impl BleAdapter for MacOSBleAdapter {
         tracing::info!("   ");
         tracing::info!("   ✅ This macOS device CAN discover Linux PolliNet devices");
         tracing::info!("   ❌ Linux devices CANNOT discover this macOS device");
-        
+
         Ok(())
     }
 
@@ -286,7 +319,10 @@ impl BleAdapter for MacOSBleAdapter {
     }
 
     async fn send_packet(&self, data: &[u8]) -> Result<(), BleError> {
-        tracing::debug!("📤 Send packet called ({} bytes) - not supported in Central-only mode", data.len());
+        tracing::debug!(
+            "📤 Send packet called ({} bytes) - not supported in Central-only mode",
+            data.len()
+        );
         Ok(())
     }
 
@@ -318,27 +354,29 @@ impl BleAdapter for MacOSBleAdapter {
         tracing::info!("   Looking for PolliNet service: {}", self.service_uuid);
 
         let adapter = self.get_adapter().await?;
-        
+
         // Create scan filter for PolliNet service
         let filter = ScanFilter {
             services: vec![self.service_uuid],
         };
 
-        adapter.start_scan(filter).await
+        adapter
+            .start_scan(filter)
+            .await
             .map_err(|e| BleError::ScanningFailed(format!("Failed to start scan: {}", e)))?;
 
         *self.is_scanning.lock().unwrap() = true;
-        
+
         tracing::info!("✅ BLE scanning started successfully");
         tracing::info!("   Filtering for PolliNet UUID: {}", self.service_uuid);
         tracing::info!("   Will discover Linux PolliNet devices advertising this service");
-        
+
         // Give scan a moment to populate
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        
+
         // Update discovered devices
         self.update_discovered_devices().await?;
-        
+
         Ok(())
     }
 
@@ -352,7 +390,9 @@ impl BleAdapter for MacOSBleAdapter {
         };
 
         if let Some(adapter) = adapter_opt {
-            adapter.stop_scan().await
+            adapter
+                .stop_scan()
+                .await
                 .map_err(|e| BleError::ScanningFailed(format!("Failed to stop scan: {}", e)))?;
         }
 
@@ -372,22 +412,23 @@ impl BleAdapter for MacOSBleAdapter {
             let devices_guard = self.discovered_devices.lock().unwrap();
             devices_guard.values().cloned().collect::<Vec<_>>()
         };
-        
+
         tracing::info!("📱 Discovered {} PolliNet devices on macOS", devices.len());
         for device in &devices {
-            tracing::info!("   - {} ({})", 
+            tracing::info!(
+                "   - {} ({})",
                 device.name.as_ref().unwrap_or(&"Unknown".to_string()),
                 device.address
             );
         }
-        
+
         Ok(devices)
     }
-    
+
     async fn connect_to_device(&self, address: &str) -> Result<(), BleError> {
         self.connect_to_peripheral(address).await
     }
-    
+
     async fn write_to_device(&self, address: &str, data: &[u8]) -> Result<(), BleError> {
         self.write_to_peripheral(address, data).await
     }

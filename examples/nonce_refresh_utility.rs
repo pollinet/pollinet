@@ -2,20 +2,24 @@
 //!
 //! This example demonstrates the nonce refresh workflow:
 //!
-//! 1. Check the nonce JSON files created
-//! 2. Refresh the used nonce data and save the new nonce data to JSON file
+//! 1. If bundle file doesn't exist: Creates a new bundle with nonce accounts
+//! 2. If bundle file exists: Refreshes used nonce data and saves to JSON file
 //!
 //! Run with: cargo run --example nonce_refresh_utility
 
-use pollinet::transaction::OfflineTransactionBundle;
+mod wallet_utils;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
+
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
-use std::fs;
+use solana_sdk::signer::Signer;
 use std::path::Path;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
-const BUNDLE_FILE: &str = "./offline_bundle.json";
-const REFRESHED_BUNDLE_FILE: &str = "./refreshed_offline_bundle.json";
+const BUNDLE_FILE: &str = ".offline_bundle.json";
+const DEFAULT_NONCE_COUNT: usize = 5; // Default number of nonces to create if bundle doesn't exist
+const AIRDROP_AMOUNT_SOL: f64 = 2.0; // Enough for creating nonce accounts
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,253 +27,163 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     info!("🔄 === PolliNet Nonce Refresh Utility ===");
-    info!("This example demonstrates refreshing nonce data from blockchain");
+    info!("This utility refreshes used nonces or creates a new bundle if needed");
 
-    // ================================================================
-    // STEP 1: Check if nonce JSON files exist
-    // ================================================================
-    info!("\n📁 STEP 1: Checking for nonce JSON files...");
-    
-    if !Path::new(BUNDLE_FILE).exists() {
-        error!("❌ No offline bundle file found: {}", BUNDLE_FILE);
-        error!("   Please run offline_transaction_sender first to create a bundle");
-        return Err("No bundle file found".into());
-    }
-    
-    info!("✅ Found offline bundle file: {}", BUNDLE_FILE);
-    
-    // Load the existing bundle
-    let bundle_data = fs::read_to_string(BUNDLE_FILE)
-        .map_err(|e| format!("Failed to read bundle file: {}", e))?;
-    
-    let mut bundle: OfflineTransactionBundle = serde_json::from_str(&bundle_data)
-        .map_err(|e| format!("Failed to parse bundle file: {}", e))?;
-    
-    info!("📊 Bundle loaded:");
-    info!("   Created at: {}", bundle.created_at);
-    info!("   Total nonce accounts: {}", bundle.nonce_caches.len());
-    
-    let used_nonces = bundle.nonce_caches.iter().filter(|n| n.used).count();
-    let unused_nonces = bundle.nonce_caches.len() - used_nonces;
-    
-    info!("   Used nonces: {}", used_nonces);
-    info!("   Unused nonces: {}", unused_nonces);
-    
-    if unused_nonces == 0 {
-        warn!("⚠️  No unused nonces found in bundle");
-        warn!("   All nonces have been used, consider creating a new bundle");
-        return Ok(());
-    }
-    
-    // ================================================================
-    // STEP 2: Connect to Solana RPC and refresh nonce data
-    // ================================================================
-    info!("\n🌐 STEP 2: Connecting to Solana blockchain...");
-    
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
-    let rpc_client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
-    
-    info!("🔗 Connected to Solana RPC: {}", rpc_url);
-    
+    // Get RPC URL from .env (SOLANA_URL) or use default
+    // For local validator, set SOLANA_URL=http://127.0.0.1:8899 in .env
+    let rpc_url = get_rpc_url();
+    info!("🌐 Using RPC endpoint: {}", rpc_url);
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
+
     // Test connection
     match rpc_client.get_health() {
         Ok(_) => info!("✅ RPC connection healthy"),
         Err(e) => {
-            error!("❌ RPC connection failed: {}", e);
-            return Err(format!("RPC connection failed: {}", e).into());
+            warn!("⚠️  RPC health check failed: {}", e);
+            warn!(
+                "   Make sure your local validator is running on {}",
+                rpc_url
+            );
+            warn!("   Default Solana validator port: 8899");
         }
     }
-    
+
     // ================================================================
-    // STEP 3: Refresh nonce data for unused nonces
+    // STEP 1: Check if bundle file exists
     // ================================================================
-    info!("\n🔄 STEP 3: Refreshing nonce data...");
-    
-    let mut refreshed_count = 0;
-    let mut error_count = 0;
-    
-    let total_nonces = bundle.nonce_caches.len();
-    for (i, nonce_info) in bundle.nonce_caches.iter_mut().enumerate() {
-        if nonce_info.used {
-            info!("⏭️  Skipping used nonce {}/{}: {}", 
-                  i + 1, total_nonces, nonce_info.nonce_account);
-            continue;
+    info!("\n📁 STEP 1: Checking for bundle file...");
+
+    let bundle_exists = Path::new(BUNDLE_FILE).exists();
+
+    if !bundle_exists {
+        info!("📝 Bundle file not found: {}", BUNDLE_FILE);
+        info!(
+            "   Creating new bundle with {} nonce accounts...",
+            DEFAULT_NONCE_COUNT
+        );
+
+        // Create a new wallet for bundle creation
+        info!("\n=== Creating Wallet for Bundle Creation ===");
+        let sender_keypair = create_and_fund_wallet(&rpc_client, AIRDROP_AMOUNT_SOL).await?;
+        info!("✅ Wallet created: {}", sender_keypair.pubkey());
+
+        // Initialize SDK
+        let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+
+        // Create new bundle using SDK's prepare_offline_bundle
+        info!("\n=== Creating New Bundle ===");
+        let bundle = sdk
+            .prepare_offline_bundle(DEFAULT_NONCE_COUNT, &sender_keypair, Some(BUNDLE_FILE))
+            .await?;
+
+        info!("✅ Bundle created successfully!");
+        info!("   Total nonces: {}", bundle.total_nonces());
+        info!("   Available nonces: {}", bundle.available_nonces());
+
+        // Explicitly save the bundle to file
+        info!("\n=== Saving Bundle to File ===");
+        bundle.save_to_file(BUNDLE_FILE)?;
+        info!("✅ Saved bundle to: {}", BUNDLE_FILE);
+
+        // Verify file was created
+        if Path::new(BUNDLE_FILE).exists() {
+            let file_size = std::fs::metadata(BUNDLE_FILE)?.len();
+            info!("   File size: {} bytes", file_size);
+            info!("   File verified: exists and readable");
+        } else {
+            warn!(
+                "⚠️  Warning: Bundle file was not created at {}",
+                BUNDLE_FILE
+            );
         }
-        
-        info!("🔄 Refreshing nonce {}/{}: {}", 
-              i + 1, total_nonces, nonce_info.nonce_account);
-        
-        // Parse the nonce account pubkey
-        let nonce_pubkey = nonce_info.nonce_account.parse()
-            .map_err(|e| format!("Invalid nonce account pubkey: {}", e))?;
-        
-        // Get the current blockhash from blockchain
-        match rpc_client.get_latest_blockhash() {
-            Ok(new_blockhash) => {
-                let old_blockhash = nonce_info.blockhash.clone();
-                nonce_info.blockhash = new_blockhash.to_string();
-                
-                info!("   ✅ Blockhash refreshed: {} -> {}", old_blockhash, new_blockhash);
-                refreshed_count += 1;
-            }
-            Err(e) => {
-                error!("   ❌ Failed to refresh nonce: {}", e);
-                error_count += 1;
-                
-                // Check if the nonce account still exists
-                match rpc_client.get_account(&nonce_pubkey) {
-                    Ok(account) => {
-                        info!("   ℹ️  Account exists but nonce query failed");
-                    }
-                    Err(account_err) => {
-                        warn!("   ⚠️  Nonce account not found - may have been closed: {}", account_err);
-                        nonce_info.used = true; // Mark as used since it's no longer valid
-                    }
-                }
-            }
-        }
-        
-        // Small delay to avoid rate limiting
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        info!("\n🎉 New bundle created! You can now use it for offline transactions.");
+        return Ok(());
     }
-    
-    info!("\n📊 Refresh summary:");
-    info!("   ✅ Successfully refreshed: {} nonces", refreshed_count);
-    info!("   ❌ Failed to refresh: {} nonces", error_count);
-    info!("   📝 Total processed: {} nonces", refreshed_count + error_count);
-    
+
+    info!("✅ Found existing bundle file: {}", BUNDLE_FILE);
+
     // ================================================================
-    // STEP 4: Save refreshed bundle to new JSON file
+    // STEP 2: Load bundle and check status
     // ================================================================
-    info!("\n💾 STEP 4: Saving refreshed bundle...");
-    
-    // Update the creation timestamp
-    bundle.created_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    
-    // Create the refreshed bundle
-    let refreshed_bundle = OfflineTransactionBundle {
-        nonce_caches: bundle.nonce_caches.clone(),
-        max_transactions: bundle.max_transactions,
-        created_at: bundle.created_at,
-    };
-    
-    // Save to new file
-    let refreshed_json = serde_json::to_string_pretty(&refreshed_bundle)
-        .map_err(|e| format!("Failed to serialize refreshed bundle: {}", e))?;
-    
-    fs::write(REFRESHED_BUNDLE_FILE, refreshed_json)
-        .map_err(|e| format!("Failed to write refreshed bundle file: {}", e))?;
-    
-    info!("✅ Refreshed bundle saved to: {}", REFRESHED_BUNDLE_FILE);
-    
-    // Also update the original file
-    let updated_json = serde_json::to_string_pretty(&bundle)
-        .map_err(|e| format!("Failed to serialize updated bundle: {}", e))?;
-    
-    fs::write(BUNDLE_FILE, updated_json)
-        .map_err(|e| format!("Failed to write updated bundle file: {}", e))?;
-    
-    info!("✅ Original bundle updated: {}", BUNDLE_FILE);
-    
+    info!("\n📊 STEP 2: Loading bundle...");
+
+    let bundle = pollinet::transaction::OfflineTransactionBundle::load_from_file(BUNDLE_FILE)?;
+
+    info!("📊 Bundle loaded:");
+    info!("   Created at: {}", bundle.created_at);
+    info!("   Total nonce accounts: {}", bundle.total_nonces());
+    info!("   Used nonces: {}", bundle.used_nonces());
+    info!("   Unused nonces: {}", bundle.available_nonces());
+
+    if bundle.used_nonces() == 0 {
+        info!("✅ All nonces are unused - no refresh needed!");
+        info!("   Bundle is ready to use as-is");
+        return Ok(());
+    }
+
     // ================================================================
-    // STEP 5: Display final statistics
+    // STEP 3: Refresh used nonces
     // ================================================================
-    info!("\n📈 STEP 5: Final statistics:");
-    
-    let final_used = bundle.nonce_caches.iter().filter(|n| n.used).count();
-    let final_unused = bundle.nonce_caches.len() - final_used;
-    
-    info!("   📁 Original bundle: {}", BUNDLE_FILE);
-    info!("   📁 Refreshed bundle: {}", REFRESHED_BUNDLE_FILE);
-    info!("   📊 Total nonce accounts: {}", bundle.nonce_caches.len());
-    info!("   ✅ Unused nonces: {}", final_unused);
-    info!("   ❌ Used nonces: {}", final_used);
-    info!("   🔄 Refreshed nonces: {}", refreshed_count);
-    info!("   ⏰ Last refreshed: {}", bundle.created_at);
-    
-    if final_unused > 0 {
+    info!(
+        "\n🔄 STEP 3: Refreshing {} used nonce(s)...",
+        bundle.used_nonces()
+    );
+
+    // Create a wallet (can use existing or create new for refresh)
+    info!("\n=== Creating Wallet for Nonce Refresh ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, AIRDROP_AMOUNT_SOL).await?;
+    info!("✅ Wallet ready: {}", sender_keypair.pubkey());
+
+    // Initialize SDK
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+
+    // Use prepare_offline_bundle which automatically refreshes used nonces
+    // Pass the same count to ensure we refresh existing nonces without creating new ones
+    let total_nonces = bundle.total_nonces();
+    info!("   Using prepare_offline_bundle to refresh used nonces...");
+    info!(
+        "   This will refresh {} used nonce(s) and make them available again",
+        bundle.used_nonces()
+    );
+
+    let refreshed_bundle = sdk
+        .prepare_offline_bundle(total_nonces, &sender_keypair, Some(BUNDLE_FILE))
+        .await?;
+
+    // Explicitly save the refreshed bundle to file
+    info!("\n=== Saving Refreshed Bundle to File ===");
+    refreshed_bundle.save_to_file(BUNDLE_FILE)?;
+    info!("✅ Bundle refreshed and saved successfully!");
+
+    // ================================================================
+    // STEP 4: Display final statistics
+    // ================================================================
+    info!("\n📈 STEP 4: Final statistics:");
+
+    info!("   📁 Bundle file: {}", BUNDLE_FILE);
+    info!(
+        "   📊 Total nonce accounts: {}",
+        refreshed_bundle.total_nonces()
+    );
+    info!(
+        "   ✅ Available (unused): {}",
+        refreshed_bundle.available_nonces()
+    );
+    info!("   ❌ Used: {}", refreshed_bundle.used_nonces());
+    info!("   🔄 Refreshed: {} nonce(s)", bundle.used_nonces());
+
+    if refreshed_bundle.available_nonces() > 0 {
         info!("\n🎉 Nonce refresh completed successfully!");
-        info!("   You can now use the refreshed nonces for offline transactions");
+        info!(
+            "   {} nonce(s) are now available for offline transactions",
+            refreshed_bundle.available_nonces()
+        );
+        info!("   Refreshed nonces can be reused - no need to create new accounts!");
     } else {
-        warn!("\n⚠️  All nonces have been used");
-        warn!("   Consider creating a new bundle with fresh nonce accounts");
+        warn!("\n⚠️  No nonces available after refresh");
+        warn!("   This should not happen - check the bundle file");
     }
-    
-    Ok(())
-}
 
-/// Display detailed information about a nonce account
-async fn display_nonce_info(
-    rpc_client: &RpcClient,
-    nonce_account: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let nonce_pubkey = nonce_account.parse()
-        .map_err(|e| format!("Invalid nonce account pubkey: {}", e))?;
-    
-    info!("🔍 Detailed nonce account information:");
-    info!("   Account: {}", nonce_account);
-    
-    // Get account info
-    match rpc_client.get_account(&nonce_pubkey) {
-        Ok(account) => {
-            info!("   Balance: {} lamports", account.lamports);
-            info!("   Owner: {}", account.owner);
-            info!("   Executable: {}", account.executable);
-            info!("   Rent Epoch: {}", account.rent_epoch);
-        }
-        Err(e) => {
-            error!("   ❌ Error getting account info: {}", e);
-        }
-    }
-    
-    // Get nonce value (using get_account to get nonce account data)
-    match rpc_client.get_account(&nonce_pubkey) {
-        Ok(account) => {
-            if account.data.len() >= 80 {
-                // Parse nonce account data to get nonce value
-                let nonce_data = &account.data[40..72]; // Nonce value is at offset 40-72
-                let nonce_value = solana_sdk::hash::Hash::new_from_array(
-                    nonce_data.try_into().unwrap_or([0; 32])
-                );
-                info!("   Nonce value: {}", nonce_value);
-            } else {
-                warn!("   ⚠️  Invalid nonce account data length");
-            }
-        }
-        Err(e) => {
-            error!("   ❌ Error getting nonce value: {}", e);
-        }
-    }
-    
     Ok(())
-}
-
-/// Validate nonce account status
-async fn validate_nonce_account(
-    rpc_client: &RpcClient,
-    nonce_account: &str,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    let nonce_pubkey = nonce_account.parse()
-        .map_err(|e| format!("Invalid nonce account pubkey: {}", e))?;
-    
-    // Check if account exists
-    match rpc_client.get_account(&nonce_pubkey) {
-        Ok(account) => {
-            // Check if it's a valid nonce account
-            if account.owner == solana_sdk::system_program::id() && account.data.len() == 80 {
-                info!("✅ Nonce account is valid: {}", nonce_account);
-                Ok(true)
-            } else {
-                warn!("⚠️  Account exists but is not a valid nonce account: {}", nonce_account);
-                Ok(false)
-            }
-        }
-        Err(e) => {
-            warn!("⚠️  Nonce account not found: {}", nonce_account);
-            Ok(false)
-        }
-    }
 }

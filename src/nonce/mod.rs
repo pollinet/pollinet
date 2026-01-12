@@ -1,23 +1,23 @@
 //! Nonce account management for PolliNet SDK
-//! 
+//!
 //! Handles Solana nonce accounts to extend transaction lifespan beyond recent blockhash constraints
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use thiserror::Error;
+use solana_account_decoder::UiAccountEncoding;
+use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
+use solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use solana_sdk::{
-    pubkey::Pubkey,
+    commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
-    system_instruction,
+    pubkey::Pubkey,
     signature::{Keypair, Signer},
+    system_instruction,
     transaction::Transaction,
-    commitment_config::CommitmentConfig,
 };
-use solana_client::rpc_client::RpcClient;
-use solana_client::rpc_filter::{RpcFilterType, Memcmp, MemcmpEncodedBytes};
-use solana_account_decoder::UiAccountEncoding;
-use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
+use std::sync::Arc;
+use thiserror::Error;
+use tokio::sync::RwLock;
 
 /// Nonce account manager for PolliNet
 pub struct NonceManager {
@@ -38,7 +38,7 @@ impl NonceManager {
         // In production, this would create or load an existing nonce account
         let nonce_account = Pubkey::new_unique();
         let authority = Pubkey::new_unique();
-        
+
         Ok(Self {
             nonce_account,
             current_nonce: Arc::new(RwLock::new(0)),
@@ -46,16 +46,14 @@ impl NonceManager {
             rpc_client: None,
         })
     }
-    
+
     /// Create a new nonce manager with RPC client
     pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, NonceError> {
         let nonce_account = Pubkey::new_unique();
         let authority = Pubkey::new_unique();
-        let rpc_client = RpcClient::new_with_commitment(
-            rpc_url.to_string(),
-            CommitmentConfig::confirmed(),
-        );
-        
+        let rpc_client =
+            RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+
         Ok(Self {
             nonce_account,
             current_nonce: Arc::new(RwLock::new(0)),
@@ -63,15 +61,17 @@ impl NonceManager {
             rpc_client: Some(rpc_client),
         })
     }
-    
+
     /// Check if a nonce account exists and is valid
     pub async fn check_nonce_account_exists(
         &self,
         nonce_pubkey: &Pubkey,
     ) -> Result<bool, NonceError> {
-        let client = self.rpc_client.as_ref()
+        let client = self
+            .rpc_client
+            .as_ref()
             .ok_or_else(|| NonceError::RpcError("RPC client not initialized".to_string()))?;
-        
+
         match client.get_account(nonce_pubkey) {
             Ok(account) => {
                 // Check if account has enough data for a nonce account
@@ -89,20 +89,20 @@ impl NonceManager {
             }
         }
     }
-    
+
     /// Get the current nonce value
     pub async fn get_current_nonce(&self) -> Result<u64, NonceError> {
         let nonce = self.current_nonce.read().await;
         Ok(*nonce)
     }
-    
+
     /// Advance the nonce value
     pub async fn advance_nonce(&self) -> Result<(), NonceError> {
         let mut nonce = self.current_nonce.write().await;
         *nonce += 1;
         Ok(())
     }
-    
+
     /// Create a nonce account instruction
     pub fn create_nonce_account_instruction(
         &self,
@@ -118,29 +118,26 @@ impl NonceManager {
             nonce_account,
             1000000, // 0.001 SOL
         );
-        
+
         Ok(instruction)
     }
-    
+
     /// Create an advance nonce account instruction
     pub fn advance_nonce_account_instruction(
         &self,
         nonce_account: &Pubkey,
         authority: &Pubkey,
     ) -> Result<Instruction, NonceError> {
-        let instruction = system_instruction::advance_nonce_account(
-            nonce_account,
-            authority,
-        );
-        
+        let instruction = system_instruction::advance_nonce_account(nonce_account, authority);
+
         Ok(instruction)
     }
-    
+
     /// Get the nonce account public key
     pub fn get_nonce_account(&self) -> Pubkey {
         self.nonce_account
     }
-    
+
     /// Get the authority public key
     pub fn get_authority(&self) -> Pubkey {
         self.authority
@@ -150,16 +147,19 @@ impl NonceManager {
 /// Parse nonce account data to extract authority and current nonce
 fn parse_nonce_account(data: &[u8]) -> Result<NonceData, NonceError> {
     if data.len() != 80 {
-        return Err(NonceError::InvalidAccountData("Invalid nonce account size".to_string()));
+        return Err(NonceError::InvalidAccountData(
+            "Invalid nonce account size".to_string(),
+        ));
     }
 
     // Parse version (first 4 bytes)
     let version = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-    
+
     if version != 1 {
-        return Err(NonceError::InvalidAccountData(
-            format!("Invalid nonce version: {}", version)
-        ));
+        return Err(NonceError::InvalidAccountData(format!(
+            "Invalid nonce version: {}",
+            version
+        )));
     }
 
     // Parse authority (bytes 4-35)
@@ -209,9 +209,12 @@ pub async fn find_nonce_accounts_by_authority(
     // Bytes 4-35: Authority pubkey (32 bytes)
     // Bytes 36-67: Blockhash (32 bytes)
     // Bytes 68-79: Fee calculator (12 bytes)
-    
-    tracing::info!("Searching for nonce accounts with authority: {}", authority_pubkey);
-    
+
+    tracing::info!(
+        "Searching for nonce accounts with authority: {}",
+        authority_pubkey
+    );
+
     // Create a filter to match accounts where authority equals our pubkey
     let filters = vec![
         // Filter 1: Account must be exactly 128 bytes (nonce account size)
@@ -260,7 +263,10 @@ pub async fn find_nonce_accounts_by_authority(
     }
 
     if nonce_accounts.is_empty() {
-        tracing::warn!("No nonce accounts found for authority: {}", authority_pubkey);
+        tracing::warn!(
+            "No nonce accounts found for authority: {}",
+            authority_pubkey
+        );
     } else {
         tracing::info!(
             "Found {} nonce account(s) for authority: {}",
@@ -281,16 +287,18 @@ pub async fn get_or_find_nonce_account(
     // If nonce pubkey provided, verify and use it
     if let Some(nonce_pubkey) = nonce_pubkey_option {
         if check_nonce_account_exists(client, nonce_pubkey).await? {
-            let account = client.get_account(nonce_pubkey)
+            let account = client
+                .get_account(nonce_pubkey)
                 .map_err(|e| NonceError::RpcError(e.to_string()))?;
             let nonce_data = parse_nonce_account(&account.data)?;
-            
+
             if nonce_data.authority != *sender_pubkey {
-                return Err(NonceError::InvalidAuthority(
-                    format!("Sender is not the authority of nonce account {}", nonce_pubkey)
-                ));
+                return Err(NonceError::InvalidAuthority(format!(
+                    "Sender is not the authority of nonce account {}",
+                    nonce_pubkey
+                )));
             }
-            
+
             return Ok((*nonce_pubkey, nonce_data.blockhash));
         }
     }
@@ -302,9 +310,10 @@ pub async fn get_or_find_nonce_account(
         tracing::info!("Using existing nonce account: {}", pubkey);
         Ok((*pubkey, *blockhash))
     } else {
-        Err(NonceError::NoNonceAccountFound(
-            format!("No nonce account found for sender: {}", sender_pubkey)
-        ))
+        Err(NonceError::NoNonceAccountFound(format!(
+            "No nonce account found for sender: {}",
+            sender_pubkey
+        )))
     }
 }
 
@@ -326,7 +335,7 @@ pub async fn get_or_find_nonce_account(
 //             ));
 //         }
 //     }
-    
+
 //     // Create new nonce account
 //     create_nonce_account(client, sender_keypair).await
 // }
@@ -354,7 +363,7 @@ pub async fn create_nonce_account(
     let sender_balance = client
         .get_balance(&sender_keypair.pubkey())
         .map_err(|e| NonceError::RpcError(format!("Failed to get sender balance: {}", e)))?;
-    
+
     if sender_balance < rent_exemption {
         return Err(NonceError::CreationFailed(format!(
             "Insufficient balance: have {} lamports, need {} lamports",
@@ -384,10 +393,8 @@ pub async fn create_nonce_account(
     );
 
     // Create and sign transaction
-    let mut tx = Transaction::new_with_payer(
-        &create_nonce_instructions,
-        Some(&sender_keypair.pubkey()),
-    );
+    let mut tx =
+        Transaction::new_with_payer(&create_nonce_instructions, Some(&sender_keypair.pubkey()));
     tx.sign(&[&nonce_keypair, sender_keypair], recent_blockhash);
 
     tracing::info!("Sending nonce account creation transaction...");
@@ -413,22 +420,22 @@ pub struct NonceData {
 pub enum NonceError {
     #[error("Nonce account creation failed: {0}")]
     CreationFailed(String),
-    
+
     #[error("Nonce advancement failed: {0}")]
     AdvancementFailed(String),
-    
+
     #[error("Invalid nonce account state: {0}")]
     InvalidState(String),
-    
+
     #[error("RPC error: {0}")]
     RpcError(String),
-    
+
     #[error("Invalid account data: {0}")]
     InvalidAccountData(String),
-    
+
     #[error("Invalid authority: {0}")]
     InvalidAuthority(String),
-    
+
     #[error("No nonce account found: {0}")]
     NoNonceAccountFound(String),
 }

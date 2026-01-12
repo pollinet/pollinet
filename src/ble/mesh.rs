@@ -2,12 +2,12 @@
 //!
 //! Implements the PolliNet mesh protocol for peer-to-peer transaction broadcasting
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 /// Maximum number of hops a message can traverse
 pub const MAX_HOPS: u8 = 10;
@@ -120,14 +120,14 @@ impl MeshHeader {
 
         let packet_type = PacketType::from_u8(bytes[0])
             .ok_or_else(|| MeshError::InvalidPacket("Unknown packet type".into()))?;
-        
+
         let version = bytes[1];
         let ttl = bytes[2];
         let hop_count = bytes[3];
-        
+
         let message_id = Uuid::from_slice(&bytes[10..26])
             .map_err(|e| MeshError::InvalidPacket(format!("Invalid message ID: {}", e)))?;
-        
+
         let sender_id = Uuid::from_slice(&bytes[26..42])
             .map_err(|e| MeshError::InvalidPacket(format!("Invalid sender ID: {}", e)))?;
 
@@ -204,20 +204,22 @@ impl TransactionFragment {
 
     pub fn deserialize(bytes: &[u8]) -> Result<Self, MeshError> {
         if bytes.len() < 38 {
-            return Err(MeshError::InvalidPacket("Fragment payload too short".into()));
+            return Err(MeshError::InvalidPacket(
+                "Fragment payload too short".into(),
+            ));
         }
 
         let mut transaction_id = [0u8; 32];
         transaction_id.copy_from_slice(&bytes[0..32]);
-        
+
         let fragment_index = u16::from_be_bytes([bytes[32], bytes[33]]);
         let total_fragments = u16::from_be_bytes([bytes[34], bytes[35]]);
         let data_len = u16::from_be_bytes([bytes[36], bytes[37]]) as usize;
-        
+
         if bytes.len() < 38 + data_len {
             return Err(MeshError::InvalidPacket("Fragment data truncated".into()));
         }
-        
+
         let data = bytes[38..38 + data_len].to_vec();
 
         Ok(Self {
@@ -348,21 +350,28 @@ impl MeshRouter {
     /// Mark message as seen
     pub async fn mark_seen(&self, message_id: Uuid, hop_count: u8) {
         let mut cache = self.seen_cache.write().await;
-        
+
         // Evict old entries if cache is full
         if cache.len() >= SEEN_CACHE_SIZE {
             let now = Instant::now();
-            cache.retain(|_, v| now.duration_since(v.seen_at) < Duration::from_secs(SEEN_CACHE_TTL));
+            cache
+                .retain(|_, v| now.duration_since(v.seen_at) < Duration::from_secs(SEEN_CACHE_TTL));
         }
 
-        cache.insert(message_id, SeenMessage {
-            seen_at: Instant::now(),
-            hop_count,
-        });
+        cache.insert(
+            message_id,
+            SeenMessage {
+                seen_at: Instant::now(),
+                hop_count,
+            },
+        );
     }
 
     /// Process received transaction fragment
-    pub async fn process_fragment(&self, fragment: TransactionFragment) -> Result<Option<Vec<u8>>, MeshError> {
+    pub async fn process_fragment(
+        &self,
+        fragment: TransactionFragment,
+    ) -> Result<Option<Vec<u8>>, MeshError> {
         tracing::info!(
             "Processing fragment {}/{} for transaction {:?}",
             fragment.fragment_index + 1,
@@ -372,7 +381,9 @@ impl MeshRouter {
 
         // Validate fragment
         if fragment.fragment_index >= fragment.total_fragments {
-            return Err(MeshError::InvalidFragment("Fragment index out of range".into()));
+            return Err(MeshError::InvalidFragment(
+                "Fragment index out of range".into(),
+            ));
         }
 
         if fragment.total_fragments > MAX_FRAGMENTS {
@@ -382,26 +393,34 @@ impl MeshRouter {
         let mut incomplete = self.incomplete_transactions.write().await;
 
         // Get or create incomplete transaction
-        let tx = incomplete.entry(fragment.transaction_id).or_insert_with(|| {
-            IncompleteTransaction::new(fragment.transaction_id, fragment.total_fragments)
-        });
+        let tx = incomplete
+            .entry(fragment.transaction_id)
+            .or_insert_with(|| {
+                IncompleteTransaction::new(fragment.transaction_id, fragment.total_fragments)
+            });
 
         // Add fragment
         tx.add_fragment(fragment.fragment_index, fragment.data);
 
         // Check if complete
         if tx.is_complete() {
-            tracing::info!("Transaction {:?} complete! Reconstructing...", hex::encode(&fragment.transaction_id[..8]));
-            
+            tracing::info!(
+                "Transaction {:?} complete! Reconstructing...",
+                hex::encode(&fragment.transaction_id[..8])
+            );
+
             if let Some(reconstructed) = tx.reconstruct() {
                 // Move to completed transactions
                 let mut completed = self.completed_transactions.write().await;
                 completed.push(reconstructed.clone());
-                
+
                 // Remove from incomplete
                 incomplete.remove(&fragment.transaction_id);
-                
-                tracing::info!("✅ Transaction reconstructed: {} bytes", reconstructed.len());
+
+                tracing::info!(
+                    "✅ Transaction reconstructed: {} bytes",
+                    reconstructed.len()
+                );
                 return Ok(Some(reconstructed));
             }
         } else {
@@ -422,9 +441,12 @@ impl MeshRouter {
         let before = incomplete.len();
         incomplete.retain(|_, tx| !tx.is_expired());
         let after = incomplete.len();
-        
+
         if before != after {
-            tracing::info!("Cleaned up {} expired incomplete transactions", before - after);
+            tracing::info!(
+                "Cleaned up {} expired incomplete transactions",
+                before - after
+            );
         }
     }
 
@@ -474,10 +496,10 @@ pub struct MeshStats {
 pub enum MeshError {
     #[error("Invalid packet: {0}")]
     InvalidPacket(String),
-    
+
     #[error("Invalid fragment: {0}")]
     InvalidFragment(String),
-    
+
     #[error("Reassembly failed: {0}")]
     ReassemblyFailed(String),
 }
@@ -490,10 +512,10 @@ mod tests {
     fn test_header_serialization() {
         let sender_id = Uuid::new_v4();
         let header = MeshHeader::new(PacketType::Ping, sender_id);
-        
+
         let bytes = header.serialize();
         assert_eq!(bytes.len(), HEADER_SIZE);
-        
+
         let deserialized = MeshHeader::deserialize(&bytes).unwrap();
         assert_eq!(deserialized.packet_type, PacketType::Ping);
         assert_eq!(deserialized.sender_id, sender_id);
@@ -504,10 +526,10 @@ mod tests {
         let sender_id = Uuid::new_v4();
         let payload = vec![1, 2, 3, 4, 5];
         let packet = MeshPacket::new(PacketType::TextMessage, sender_id, payload.clone());
-        
+
         let bytes = packet.serialize();
         let deserialized = MeshPacket::deserialize(&bytes).unwrap();
-        
+
         assert_eq!(deserialized.header.packet_type, PacketType::TextMessage);
         assert_eq!(deserialized.payload, payload);
     }
@@ -520,10 +542,10 @@ mod tests {
             total_fragments: 3,
             data: vec![1, 2, 3],
         };
-        
+
         let bytes = fragment.serialize();
         let deserialized = TransactionFragment::deserialize(&bytes).unwrap();
-        
+
         assert_eq!(deserialized.transaction_id, fragment.transaction_id);
         assert_eq!(deserialized.fragment_index, fragment.fragment_index);
         assert_eq!(deserialized.total_fragments, fragment.total_fragments);
@@ -534,7 +556,7 @@ mod tests {
     async fn test_fragment_reassembly() {
         let router = MeshRouter::new(Uuid::new_v4());
         let tx_id = [1u8; 32];
-        
+
         // Send fragments
         for i in 0..3 {
             let fragment = TransactionFragment {
@@ -543,9 +565,9 @@ mod tests {
                 total_fragments: 3,
                 data: vec![i as u8; 10],
             };
-            
+
             let result = router.process_fragment(fragment).await.unwrap();
-            
+
             if i == 2 {
                 assert!(result.is_some());
                 let reconstructed = result.unwrap();
@@ -556,4 +578,3 @@ mod tests {
         }
     }
 }
-

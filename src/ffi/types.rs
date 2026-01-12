@@ -1,5 +1,5 @@
 //! FFI data types and JSON schemas (v1)
-//! 
+//!
 //! All data exchanged across FFI boundary uses JSON serialization for simplicity.
 //! Each message includes a `version` field for future compatibility.
 
@@ -15,8 +15,15 @@ pub const FFI_VERSION: u32 = 1;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FfiResult<T> {
-    Ok { ok: bool, data: T },
-    Err { ok: bool, code: String, message: String },
+    Ok {
+        ok: bool,
+        data: T,
+    },
+    Err {
+        ok: bool,
+        code: String,
+        message: String,
+    },
 }
 
 impl<T> FfiResult<T> {
@@ -235,15 +242,19 @@ impl OfflineTransactionBundle {
     pub fn from_transaction_bundle(bundle: &crate::transaction::OfflineTransactionBundle) -> Self {
         Self {
             version: 1,
-            nonce_caches: bundle.nonce_caches.iter().map(|nc| CachedNonceData {
-                version: 1,
-                nonce_account: nc.nonce_account.clone(),
-                authority: nc.authority.clone(),
-                blockhash: nc.blockhash.clone(),
-                lamports_per_signature: nc.lamports_per_signature,
-                cached_at: nc.cached_at,
-                used: nc.used,
-            }).collect(),
+            nonce_caches: bundle
+                .nonce_caches
+                .iter()
+                .map(|nc| CachedNonceData {
+                    version: 1,
+                    nonce_account: nc.nonce_account.clone(),
+                    authority: nc.authority.clone(),
+                    blockhash: nc.blockhash.clone(),
+                    lamports_per_signature: nc.lamports_per_signature,
+                    cached_at: nc.cached_at,
+                    used: nc.used,
+                })
+                .collect(),
             max_transactions: bundle.max_transactions as u32,
             created_at: bundle.created_at,
         }
@@ -259,9 +270,9 @@ pub struct Fragment {
     pub id: String,
     pub index: u32,
     pub total: u32,
-    pub data: String, // base64
+    pub data: String,          // base64
     pub fragment_type: String, // "FragmentStart" | "FragmentContinue" | "FragmentEnd"
-    pub checksum: String, // base64
+    pub checksum: String,      // base64
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

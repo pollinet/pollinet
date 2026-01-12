@@ -1,9 +1,9 @@
 //! Windows BLE implementation stub
-//! 
+//!
 //! This module provides a stub implementation for Windows.
 //! In the future, this will use Windows Bluetooth APIs.
 
-use super::adapter::{BleAdapter, BleError, AdapterInfo};
+use super::adapter::{AdapterInfo, BleAdapter, BleError};
 use async_trait::async_trait;
 
 /// Windows BLE adapter implementation (stub)
@@ -15,14 +15,18 @@ impl WindowsBleAdapter {
     /// Create a new Windows BLE adapter (stub)
     pub async fn new() -> Result<Self, BleError> {
         Err(BleError::OperationNotSupported(
-            "Windows BLE adapter not yet implemented".to_string()
+            "Windows BLE adapter not yet implemented".to_string(),
         ))
     }
 }
 
 #[async_trait]
 impl BleAdapter for WindowsBleAdapter {
-    async fn start_advertising(&self, _service_uuid: &str, _service_name: &str) -> Result<(), BleError> {
+    async fn start_advertising(
+        &self,
+        _service_uuid: &str,
+        _service_name: &str,
+    ) -> Result<(), BleError> {
         unimplemented!("Windows BLE adapter not yet implemented")
     }
 
@@ -58,19 +62,21 @@ impl BleAdapter for WindowsBleAdapter {
 
     async fn start_scanning(&self) -> Result<(), BleError> {
         Err(BleError::OperationNotSupported(
-            "Windows BLE scanning not yet implemented".to_string()
+            "Windows BLE scanning not yet implemented".to_string(),
         ))
     }
 
     async fn stop_scanning(&self) -> Result<(), BleError> {
         Err(BleError::OperationNotSupported(
-            "Windows BLE scanning not yet implemented".to_string()
+            "Windows BLE scanning not yet implemented".to_string(),
         ))
     }
 
-    async fn get_discovered_devices(&self) -> Result<Vec<super::adapter::DiscoveredDevice>, BleError> {
+    async fn get_discovered_devices(
+        &self,
+    ) -> Result<Vec<super::adapter::DiscoveredDevice>, BleError> {
         Err(BleError::OperationNotSupported(
-            "Windows BLE discovery not yet implemented".to_string()
+            "Windows BLE discovery not yet implemented".to_string(),
         ))
     }
 }
