@@ -504,7 +504,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
             "✅ Created unsigned vote transaction (base64 length: {})",
             base64_tx.len()
         );
-
+        
         let response: FfiResult<String> = FfiResult::success(base64_tx);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
@@ -2532,6 +2532,41 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushOutboundTransaction(
         })?;
         
         let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse { success: true });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Accept and queue a pre-signed transaction from external partners
+/// Verifies the transaction, compresses it if needed, fragments it, and adds to queue
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_acceptAndQueueExternalTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let request_str: String = env
+            .get_string(&request_json)
+            .map_err(|e| format!("Failed to get request string: {}", e))?
+            .into();
+        
+        let request: AcceptExternalTransactionRequest = serde_json::from_str(&request_str)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+        
+        let tx_id = runtime::block_on(async {
+            transport.sdk.accept_and_queue_external_transaction(
+                &request.base64_signed_tx,
+                request.max_payload,
+            ).await
+        })
+        .map_err(|e| format!("Failed to accept and queue external transaction: {}", e))?;
+        
+        let response: FfiResult<String> = FfiResult::success(tx_id);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
     

@@ -490,6 +490,17 @@ pub struct PushOutboundRequest {
     pub priority: PriorityFFI,
 }
 
+/// Request to accept and queue external pre-signed transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptExternalTransactionRequest {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(rename = "base64SignedTx")]
+    pub base64_signed_tx: String,
+    #[serde(rename = "maxPayload")]
+    pub max_payload: Option<usize>,
+}
+
 /// Fragment for FFI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FragmentFFI {
