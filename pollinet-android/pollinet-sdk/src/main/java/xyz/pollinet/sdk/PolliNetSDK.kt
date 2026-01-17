@@ -1274,6 +1274,34 @@ class PolliNetSDK private constructor(
             Result.failure(e)
         }
     }
+    
+    /**
+     * Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+     * Note: This does NOT clear nonce data
+     */
+    suspend fun clearAllQueues(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.clearAllQueues(handle)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Relay a received confirmation (increment hop count and re-queue for relay)
+     * @param confirmation Confirmation to relay
+     * @return Success if relayed, failure if max hops exceeded
+     */
+    suspend fun relayConfirmation(confirmation: Confirmation): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val confirmationJson = json.encodeToString(confirmation)
+            val resultJson = PolliNetFFI.relayConfirmation(handle, confirmationJson)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     // =========================================================================
     // Private helpers

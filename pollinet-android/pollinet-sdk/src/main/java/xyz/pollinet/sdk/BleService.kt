@@ -396,10 +396,14 @@ class BleService : Service() {
         // Start permission monitoring to detect when permissions are granted
         startPermissionMonitoring()
         
-        // Only start foreground if we have required permissions
+        // CRITICAL: Always call startForeground() when started via startForegroundService()
+        // Android requires this within 5 seconds, even if we don't have permissions yet
+        android.util.Log.d("BleService", "onCreate: Starting foreground service (required by Android)")
+        startForeground()
+        
+        // Check permissions and initialize accordingly
         if (hasRequiredPermissions()) {
-            android.util.Log.d("BleService", "onCreate: Permissions granted, starting foreground")
-            startForeground()
+            android.util.Log.d("BleService", "onCreate: Permissions granted, initializing service")
             
             // Request battery optimization exemption for persistent operation
             requestBatteryOptimizationExemption()
@@ -431,9 +435,11 @@ class BleService : Service() {
             // Note: Mesh watchdog disabled - alternating mode handles discovery automatically
             // startMeshWatchdog()
         } else {
-            android.util.Log.w("BleService", "onCreate: Missing required permissions, stopping service")
-            // Stop the service if permissions aren't granted
-            stopSelf()
+            android.util.Log.w("BleService", "onCreate: Missing required permissions - service will wait for permissions")
+            appendLog("⚠️ Permissions not granted - monitoring for permission grant")
+            appendLog("   Service will automatically recover when permissions are granted")
+            // Don't stop the service - keep it running so permission monitoring can recover
+            // The service will automatically initialize when permissions are granted via handlePermissionGranted()
         }
         
         android.util.Log.d("BleService", "onCreate: Completed")
@@ -1350,9 +1356,23 @@ class BleService : Service() {
                 }
             }
             
-            // If relay count hasn't exceeded max, relay to other peers
-            // For now, we just log - in a full mesh implementation, we'd check
-            // if this confirmation is for us or needs to be relayed further
+            // Relay confirmation back through the mesh if hop count hasn't exceeded max
+            // In a full mesh, we'd check if this confirmation is for us (we're the origin)
+            // For now, we always relay if hop count allows (mesh will eventually reach origin)
+            val maxHops = 5 // Default max hops
+            if (confirmation.relayCount < maxHops) {
+                appendLog("🔄 Relaying confirmation (hops: ${confirmation.relayCount}/$maxHops)")
+                sdk?.relayConfirmation(confirmation)?.onSuccess {
+                    appendLog("✅ Confirmation re-queued for relay")
+                    workChannel.trySend(WorkEvent.ConfirmationReady)
+                }?.onFailure { e ->
+                    appendLog("⚠️ Failed to relay confirmation: ${e.message}")
+                }
+            } else {
+                appendLog("⚠️ Confirmation exceeded max hops ($maxHops) - dropping")
+                appendLog("   This confirmation has been relayed through the mesh and reached TTL")
+            }
+            
             appendLog("✅ Confirmation processed")
             
         } catch (e: Exception) {

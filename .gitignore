@@ -36,6 +36,7 @@ pollinet-android/.gradle/
 pollinet-android/**/build/
 pollinet-android/**/.cxx/
 pollinet-android/**/local.properties
+pollinet-android/gradle.properties
 pollinet-android/**/*.iml
 pollinet-android/.idea/
 pollinet-android/app/build/

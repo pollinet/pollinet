@@ -173,6 +173,28 @@ impl QueueManager {
             HealthStatus::Warning(active_warnings)
         }
     }
+    
+    /// Clear all queues (outbound, retry, confirmation)
+    /// Note: Received queue is managed by transport layer, not QueueManager
+    /// Note: This does NOT clear nonce data
+    pub async fn clear_all_queues(&self) {
+        {
+            let mut outbound = self.outbound.write().await;
+            outbound.clear();
+        }
+        
+        {
+            let mut retries = self.retries.write().await;
+            retries.clear();
+        }
+        
+        {
+            let mut confirmations = self.confirmations.write().await;
+            confirmations.clear();
+        }
+        
+        tracing::info!("✅ Cleared all queues (outbound, retry, confirmation)");
+    }
 }
 
 impl Default for QueueManager {

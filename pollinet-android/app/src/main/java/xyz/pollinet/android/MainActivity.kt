@@ -215,8 +215,8 @@ fun PolliNetApp(mwaActivityResultSender: ActivityResultSender) {
                     // Option 1: Alchemy (requires valid API key)
                     // rpcUrl = "https://solana-devnet.g.alchemy.com/v2/",
                     
-                    // Option 2: Public Helius endpoint (free, no API key)
-                    rpcUrl = "https://devnet.helius-rpc.com/?api-key=",
+                    // Option 2: Helius endpoint with API key
+                    rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
                     
                     // Option 3: Solana public devnet (can be slow)
                     // rpcUrl = "https://api.devnet.solana.com",

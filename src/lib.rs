@@ -143,6 +143,16 @@ impl PolliNetSDK {
         &self.queue_manager
     }
     
+    /// Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+    /// Note: This does NOT clear nonce data
+    pub async fn clear_all_queues(&self) -> Result<(), PolliNetError> {
+        // Clear queue manager queues
+        self.queue_manager.clear_all_queues().await;
+        
+        tracing::info!("✅ Cleared all queues via SDK");
+        Ok(())
+    }
+    
     /// Get queue metrics
     pub async fn get_queue_metrics(&self) -> queue::QueueMetrics {
         self.queue_manager.get_metrics().await

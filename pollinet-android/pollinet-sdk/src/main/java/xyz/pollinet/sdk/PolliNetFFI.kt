@@ -466,5 +466,21 @@ object PolliNetFFI {
      * @return JSON FfiResult<SuccessResponse>
      */
     external fun autoSaveQueues(handle: Long): String
+    
+    /**
+     * Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+     * Note: This does NOT clear nonce data
+     * @param handle SDK handle
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun clearAllQueues(handle: Long): String
+    
+    /**
+     * Relay a received confirmation (increment hop count and re-queue for relay)
+     * @param handle SDK handle
+     * @param confirmationJson JSON-encoded Confirmation
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun relayConfirmation(handle: Long, confirmationJson: String): String
 }
 

@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     kotlin("plugin.serialization")
+    id("maven-publish")
+    id("signing")
 }
 
 android {
@@ -51,6 +53,13 @@ android {
         abortOnError = false
         // Treat warnings as errors (optional, can remove if too strict)
         warningsAsErrors = false
+    }
+    
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
     }
 }
 
@@ -106,3 +115,96 @@ tasks.named("preBuild") {
     dependsOn("buildRustLib")
 }
 
+// Version - read from VERSION file or Cargo.toml or set directly
+val sdkVersion = file("../../VERSION").takeIf { it.exists() }?.readText()?.trim()
+    ?: file("../../Cargo.toml").takeIf { it.exists() }?.readText()?.let {
+        Regex("version = \"([^\"]+)\"").find(it)?.groupValues?.get(1)
+    }
+    ?: project.findProperty("sdk.version") as String?
+    ?: "0.1.0"
+
+version = sdkVersion
+
+// Publishing configuration
+publishing {
+    publications {
+        create<MavenPublication>("release") {
+            groupId = "xyz.pollinet"
+            artifactId = "pollinet-sdk"
+            version = sdkVersion
+            
+            afterEvaluate {
+                from(components["release"])
+            }
+            
+            pom {
+                name.set("Pollinet SDK")
+                description.set("Offline Solana transaction propagation over BLE mesh networks")
+                url.set("https://github.com/pollinet/pollinet")
+                
+                licenses {
+                    license {
+                        name.set("Apache-2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+                
+                developers {
+                    developer {
+                        id.set("pollinet")
+                        name.set("Pollinet Team")
+                        email.set("team@pollinet.xyz")
+                    }
+                }
+                
+                scm {
+                    connection.set("scm:git:git://github.com/pollinet/pollinet.git")
+                    developerConnection.set("scm:git:ssh://github.com/pollinet/pollinet.git")
+                    url.set("https://github.com/pollinet/pollinet")
+                }
+            }
+        }
+    }
+    
+    repositories {
+        // Maven Central (Sonatype OSSRH) - Recommended for production
+        maven {
+            name = "OSSRH"
+            url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            credentials {
+                username = project.findProperty("ossrhUsername") as String?
+                password = project.findProperty("ossrhPassword") as String?
+            }
+        }
+        
+        // GitHub Packages - Alternative/backup option
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/pollinet/pollinet")
+            credentials {
+                username = project.findProperty("gpr.user") as String? ?: System.getenv("GITHUB_ACTOR")
+                password = project.findProperty("gpr.token") as String? ?: System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
+}
+
+// Signing configuration (required for Maven Central)
+signing {
+    val signingKeyId = project.findProperty("signing.keyId") as String? 
+        ?: project.findProperty("signingKeyId") as String?
+    val signingKey = project.findProperty("signingKey") as String?
+    val signingPassword = project.findProperty("signing.password") as String?
+        ?: project.findProperty("signingPassword") as String?
+    
+    // Try in-memory keys first (for CI/CD with exported key)
+    if (signingKeyId != null && signingKey != null && signingPassword != null) {
+        useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+        sign(publishing.publications["release"])
+    } else {
+        // Use GPG command (for local development with GPG keyring)
+        // This will use the default GPG keyring and gpg-agent
+        useGpgCmd()
+        sign(publishing.publications["release"])
+    }
+}
