@@ -514,7 +514,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
             "✅ Created unsigned vote transaction (base64 length: {})",
             base64_tx.len()
         );
-
+        
         let response: FfiResult<String> = FfiResult::success(base64_tx);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
@@ -711,7 +711,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
             .convert_byte_array(&tx_bytes)
             .map_err(|e| format!("Failed to read tx bytes: {}", e))?;
 
-        let fragments = transport.queue_transaction(tx_data)?;
+        let fragments = transport.queue_transaction(tx_data, None)?;
 
         let fragment_list = FragmentList { fragments };
         let response: FfiResult<FragmentList> = FfiResult::success(fragment_list);
@@ -1683,7 +1683,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
             #[serde(rename = "payerSignedTransactionBase64")]
             payer_signed_transaction_base64: String,
             #[serde(rename = "nonceKeypairBase64")]
-            nonce_keypair_base64: String,
+            nonce_keypair_base64: Vec<String>,
         }
 
         let request: AddNonceSignatureRequest = serde_json::from_slice(&request_data)
@@ -1726,14 +1726,14 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
                     format!("Failed to decode nonce keypair {}: {}", i, e)
                 })?;
 
-        if nonce_keypair_bytes.len() != 64 {
-            return Err(format!(
-                "Invalid nonce keypair length: expected 64, got {}",
-                nonce_keypair_bytes.len()
-            ));
-        }
+            if nonce_keypair_bytes.len() != 64 {
+                return Err(format!(
+                    "Invalid nonce keypair length: expected 64, got {}",
+                    nonce_keypair_bytes.len()
+                ));
+            }
 
-        let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
+            let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
                 .map_err(|e| {
                     tracing::error!("❌ Failed to create keypair {} from bytes: {}", i, e);
                     format!("Failed to create keypair {} from bytes: {}", i, e)
@@ -2345,6 +2345,33 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getReceivedQueueSize(
     create_result_string(&mut env, result)
 }
 
+/// Get fragment reassembly info for all incomplete transactions
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getFragmentReassemblyInfo(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        log::debug!("🔍 FFI getFragmentReassemblyInfo called with handle: {}", handle);
+        let transport = get_transport(handle)?;
+        log::debug!("✅ Got transport instance for handle {}", handle);
+        
+        let info_list = transport.get_fragment_reassembly_info();
+        
+        use crate::ffi::types::FragmentReassemblyInfoList;
+        
+        let response_data = FragmentReassemblyInfoList {
+            transactions: info_list,
+        };
+        
+        let response: FfiResult<FragmentReassemblyInfoList> = FfiResult::success(response_data);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
 /// Mark a transaction as successfully submitted
 #[no_mangle]
 pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_markTransactionSubmitted(
@@ -2628,6 +2655,91 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushOutboundTransaction(
     create_result_string(&mut env, result)
 }
 
+/// Accept and queue a pre-signed transaction from external partners
+/// Verifies the transaction, compresses it if needed, fragments it, and adds to queue
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_acceptAndQueueExternalTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let request_str: String = env
+            .get_string(&request_json)
+            .map_err(|e| format!("Failed to get request string: {}", e))?
+            .into();
+        
+        let request: AcceptExternalTransactionRequest = serde_json::from_str(&request_str)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+        
+        let tx_id = runtime::block_on(async {
+            // First, verify and queue in priority queue (for tracking/management)
+            transport.sdk.accept_and_queue_external_transaction(
+                &request.base64_signed_tx,
+                request.max_payload,
+            ).await
+        })
+        .map_err(|e| format!("Failed to accept and queue external transaction: {}", e))?;
+        
+        // CRITICAL FIX: Also populate transport.outbound_queue so next_outbound() can read fragments
+        // The transaction was already verified and fragmented by accept_and_queue_external_transaction
+        // Now we need to get those fragments and add them to the fragment queue
+        runtime::block_on(async {
+            // Get mutable access to the queue to pop transactions
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            
+            // Pop transactions until we find the one we just added
+            let mut found_tx = None;
+            let mut popped_txs = Vec::new();
+            
+            // Search through all priorities by popping
+            while let Some(tx) = queue.pop() {
+                if tx.tx_id == tx_id {
+                    found_tx = Some(tx);
+                    break;
+                } else {
+                    popped_txs.push(tx);
+                }
+            }
+            
+            // Put back all the transactions we popped (maintain original order)
+            // Note: push() will add to the correct priority queue based on tx.priority
+            for tx in popped_txs {
+                // Re-add to queue (this will maintain priority)
+                if let Err(e) = queue.push(tx) {
+                    tracing::warn!("⚠️ Failed to re-queue transaction: {}", e);
+                }
+            }
+            
+            if let Some(tx) = found_tx {
+                // Store fragment count before moving tx
+                let fragment_count = tx.fragments.len();
+                
+                // Queue fragments directly using the public method
+                transport.queue_fragments(&tx.fragments)
+                    .map_err(|e| format!("Failed to queue fragments: {}", e))?;
+                
+                // Put the transaction back in the priority queue (for management/tracking)
+                queue.push(tx).map_err(|e| format!("Failed to re-queue transaction: {}", e))?;
+                
+                tracing::info!("✅ External transaction {} fragments added to transport outbound queue ({} fragments)", tx_id, fragment_count);
+            } else {
+                tracing::warn!("⚠️ Could not find queued transaction {} to populate fragment queue", tx_id);
+            }
+            
+            Ok::<(), String>(())
+        }).map_err(|e| format!("Failed to populate fragment queue: {}", e))?;
+        
+        let response: FfiResult<String> = FfiResult::success(tx_id);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
 /// Pop next transaction from outbound queue
 #[cfg(feature = "android")]
 #[no_mangle]
@@ -2669,34 +2781,6 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popOutboundTransaction(
     create_result_string(&mut env, result)
 }
 
-/// Get outbound queue size
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getOutboundQueueSize(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-) -> jstring {
-    let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
-        
-        let size = runtime::block_on(async {
-            let queue = transport.sdk.queue_manager().outbound.read().await;
-            queue.len()
-        });
-        
-        #[derive(serde::Serialize)]
-        struct QueueSizeResponse {
-            #[serde(rename = "queueSize")]
-            queue_size: usize,
-        }
-        
-        let response: FfiResult<QueueSizeResponse> = FfiResult::success(QueueSizeResponse { queue_size: size });
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-    
-    create_result_string(&mut env, result)
-}
 
 /// Add transaction to retry queue
 #[cfg(feature = "android")]
@@ -2991,3 +3075,148 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupStaleFragments(
     create_result_string(&mut env, result)
 }
 
+/// Relay a received confirmation (increment hop count and re-queue for relay)
+/// This is called when a confirmation is received that needs to be relayed further
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_relayConfirmation(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    confirmation_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        // Parse confirmation JSON from Kotlin
+        let conf_str: String = env
+            .get_string(&confirmation_json)
+            .map_err(|e| format!("Failed to read confirmation JSON: {}", e))?
+            .into();
+        
+        let conf_ffi: ConfirmationFFI = serde_json::from_str(&conf_str)
+            .map_err(|e| format!("Failed to parse confirmation: {}", e))?;
+        
+        tracing::info!(
+            "🔄 Relaying confirmation for tx {} (current hops: {})",
+            &conf_ffi.tx_id[..std::cmp::min(16, conf_ffi.tx_id.len())],
+            conf_ffi.relay_count
+        );
+        
+        // Convert FFI confirmation to Rust confirmation
+        let tx_id_bytes = hex::decode(&conf_ffi.tx_id)
+            .map_err(|e| format!("Invalid txId hex: {}", e))?;
+        if tx_id_bytes.len() != 32 {
+            return Err(format!(
+                "Invalid txId length: expected 32 bytes, got {}",
+                tx_id_bytes.len()
+            ));
+        }
+        let mut tx_id_array = [0u8; 32];
+        tx_id_array.copy_from_slice(&tx_id_bytes);
+        
+        let status = match &conf_ffi.status {
+            ConfirmationStatusFFI::Success { signature } => {
+                crate::queue::confirmation::ConfirmationStatus::Success {
+                    signature: signature.clone(),
+                }
+            }
+            ConfirmationStatusFFI::Failed { error } => {
+                crate::queue::confirmation::ConfirmationStatus::Failed {
+                    error: error.clone(),
+                }
+            }
+        };
+        
+        // Create confirmation with incremented relay count
+        let mut confirmation = crate::queue::confirmation::Confirmation {
+            original_tx_id: tx_id_array,
+            status,
+            timestamp: conf_ffi.timestamp,
+            relay_count: conf_ffi.relay_count,
+            max_hops: 5, // Default max hops
+        };
+        
+        // Increment relay count
+        let relay_count_before = confirmation.relay_count;
+        let max_hops = confirmation.max_hops;
+        if !confirmation.increment_relay() {
+            tracing::warn!(
+                "⚠️ Confirmation for tx {} exceeded max hops ({}/{}) - dropping",
+                &conf_ffi.tx_id[..std::cmp::min(16, conf_ffi.tx_id.len())],
+                relay_count_before,
+                max_hops
+            );
+            // Return success but don't queue (TTL exceeded)
+            let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse {
+                success: true,
+            });
+            return serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e));
+        }
+        
+        // Store relay count after increment for logging
+        let relay_count_after = confirmation.relay_count;
+        
+        // Re-queue for relay
+        runtime::block_on(async {
+            let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
+            conf_queue
+                .push(confirmation)
+                .map_err(|e| format!("Failed to re-queue confirmation: {:?}", e))?;
+            
+            tracing::info!(
+                "✅ Re-queued confirmation for tx {} (hops: {}/{})",
+                &conf_ffi.tx_id[..std::cmp::min(16, conf_ffi.tx_id.len())],
+                relay_count_after,
+                max_hops
+            );
+            
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse {
+            success: true,
+        });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}
+
+/// Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+/// Note: This does NOT clear nonce data
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearAllQueues(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        
+        runtime::block_on(async {
+            // Clear queue manager queues (outbound, retry, confirmation)
+            transport.sdk.clear_all_queues().await
+                .map_err(|e| format!("Failed to clear queues: {}", e))?;
+            
+            // Clear reassembly buffers and completed transactions in transport
+            transport.clear_all_reassembly_buffers();
+            
+            // Clear received queue
+            transport.clear_received_queue();
+            
+            tracing::info!("✅ Cleared all queues (outbound, retry, confirmation, received) and reassembly buffers");
+            
+            Ok::<(), String>(())
+        })?;
+        
+        let response: FfiResult<SuccessResponse> = FfiResult::success(SuccessResponse {
+            success: true,
+        });
+        
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    
+    create_result_string(&mut env, result)
+}

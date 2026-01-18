@@ -61,8 +61,9 @@ pub fn fragment_transaction_with_max_payload(
     // Ensure minimum fragment size (but allow much larger with good MTU)
     let max_data = max_data.max(20).min(512); // 20 bytes min, 512 bytes max
     
-    // Calculate number of fragments needed
-    let total_fragments = (transaction_bytes.len() + MAX_FRAGMENT_DATA - 1) / MAX_FRAGMENT_DATA;
+    // Calculate number of fragments needed using the same max_data that we'll use for chunking
+    // CRITICAL FIX: Use max_data instead of MAX_FRAGMENT_DATA to match actual chunking
+    let total_fragments = (transaction_bytes.len() + max_data - 1) / max_data;
 
     tracing::info!(
         "MTU-aware fragmentation: {} bytes → {} fragments",
@@ -148,14 +149,36 @@ pub fn reconstruct_transaction(fragments: &[TransactionFragment]) -> Result<Vec<
     let mut sorted_fragments = fragments.to_vec();
     sorted_fragments.sort_by_key(|f| f.fragment_index);
 
-    // Verify we have all indices
-    for (expected_index, fragment) in sorted_fragments.iter().enumerate() {
-        if fragment.fragment_index != expected_index as u16 {
-            return Err(format!(
-                "Missing fragment at index {}, found {}",
-                expected_index, fragment.fragment_index
-            ));
-        }
+    // Verify we have all required indices (0..total_fragments-1)
+    // Use HashSet to check for duplicates and missing indices
+    use std::collections::HashSet;
+    let received_indices: HashSet<u16> = sorted_fragments.iter()
+        .map(|f| f.fragment_index)
+        .collect();
+    
+    let expected_indices: HashSet<u16> = (0..total_fragments as u16).collect();
+    
+    // Check for missing indices
+    let missing_indices: Vec<u16> = expected_indices.difference(&received_indices)
+        .cloned()
+        .collect();
+    
+    if !missing_indices.is_empty() {
+        return Err(format!(
+            "Missing fragment indices: {:?} (have {} fragments, expected indices 0..{})",
+            missing_indices,
+            fragments.len(),
+            total_fragments - 1
+        ));
+    }
+    
+    // Check for duplicate indices (shouldn't happen if we have exactly total_fragments unique fragments)
+    if received_indices.len() != total_fragments as usize {
+        return Err(format!(
+            "Duplicate fragments detected: have {} unique indices, expected {}",
+            received_indices.len(),
+            total_fragments
+        ));
     }
 
     // Reconstruct the transaction

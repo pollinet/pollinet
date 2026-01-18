@@ -245,7 +245,7 @@ object PolliNetFFI {
     external fun refreshOfflineBundle(handle: Long): String
 
     external fun getAvailableNonce(handle: Long): String
-
+    
     external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
     
     /**
@@ -362,6 +362,15 @@ object PolliNetFFI {
     external fun pushOutboundTransaction(handle: Long, requestJson: String): String
     
     /**
+     * Accept and queue a pre-signed transaction from external partners
+     * Verifies the transaction, compresses it if needed, fragments it, and adds to queue
+     * @param handle SDK handle
+     * @param requestJson JSON-encoded AcceptExternalTransactionRequest
+     * @return JSON FfiResult<String> with transaction ID
+     */
+    external fun acceptAndQueueExternalTransaction(handle: Long, requestJson: String): String
+    
+    /**
      * Pop next transaction from outbound queue
      * @param handle SDK handle
      * @return JSON FfiResult<OutboundTransactionFFI?>
@@ -457,5 +466,21 @@ object PolliNetFFI {
      * @return JSON FfiResult<SuccessResponse>
      */
     external fun autoSaveQueues(handle: Long): String
+    
+    /**
+     * Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+     * Note: This does NOT clear nonce data
+     * @param handle SDK handle
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun clearAllQueues(handle: Long): String
+    
+    /**
+     * Relay a received confirmation (increment hop count and re-queue for relay)
+     * @param handle SDK handle
+     * @param confirmationJson JSON-encoded Confirmation
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun relayConfirmation(handle: Long, confirmationJson: String): String
 }
 

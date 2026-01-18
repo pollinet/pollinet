@@ -143,6 +143,16 @@ impl PolliNetSDK {
         &self.queue_manager
     }
     
+    /// Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+    /// Note: This does NOT clear nonce data
+    pub async fn clear_all_queues(&self) -> Result<(), PolliNetError> {
+        // Clear queue manager queues
+        self.queue_manager.clear_all_queues().await;
+        
+        tracing::info!("✅ Cleared all queues via SDK");
+        Ok(())
+    }
+    
     /// Get queue metrics
     pub async fn get_queue_metrics(&self) -> queue::QueueMetrics {
         self.queue_manager.get_metrics().await
@@ -522,6 +532,148 @@ impl PolliNetSDK {
             .refresh_blockhash_in_unsigned_transaction(unsigned_tx_base64)
             .await?)
     }
+    
+    /// Accept and queue a pre-signed transaction from external partners
+    /// 
+    /// This method is designed for accepting transactions from external partners.
+    /// It verifies the transaction is properly signed, compresses it if needed,
+    /// fragments it for BLE transmission, and adds it to the outbound queue for relay.
+    /// 
+    /// # Arguments
+    /// * `base64_signed_tx` - Base64-encoded pre-signed Solana transaction
+    /// * `max_payload` - Optional maximum payload size (typically MTU - 10). If None, uses default.
+    /// 
+    /// # Returns
+    /// Transaction ID (SHA-256 hash as hex string) for tracking
+    /// 
+    /// # Errors
+    /// Returns error if:
+    /// - Transaction is not properly signed
+    /// - Transaction verification fails
+    /// - Compression fails
+    /// - Fragmentation fails
+    /// - Queue is full
+    pub async fn accept_and_queue_external_transaction(
+        &self,
+        base64_signed_tx: &str,
+        max_payload: Option<usize>,
+    ) -> Result<String, PolliNetError> {
+        use sha2::{Sha256, Digest};
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        use crate::ble::fragmenter;
+        use crate::queue::{OutboundTransaction, Priority};
+        
+        tracing::info!("📥 Accepting external pre-signed transaction for relay");
+        
+        // Decode from base64
+        let tx_bytes = BASE64.decode(base64_signed_tx)
+            .map_err(|e| PolliNetError::Transaction(
+                transaction::TransactionError::Serialization(format!("Failed to decode base64: {}", e))
+            ))?;
+        
+        tracing::info!("Decoded transaction: {} bytes", tx_bytes.len());
+        
+        // Deserialize and verify transaction
+        let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)
+            .map_err(|e| PolliNetError::Transaction(
+                transaction::TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e))
+            ))?;
+        
+        // Verify transaction has valid signatures
+        let valid_sigs = tx
+            .signatures
+            .iter()
+            .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
+            .count();
+        
+        if valid_sigs == 0 {
+            return Err(PolliNetError::Transaction(
+                transaction::TransactionError::Serialization(
+                    "Transaction must be signed before queuing for relay".to_string()
+                )
+            ));
+        }
+        
+        // Verify transaction signatures
+        if let Err(err) = tx.verify() {
+            tracing::error!("❌ Transaction signature verification failed: {}", err);
+            return Err(PolliNetError::Transaction(
+                transaction::TransactionError::Serialization(
+                    format!("Transaction signature verification failed: {}", err)
+                )
+            ));
+        }
+        
+        tracing::info!("✅ Transaction verified: {}/{} valid signatures", valid_sigs, tx.signatures.len());
+        tracing::info!("   Instructions: {}", tx.message.instructions.len());
+        
+        // Store original bytes for transaction ID calculation
+        let original_tx_bytes = tx_bytes.clone();
+        
+        // Compress the transaction if it exceeds the threshold
+        // Use the transaction service's compression logic via process_and_relay_transaction
+        // but we'll do it manually to avoid creating fragments twice
+        let compressed_tx = if tx_bytes.len() > crate::COMPRESSION_THRESHOLD {
+            tracing::info!(
+                "Compressing transaction (threshold: {} bytes)",
+                crate::COMPRESSION_THRESHOLD
+            );
+            // Create a temporary compressor to compress
+            let compressor = crate::util::lz::Lz4Compressor::new()
+                .map_err(|e| PolliNetError::Transaction(
+                    transaction::TransactionError::Compression(e.to_string())
+                ))?;
+            let compressed = compressor.compress_with_size(&tx_bytes)
+                .map_err(|e| PolliNetError::Transaction(
+                    transaction::TransactionError::Compression(e.to_string())
+                ))?;
+            tracing::info!(
+                "Compressed: {} bytes -> {} bytes",
+                tx_bytes.len(),
+                compressed.len()
+            );
+            compressed
+        } else {
+            tracing::info!("Transaction below compression threshold, keeping uncompressed");
+            tx_bytes
+        };
+        
+        tracing::info!("Final transaction size: {} bytes", compressed_tx.len());
+        
+        // Fragment the transaction
+        let mesh_fragments = if let Some(max_payload) = max_payload {
+            fragmenter::fragment_transaction_with_max_payload(&compressed_tx, max_payload)
+        } else {
+            fragmenter::fragment_transaction(&compressed_tx)
+        };
+        
+        tracing::info!("✅ Created {} fragments for BLE transmission", mesh_fragments.len());
+        
+        // Calculate transaction ID (SHA-256 hash of original uncompressed transaction)
+        let mut hasher = Sha256::new();
+        hasher.update(&original_tx_bytes);
+        let tx_id = hex::encode(hasher.finalize());
+        
+        // Create outbound transaction with NORMAL priority (external partner transactions)
+        let outbound_tx = OutboundTransaction::new(
+            tx_id.clone(),
+            original_tx_bytes, // Store original uncompressed bytes
+            mesh_fragments,
+            Priority::Normal, // External partner transactions use normal priority
+        );
+        
+        // Add to outbound queue
+        let mut queue = self.queue_manager.outbound.write().await;
+        queue.push(outbound_tx)
+            .map_err(|e| PolliNetError::Transaction(
+                transaction::TransactionError::Serialization(format!("Failed to add transaction to queue: {}", e))
+            ))?;
+        drop(queue);
+        
+        tracing::info!("✅ External transaction queued for relay: {}", tx_id);
+        
+        Ok(tx_id)
+    }
 
     /// Process and relay a presigned custom transaction
     /// Takes a presigned transaction (base64), compresses, fragments, and relays over BLE
@@ -748,19 +900,19 @@ impl PolliNetSDK {
         // Convert to requested format
         let result = match format {
             DiscoveryFormat::PeerInfo => {
-                let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
-                    ble::PeerInfo {
-                        peer_id: device.address.clone(),
-                        device_uuid: None,
-                        capabilities: vec!["CAN_RELAY".to_string()],
-                        rssi: device.rssi.unwrap_or(-100),
-                        first_seen: device.last_seen,
-                        last_seen: device.last_seen,
-                        state: ble::PeerState::Discovered,
-                        connection_attempts: 0,
-                        last_attempt: None,
-                    }
-                }).collect();
+        let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
+            ble::PeerInfo {
+                peer_id: device.address.clone(),
+                device_uuid: None,
+                capabilities: vec!["CAN_RELAY".to_string()],
+                rssi: device.rssi.unwrap_or(-100),
+                first_seen: device.last_seen,
+                last_seen: device.last_seen,
+                state: ble::PeerState::Discovered,
+                connection_attempts: 0,
+                last_attempt: None,
+            }
+        }).collect();
                 DiscoveryResult::PeerInfo(peers)
             }
             DiscoveryFormat::Addresses => {
@@ -815,7 +967,7 @@ impl PolliNetSDK {
         self.ble_bridge.write_to_device(peer_address, data).await?;
         Ok(())
     }
-    
+
     /// Get BLE status and debugging information
     pub async fn get_ble_status(&self) -> Result<String, PolliNetError> {
         let adapter_info = self.ble_bridge.get_adapter_info();

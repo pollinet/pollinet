@@ -135,10 +135,10 @@ fun TransactionBuilderScreen(
                         TransactionType.SOL -> {
                             // Use convenience method - can optionally pass nonceData for better performance
                             sdk.createUnsignedTransaction(
-                                sender = solSender,
-                                recipient = solRecipient,
-                                feePayer = solFeePayer,
-                                amount = solAmount.toLongOrNull() ?: 0,
+                                    sender = solSender,
+                                    recipient = solRecipient,
+                                    feePayer = solFeePayer,
+                                    amount = solAmount.toLongOrNull() ?: 0,
                                 nonceAccount = solNonceAccount.takeIf { it.isNotBlank() }
                                 // Optional: nonceData = cachedNonceData (no RPC call needed)
                             )
@@ -146,11 +146,11 @@ fun TransactionBuilderScreen(
                         TransactionType.SPL -> {
                             // Use convenience method - can optionally pass nonceData for better performance
                             sdk.createUnsignedSplTransaction(
-                                senderWallet = splSenderWallet,
-                                recipientWallet = splRecipientWallet,
-                                feePayer = splFeePayer,
-                                mintAddress = splMintAddress,
-                                amount = splAmount.toLongOrNull() ?: 0,
+                                    senderWallet = splSenderWallet,
+                                    recipientWallet = splRecipientWallet,
+                                    feePayer = splFeePayer,
+                                    mintAddress = splMintAddress,
+                                    amount = splAmount.toLongOrNull() ?: 0,
                                 nonceAccount = splNonceAccount.takeIf { it.isNotBlank() }
                                 // Optional: nonceData = cachedNonceData (no RPC call needed)
                             )

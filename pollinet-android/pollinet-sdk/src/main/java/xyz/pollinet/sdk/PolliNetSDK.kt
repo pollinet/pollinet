@@ -1037,6 +1037,36 @@ class PolliNetSDK private constructor(
     }
     
     /**
+     * Accept and queue a pre-signed transaction from external partners
+     * 
+     * This method is designed for accepting transactions from external partners.
+     * It verifies the transaction is properly signed, compresses it if needed,
+     * fragments it for BLE transmission, and adds it to the outbound queue for relay.
+     * 
+     * The transaction will be queued with NORMAL priority (external partner transactions).
+     * 
+     * @param base64SignedTx Base64-encoded pre-signed Solana transaction
+     * @param maxPayload Optional maximum payload size (typically MTU - 10). If null, uses default.
+     * @return Transaction ID (SHA-256 hash as hex string) for tracking
+     */
+    suspend fun acceptAndQueueExternalTransaction(
+        base64SignedTx: String,
+        maxPayload: Int? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = AcceptExternalTransactionRequest(
+                base64SignedTx = base64SignedTx,
+                maxPayload = maxPayload
+            )
+            val requestJson = json.encodeToString(request)
+            val resultJson = PolliNetFFI.acceptAndQueueExternalTransaction(handle, requestJson)
+            parseResult<String>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
      * Pop next transaction from outbound queue (priority-based)
      * @return OutboundTransaction or null if queue empty
      */
@@ -1239,6 +1269,34 @@ class PolliNetSDK private constructor(
     suspend fun autoSaveQueues(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val resultJson = PolliNetFFI.autoSaveQueues(handle)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
+     * Note: This does NOT clear nonce data
+     */
+    suspend fun clearAllQueues(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.clearAllQueues(handle)
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Relay a received confirmation (increment hop count and re-queue for relay)
+     * @param confirmation Confirmation to relay
+     * @return Success if relayed, failure if max hops exceeded
+     */
+    suspend fun relayConfirmation(confirmation: Confirmation): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val confirmationJson = json.encodeToString(confirmation)
+            val resultJson = PolliNetFFI.relayConfirmation(handle, confirmationJson)
             parseResult<SuccessResponse>(resultJson).map { }
         } catch (e: Exception) {
             Result.failure(e)
@@ -1695,6 +1753,16 @@ internal data class PushOutboundRequest(
     @SerialName("txId") val txId: String,
     val fragments: List<FragmentFFI>,
     val priority: Priority
+)
+
+/**
+ * Request to accept and queue external pre-signed transaction
+ */
+@Serializable
+internal data class AcceptExternalTransactionRequest(
+    val version: Int = 1,
+    @SerialName("base64SignedTx") val base64SignedTx: String,
+    @SerialName("maxPayload") val maxPayload: Int? = null
 )
 
 @Serializable

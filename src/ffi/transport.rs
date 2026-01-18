@@ -8,7 +8,7 @@ use crate::transaction::TransactionService;
 use crate::ble::MeshHealthMonitor;
 use crate::ble::mesh::TransactionFragment;
 use crate::storage::SecureStorage;
-use crate::transaction::{Fragment as TxFragment, FragmentType, TransactionService};
+use crate::transaction::{Fragment as TxFragment, FragmentType};
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -318,6 +318,26 @@ impl HostBleTransport {
         // Store TransactionFragment directly (no conversion needed)
         let buffer = buffers.entry(tx_id.clone()).or_insert_with(Vec::new);
         let buffer_size_before = buffer.len();
+        
+        // Validate fragment index is within expected range
+        if fragment.fragment_index >= fragment.total_fragments {
+            let error_msg = format!(
+                "Invalid fragment index {} (total: {}) for tx {}",
+                fragment.fragment_index, fragment.total_fragments, tx_id
+            );
+            t_error!("❌ {}", error_msg);
+            drop(buffers);
+            return Err(error_msg);
+        }
+        
+        // Check if fragment already exists (avoid duplicates)
+        if buffer.iter().any(|f| f.fragment_index == fragment.fragment_index) {
+            t_debug!("⚠️ Duplicate fragment {}/{} for tx {} - ignoring", 
+                fragment.fragment_index + 1, fragment.total_fragments, tx_id);
+            drop(buffers);
+            return Ok(()); // Ignore duplicate, but don't error
+        }
+        
         buffer.push(fragment.clone());
         let buffer_size_after = buffer.len();
         
@@ -552,11 +572,15 @@ impl HostBleTransport {
         let queue_size_after = queue.len();
         let total_bytes: usize = queue.iter().map(|data| data.len()).sum();
         
-        t_info!(
-            "📤 Queued {} fragments for transaction {}",
-            ffi_fragments.len(),
-            ffi_fragments[0].id
-        );
+        if !ffi_fragments.is_empty() {
+            t_info!(
+                "📤 Queued {} fragments for transaction {}",
+                ffi_fragments.len(),
+                ffi_fragments[0].id
+            );
+        } else {
+            t_warn!("⚠️ No fragments to queue");
+        }
         t_info!(
             "📊 Outbound queue: {} → {} fragments ({} total bytes)",
             queue_size_before,
@@ -570,6 +594,21 @@ impl HostBleTransport {
         }
 
         Ok(ffi_fragments)
+    }
+
+    /// Queue pre-fragmented transaction fragments directly to outbound queue
+    /// This is used when fragments are already created (e.g., from accept_and_queue_external_transaction)
+    pub fn queue_fragments(&self, fragments: &[crate::ble::mesh::TransactionFragment]) -> Result<(), String> {
+        let mut queue = self.outbound_queue.lock();
+        
+        for fragment in fragments {
+            let binary_bytes = bincode1::serialize(fragment)
+                .map_err(|e| format!("Failed to serialize fragment: {}", e))?;
+            queue.push_back(binary_bytes);
+        }
+        
+        t_info!("✅ Queued {} fragments directly to outbound queue", fragments.len());
+        Ok(())
     }
 
     /// Periodic tick for retries and timeouts
@@ -605,6 +644,21 @@ impl HostBleTransport {
     pub fn clear_transaction(&self, tx_id: &str) {
         self.inbound_buffers.lock().remove(tx_id);
         t_info!("🗑️  Cleared transaction {}", tx_id);
+    }
+    
+    /// Clear all reassembly buffers and completed transactions
+    /// Note: This does NOT clear nonce data
+    pub fn clear_all_reassembly_buffers(&self) {
+        self.inbound_buffers.lock().clear();
+        self.completed_transactions.lock().clear();
+        t_info!("✅ Cleared all reassembly buffers and completed transactions");
+    }
+    
+    /// Clear received transaction queue
+    /// Note: This does NOT clear nonce data
+    pub fn clear_received_queue(&self) {
+        self.received_tx_queue.lock().clear();
+        t_info!("✅ Cleared received transaction queue");
     }
 
     /// Get next completed transaction

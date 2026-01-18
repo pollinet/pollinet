@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import xyz.pollinet.android.mwa.PolliNetMwaClient
 import xyz.pollinet.android.mwa.MwaException
 import xyz.pollinet.sdk.BleService
+import xyz.pollinet.sdk.CachedNonceData
 import xyz.pollinet.sdk.CreateUnsignedTransactionRequest
 import xyz.pollinet.sdk.MetricsSnapshot
 import xyz.pollinet.sdk.PolliNetSDK
@@ -259,6 +260,20 @@ fun DiagnosticsScreen(
             }
         )
 
+        // External Transaction Flow: Create → Sign → Queue
+        StatusCard(
+            title = "📤 External Transaction Flow",
+            content = {
+                ExternalTransactionFlowDemo(
+                    sdk = mainSdk,
+                    bleService = bleService,
+                    mwaActivityResultSender = mwaActivityResultSender,
+                    onLog = { addLog(it) },
+                    scope = scope
+                )
+            }
+        )
+
         // SPL Token, Vote & Nonce Account Tests
         StatusCard(
             title = "🧪 SPL Token, Vote & Nonce Tests",
@@ -468,6 +483,31 @@ private fun BleMeshManualTestContent(
             ) {
                 Text("Cleanup", style = MaterialTheme.typography.labelSmall)
             }
+        }
+        
+        // Clear All Queues Button
+        Button(
+            onClick = {
+                scope.launch {
+                    try {
+                        bleService?.sdk?.clearAllQueues()?.onSuccess {
+                            android.util.Log.d("PolliNet", "✅ Cleared all queues (outbound, retry, confirmation, received, reassembly buffers)")
+                            android.util.Log.d("PolliNet", "   Note: Nonce data was NOT cleared")
+                        }?.onFailure { e ->
+                            android.util.Log.e("PolliNet", "❌ Failed to clear queues: ${e.message}")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("PolliNet", "❌ Exception clearing queues: ${e.message}")
+                    }
+                }
+            },
+            enabled = bleService?.sdk != null,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error
+            )
+        ) {
+            Text("🗑️ Clear All Queues (Except Nonce)")
         }
 
         HorizontalDivider()
@@ -706,11 +746,11 @@ private fun FFITestButtons(
                             // Example: Using nonceAccount (fetches from blockchain)
                             // For better performance, you can use nonceData instead (no RPC call)
                             val txResult = sdk.createUnsignedTransaction(
-                                sender = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
-                                recipient = "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE",
-                                feePayer = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
-                                amount = 1000000,
-                                nonceAccount = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq"
+                                    sender = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
+                                    recipient = "AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE",
+                                    feePayer = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq",
+                                    amount = 1000000,
+                                    nonceAccount = "2JnzJqwqLvrLZBAsu58jJtrMn1mT38Be3tcJBigmkTZq"
                                 // Alternative: nonceData = cachedNonceData (no RPC call needed)
                             )
                             
@@ -1856,6 +1896,463 @@ private fun SplVoteNonceTestContent(
                 text = "⚠️ SDK not initialized. Initialize SDK in MainActivity first.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExternalTransactionFlowDemo(
+    sdk: PolliNetSDK?,
+    bleService: BleService?,
+    mwaActivityResultSender: ActivityResultSender,
+    onLog: (String) -> Unit,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    val context = LocalContext.current
+    var mwaClient by remember { mutableStateOf<PolliNetMwaClient?>(null) }
+    var authorizedPubkey by remember { mutableStateOf<String?>(null) }
+    
+    // Transaction creation state
+    var senderPubkey by rememberSaveable { mutableStateOf("") }
+    var recipientPubkey by rememberSaveable { mutableStateOf("AtHGwWe2cZQ1WbsPVHFsCm4FqUDW8pcPLYXWsA89iuDE") }
+    var amount by rememberSaveable { mutableStateOf("1000000") } // 0.001 SOL
+    var feePayerPubkey by rememberSaveable { mutableStateOf("") }
+    var nonceAccount by rememberSaveable { mutableStateOf("") }
+    var cachedNonceData by remember { mutableStateOf<CachedNonceData?>(null) }
+    
+    // Transaction state
+    var unsignedTransaction by remember { mutableStateOf<String?>(null) }
+    var signedTransaction by remember { mutableStateOf<String?>(null) }
+    var transactionId by remember { mutableStateOf<String?>(null) }
+    
+    var isCreating by remember { mutableStateOf(false) }
+    var isSigning by remember { mutableStateOf(false) }
+    var isQueuing by remember { mutableStateOf(false) }
+    var isAuthorizing by remember { mutableStateOf(false) }
+    
+    // Initialize MWA client
+    LaunchedEffect(Unit) {
+        try {
+            mwaClient = PolliNetMwaClient.create(
+                context = context,
+                identityUri = "https://pollinet.xyz",
+                iconUri = "favicon.ico",
+                identityName = "PolliNet External Transaction Demo"
+            )
+        } catch (e: Exception) {
+            onLog("⚠️ MWA client init failed: ${e.message}")
+        }
+    }
+    
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Complete Flow: Create → Sign → Queue",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        
+        Text(
+            text = "This example demonstrates the full workflow:\n" +
+                    "1. Create unsigned transaction\n" +
+                    "2. Sign with MWA (Mobile Wallet Adapter)\n" +
+                    "3. Submit to PolliNet via acceptAndQueueExternalTransaction()",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        
+        HorizontalDivider()
+        
+        // Step 1: Authorize MWA
+        Text(
+            text = "Step 1: Authorize Wallet",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.secondary
+        )
+        
+        if (authorizedPubkey == null) {
+            Button(
+                onClick = {
+                    if (mwaClient == null) {
+                        onLog("❌ MWA client not initialized")
+                        return@Button
+                    }
+                    isAuthorizing = true
+                    scope.launch {
+                        try {
+                            onLog("🔐 Step 1: Authorizing with wallet...")
+                            val pubkey = mwaClient!!.authorize(mwaActivityResultSender)
+                            authorizedPubkey = pubkey
+                            senderPubkey = pubkey
+                            feePayerPubkey = pubkey
+                            onLog("✅ Authorized: ${pubkey.take(16)}...")
+                        } catch (e: MwaException) {
+                            onLog("❌ Authorization failed: ${e.message}")
+                        } catch (e: Exception) {
+                            onLog("❌ Exception: ${e.message}")
+                        } finally {
+                            isAuthorizing = false
+                        }
+                    }
+                },
+                enabled = !isAuthorizing && mwaClient != null,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (isAuthorizing) "Authorizing..." else "1️⃣ Authorize MWA")
+            }
+        } else {
+            Text(
+                text = "✅ Authorized: ${authorizedPubkey!!.take(16)}...",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+        
+        HorizontalDivider()
+        
+        // Step 2: Create Unsigned Transaction
+        Text(
+            text = "Step 2: Create Unsigned Transaction",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.secondary
+        )
+        
+        OutlinedTextField(
+            value = senderPubkey,
+            onValueChange = { senderPubkey = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Sender Pubkey (base58)") },
+            placeholder = { Text("Enter sender pubkey") },
+            enabled = !isCreating && sdk != null && authorizedPubkey != null
+        )
+        
+        OutlinedTextField(
+            value = recipientPubkey,
+            onValueChange = { recipientPubkey = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Recipient Pubkey (base58)") },
+            placeholder = { Text("Enter recipient pubkey") },
+            enabled = !isCreating && sdk != null
+        )
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = it },
+                modifier = Modifier.weight(1f),
+                label = { Text("Amount (lamports)") },
+                placeholder = { Text("1000000") },
+                enabled = !isCreating && sdk != null
+            )
+            
+        OutlinedTextField(
+            value = feePayerPubkey,
+            onValueChange = { feePayerPubkey = it },
+            modifier = Modifier.weight(1f),
+            label = { Text("Fee Payer") },
+            placeholder = { Text("Fee payer pubkey") },
+            enabled = !isCreating && sdk != null && authorizedPubkey != null
+        )
+        }
+        
+        OutlinedTextField(
+            value = nonceAccount,
+            onValueChange = { nonceAccount = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Nonce Account (required if no cached nonce)") },
+            placeholder = { Text("Enter nonce account pubkey (base58)") },
+            enabled = !isCreating && sdk != null,
+            supportingText = {
+                if (cachedNonceData != null) {
+                    Text("✅ Using cached nonce: ${cachedNonceData!!.nonceAccount.take(16)}...")
+                } else if (nonceAccount.isNotBlank()) {
+                    Text("✅ Will use provided nonce account")
+                } else {
+                    Text("⚠️ Required: Enter a nonce account pubkey (owned by sender), or cache nonces first")
+                }
+            }
+        )
+        
+        Button(
+            onClick = {
+                if (sdk == null) {
+                    onLog("❌ SDK not initialized")
+                    return@Button
+                }
+                if (senderPubkey.isBlank() || recipientPubkey.isBlank()) {
+                    onLog("❌ Please fill in sender and recipient")
+                    return@Button
+                }
+                isCreating = true
+                scope.launch {
+                    try {
+                        onLog("📝 Step 2: Creating unsigned transaction...")
+                        val amountLong = amount.toLongOrNull() ?: 1000000L
+                        val feePayer = feePayerPubkey.ifEmpty { senderPubkey }
+                        
+                        // Try to get cached nonce data if not already available
+                        var nonceData = cachedNonceData
+                        if (nonceData == null && nonceAccount.isBlank()) {
+                            onLog("🔍 Attempting to get available nonce from cache...")
+                            val nonceResult = sdk.getAvailableNonce()
+                            
+                            // Handle the result synchronously
+                            nonceResult.fold(
+                                onSuccess = { nonce ->
+                                    if (nonce != null) {
+                                        nonceData = nonce
+                                        cachedNonceData = nonce
+                                        onLog("✅ Found cached nonce: ${nonce.nonceAccount.take(16)}...")
+                                    } else {
+                                        onLog("⚠️ No cached nonce available.")
+                                    }
+                                },
+                                onFailure = { e ->
+                                    val errorMsg = e.message ?: "Unknown error"
+                                    onLog("⚠️ Could not get cached nonce: $errorMsg")
+                                    // If bundle doesn't exist, this is expected - user needs to provide nonce account
+                                    if (errorMsg.contains("bundle") || errorMsg.contains("No bundle")) {
+                                        onLog("💡 Tip: Provide a nonce account pubkey in the field above, or cache nonces first.")
+                                    }
+                                }
+                            )
+                        }
+                        
+                        // Create transaction with nonce account or nonce data
+                        val result = if (nonceData != null) {
+                            onLog("📝 Using cached nonce data...")
+                            sdk.createUnsignedTransaction(
+                                sender = senderPubkey,
+                                recipient = recipientPubkey,
+                                feePayer = feePayer,
+                                amount = amountLong,
+                                nonceData = nonceData
+                            )
+                        } else if (nonceAccount.isNotBlank()) {
+                            onLog("📝 Using provided nonce account (will fetch nonce from blockchain)...")
+                            sdk.createUnsignedTransaction(
+                                sender = senderPubkey,
+                                recipient = recipientPubkey,
+                                feePayer = feePayer,
+                                amount = amountLong,
+                                nonceAccount = nonceAccount
+                            )
+                        } else {
+                            onLog("❌ No nonce available. Please provide a nonce account pubkey in the field above.")
+                            onLog("💡 The nonce account must be owned by the sender wallet.")
+                            unsignedTransaction = null
+                            return@launch
+                        }
+                        
+                        result.onSuccess { txBase64 ->
+                            unsignedTransaction = txBase64
+                            onLog("✅ Unsigned transaction created!")
+                            onLog("   Length: ${txBase64.length} chars")
+                            onLog("   Preview: ${txBase64.take(80)}...")
+                            onLog("   Ready for Step 3: Signing")
+                        }.onFailure { e ->
+                            onLog("❌ Transaction creation failed: ${e.message}")
+                            unsignedTransaction = null
+                        }
+                    } catch (e: Exception) {
+                        onLog("❌ Exception: ${e.message}")
+                        unsignedTransaction = null
+                    } finally {
+                        isCreating = false
+                    }
+                }
+            },
+            enabled = !isCreating && sdk != null && senderPubkey.isNotBlank() && recipientPubkey.isNotBlank() && unsignedTransaction == null && authorizedPubkey != null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (isCreating) "Creating..." else "2️⃣ Create Unsigned Transaction")
+        }
+        
+        if (unsignedTransaction != null) {
+            Text(
+                text = "✅ Unsigned transaction ready",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
+        
+        HorizontalDivider()
+        
+        // Step 3: Sign with MWA
+        Text(
+            text = "Step 3: Sign with MWA",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.secondary
+        )
+        
+        Button(
+            onClick = {
+                if (mwaClient == null) {
+                    onLog("❌ MWA client not initialized")
+                    return@Button
+                }
+                if (unsignedTransaction == null) {
+                    onLog("❌ No unsigned transaction to sign")
+                    return@Button
+                }
+                isSigning = true
+                scope.launch {
+                    try {
+                        onLog("✍️ Step 3: Signing transaction with MWA...")
+                        val signedTxBytes = mwaClient!!.signTransaction(
+                            mwaActivityResultSender,
+                            unsignedTransaction!!
+                        )
+                        val signedTxBase64 = android.util.Base64.encodeToString(
+                            signedTxBytes,
+                            android.util.Base64.NO_WRAP
+                        )
+                        signedTransaction = signedTxBase64
+                        onLog("✅ Transaction signed successfully!")
+                        onLog("   Signed length: ${signedTxBase64.length} chars")
+                        onLog("   Preview: ${signedTxBase64.take(80)}...")
+                        onLog("   Ready for Step 4: Queue")
+                    } catch (e: MwaException) {
+                        onLog("❌ MWA signing failed: ${e.message}")
+                        signedTransaction = null
+                    } catch (e: Exception) {
+                        onLog("❌ Exception during signing: ${e.message}")
+                        signedTransaction = null
+                    } finally {
+                        isSigning = false
+                    }
+                }
+            },
+            enabled = !isSigning && mwaClient != null && unsignedTransaction != null && signedTransaction == null,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Text(if (isSigning) "Signing..." else "3️⃣ Sign with MWA")
+        }
+        
+        if (signedTransaction != null) {
+            Text(
+                text = "✅ Transaction signed",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
+        
+        HorizontalDivider()
+        
+        // Step 4: Queue via acceptAndQueueExternalTransaction
+        Text(
+            text = "Step 4: Queue External Transaction",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.secondary
+        )
+        
+        Text(
+            text = "This uses acceptAndQueueExternalTransaction() which:\n" +
+                    "• Verifies the transaction signature\n" +
+                    "• Compresses if needed\n" +
+                    "• Fragments for BLE transmission\n" +
+                    "• Adds to outbound queue for relay",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        
+        Button(
+            onClick = {
+                if (bleService?.sdk == null) {
+                    onLog("❌ BLE Service SDK not initialized")
+                    onLog("   The BLE service needs to be started and SDK initialized for queuing transactions")
+                    return@Button
+                }
+                if (signedTransaction == null) {
+                    onLog("❌ No signed transaction to queue")
+                    return@Button
+                }
+                isQueuing = true
+                scope.launch {
+                    try {
+                        onLog("📤 Step 4: Submitting to acceptAndQueueExternalTransaction()...")
+                        onLog("   Using BLE Service SDK instance for queuing")
+                        val result = bleService!!.sdk!!.acceptAndQueueExternalTransaction(
+                            base64SignedTx = signedTransaction!!
+                        )
+                        
+                        result.onSuccess { txId ->
+                            transactionId = txId
+                            onLog("✅ Transaction queued successfully!")
+                            onLog("   Transaction ID: $txId")
+                            onLog("   Transaction verified, compressed, and fragmented")
+                            onLog("   Added to outbound queue for BLE relay")
+                            onLog("   Ready for mesh transmission when BLE connection is established")
+                            // Trigger the sending loop to process the new transaction
+                            onLog("   Triggering sending loop to process queued transaction...")
+                            
+                            // Reset for next transaction
+                            unsignedTransaction = null
+                            signedTransaction = null
+                        }.onFailure { e ->
+                            onLog("❌ Failed to queue transaction: ${e.message}")
+                            transactionId = null
+                        }
+                    } catch (e: Exception) {
+                        onLog("❌ Exception: ${e.message}")
+                        transactionId = null
+                    } finally {
+                        isQueuing = false
+                    }
+                }
+            },
+            enabled = !isQueuing && bleService?.sdk != null && signedTransaction != null && transactionId == null,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.tertiary
+            )
+        ) {
+            Text(if (isQueuing) "Queuing..." else "4️⃣ Queue External Transaction")
+        }
+        
+        if (transactionId != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "✅ Transaction Queued Successfully!",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "Transaction ID: $transactionId",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
+        
+        if (sdk == null) {
+            Text(
+                text = "⏳ SDK is initializing... Please wait.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(vertical = 8.dp)
             )
         }
     }

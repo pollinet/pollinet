@@ -47,8 +47,9 @@ Pollinet is an open-source SDK and runtime enabling **offline Solana transaction
 ## 📚 Documentation
 
 - **[Whitepaper](https://pollinet.github.io/pollinet/)** – Detailed technical architecture
-- **[Offline Transactions Guide](./OFFLINE_TRANSACTIONS_GUIDE.md)** – Complete guide to offline transactions and nonce accounts
+- **[Offline Transactions Guide](./docs/OFFLINE_TRANSACTIONS_GUIDE.md)** – Complete guide to offline transactions and nonce accounts
 - **[Testing Guide](./TESTING.md)** – Comprehensive testing documentation
+- **[Publishing Guide](./docs/PUBLISHING_GUIDE.md)** – How to publish Kotlin SDK to Maven Central or GitHub Packages
 - **[Scripts Reference](./scripts/README.md)** – Utility scripts documentation
 
 ---
