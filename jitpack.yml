@@ -1,25 +1,11 @@
 jdk:
   - openjdk11
 
-# Install Rust and cargo-ndk if not available
-before_install:
-  - |
-    if ! command -v cargo &> /dev/null; then
-      echo "Installing Rust..."
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      export PATH="$HOME/.cargo/bin:$PATH"
-    fi
-  - export PATH="$HOME/.cargo/bin:$PATH"
-  - cargo --version || echo "Warning: Rust not available"
-  - |
-    if ! command -v cargo-ndk &> /dev/null; then
-      echo "Installing cargo-ndk..."
-      cargo install cargo-ndk || echo "Warning: cargo-ndk installation failed"
-    fi
-
-# Build and publish the SDK module
 install:
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y || true
+  - export PATH="$HOME/.cargo/bin:$PATH" && cargo --version || echo "Warning: Rust not available"
+  - export PATH="$HOME/.cargo/bin:$PATH" && cargo install cargo-ndk || echo "Warning: cargo-ndk installation failed"
   - cd pollinet-android
   - chmod +x ./gradlew
-  - ./gradlew :pollinet-sdk:build -x test
+  - export PATH="$HOME/.cargo/bin:$PATH" && ./gradlew :pollinet-sdk:build -x test
   - ./gradlew :pollinet-sdk:publishToMavenLocal -x test
