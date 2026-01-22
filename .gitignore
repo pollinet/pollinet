@@ -43,7 +43,8 @@ pollinet-android/app/build/
 pollinet-android/pollinet-sdk/build/
 
 # Android build artifacts
-pollinet-android/pollinet-sdk/src/main/jniLibs/
+# Note: SDK jniLibs are pre-built and committed for JitPack - DO NOT IGNORE
+# pollinet-android/pollinet-sdk/src/main/jniLibs/  # Commented out - needed for JitPack
 pollinet-android/app/src/main/jniLibs/
 
 docs/

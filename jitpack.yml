@@ -1,4 +1,4 @@
 jdk:
-  - openjdk11
+  - openjdk17
 install:
   - cd pollinet-android && chmod +x ./gradlew && ./gradlew :pollinet-sdk:build -x test -x buildRustLib && ./gradlew :pollinet-sdk:publishToMavenLocal -x test -x buildRustLib
