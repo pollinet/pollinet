@@ -207,7 +207,8 @@ publishing {
     }
 }
 
-// Signing configuration (required for Maven Central)
+// Signing configuration (required for Maven Central, optional for JitPack)
+// Only sign if signing keys are explicitly provided
 signing {
     val signingKeyId = project.findProperty("signing.keyId") as String? 
         ?: project.findProperty("signingKeyId") as String?
@@ -215,14 +216,10 @@ signing {
     val signingPassword = project.findProperty("signing.password") as String?
         ?: project.findProperty("signingPassword") as String?
     
-    // Try in-memory keys first (for CI/CD with exported key)
+    // Only sign if we have in-memory keys (for CI/CD)
     if (signingKeyId != null && signingKey != null && signingPassword != null) {
         useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
         sign(publishing.publications["release"])
-    } else {
-        // Use GPG command (for local development with GPG keyring)
-        // This will use the default GPG keyring and gpg-agent
-        useGpgCmd()
-        sign(publishing.publications["release"])
     }
+    // Skip signing if no keys provided (OK for JitPack builds)
 }
