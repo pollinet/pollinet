@@ -1,11 +1,4 @@
 jdk:
   - openjdk11
-
 install:
-  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y || true
-  - export PATH="$HOME/.cargo/bin:$PATH" && cargo --version || echo "Warning: Rust not available"
-  - export PATH="$HOME/.cargo/bin:$PATH" && cargo install cargo-ndk || echo "Warning: cargo-ndk installation failed"
-  - cd pollinet-android
-  - chmod +x ./gradlew
-  - export PATH="$HOME/.cargo/bin:$PATH" && ./gradlew :pollinet-sdk:build -x test
-  - ./gradlew :pollinet-sdk:publishToMavenLocal -x test
+  - cd pollinet-android && chmod +x ./gradlew && ./gradlew :pollinet-sdk:build -x test -x buildRustLib && ./gradlew :pollinet-sdk:publishToMavenLocal -x test -x buildRustLib

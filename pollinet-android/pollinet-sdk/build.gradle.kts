@@ -86,10 +86,18 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 }
 
-// Task to build Rust library using cargo-ndk
+// Check if native libraries already exist
+val jniLibsDir = file("src/main/jniLibs")
+val hasNativeLibs = jniLibsDir.exists() && 
+    file("$jniLibsDir/arm64-v8a").exists() &&
+    file("$jniLibsDir/armeabi-v7a").exists() &&
+    file("$jniLibsDir/x86_64").exists()
+
+// Task to build Rust library using cargo-ndk (only if libraries don't exist)
 tasks.register<Exec>("buildRustLib") {
     description = "Build Rust library for Android using cargo-ndk"
     group = "build"
+    enabled = !hasNativeLibs
     
     workingDir = file("../../")
     
@@ -108,11 +116,21 @@ tasks.register<Exec>("buildRustLib") {
         "--no-default-features",
         "--features", "android"
     )
+    
+    doFirst {
+        if (hasNativeLibs) {
+            logger.info("Native libraries already exist, skipping Rust build")
+        }
+    }
 }
 
-// Make preBuild depend on buildRustLib
+// Make preBuild depend on buildRustLib only if libraries don't exist
 tasks.named("preBuild") {
-    dependsOn("buildRustLib")
+    if (!hasNativeLibs) {
+        dependsOn("buildRustLib")
+    } else {
+        logger.info("Using pre-built native libraries, skipping Rust build")
+    }
 }
 
 // Version - read from VERSION file or Cargo.toml or set directly
