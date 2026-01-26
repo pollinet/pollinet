@@ -3,6 +3,7 @@
 //! This SDK enables offline Solana transactions to be distributed opportunistically
 //! over Bluetooth Low Energy (BLE) mesh networks, inspired by biological pollination.
 
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 pub mod ble;
 pub mod nonce;
 pub mod queue;
@@ -10,14 +11,19 @@ pub mod storage;
 pub mod transaction;
 pub mod util;
 
-#[cfg(feature = "android")]
+#[cfg(any(feature = "android", feature = "ios"))]
 pub mod ffi;
 
+// Only compile SDK and BLE-dependent code when BLE feature is enabled
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 use std::sync::Arc;
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 use thiserror::Error;
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 use tokio::sync::RwLock;
 
 /// Format for BLE device discovery results
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 #[derive(Debug, Clone, Copy)]
 pub enum DiscoveryFormat {
     /// Return detailed PeerInfo objects
@@ -27,6 +33,7 @@ pub enum DiscoveryFormat {
 }
 
 /// Result of BLE device discovery
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 #[derive(Debug)]
 pub enum DiscoveryResult {
     /// Detailed peer information
@@ -37,11 +44,13 @@ pub enum DiscoveryResult {
 
 /// Trait for transaction input types that can be submitted to Solana
 /// Allows unified `submit_transaction()` method to accept both base64 strings and raw bytes
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 pub trait TransactionInput {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError>;
 }
 
 /// Core PolliNet SDK instance using new platform-agnostic BLE adapter
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 pub struct PolliNetSDK {
     /// BLE adapter bridge for mesh networking
     ble_bridge: Arc<ble::bridge::BleAdapterBridge>,
@@ -57,6 +66,7 @@ pub struct PolliNetSDK {
     queue_manager: Arc<queue::QueueManager>,
 }
 
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 impl PolliNetSDK {
     /// Initialize a new PolliNet SDK instance without RPC client
     pub async fn new() -> Result<Self, PolliNetError> {
@@ -962,6 +972,7 @@ impl PolliNetSDK {
 }
 
 // TransactionInput trait implementations for unified submit_transaction() method
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 impl TransactionInput for &str {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
         Ok(sdk
@@ -971,6 +982,7 @@ impl TransactionInput for &str {
     }
 }
 
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 impl TransactionInput for String {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
         Ok(sdk
@@ -980,6 +992,7 @@ impl TransactionInput for String {
     }
 }
 
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 impl TransactionInput for &[u8] {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
         Ok(sdk
@@ -989,6 +1002,7 @@ impl TransactionInput for &[u8] {
     }
 }
 
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 impl TransactionInput for Vec<u8> {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
         Ok(sdk
@@ -999,6 +1013,7 @@ impl TransactionInput for Vec<u8> {
 }
 
 /// Error types for PolliNet operations
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 #[derive(Error, Debug)]
 pub enum PolliNetError {
     #[error("BLE adapter error: {0}")]
@@ -1021,9 +1036,11 @@ pub enum PolliNetError {
 }
 
 /// Service UUID for BLE mesh networking
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 pub const SERVICE_UUID: &str = "7e2a9b1f-4b8c-4d93-bb19-2c4eac4e12a7";
 
 /// BLE MTU size for safe packet transmission
+#[cfg(any(feature = "ble", feature = "android", feature = "linux", feature = "macos", feature = "windows"))]
 pub const BLE_MTU_SIZE: usize = 480;
 
 /// Compression threshold in bytes

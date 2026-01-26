@@ -14,9 +14,14 @@ use solana_sdk::{
     transaction::Transaction,
     commitment_config::CommitmentConfig,
 };
+
+#[cfg(feature = "rpc-client")]
 use solana_client::rpc_client::RpcClient;
+#[cfg(feature = "rpc-client")]
 use solana_client::rpc_filter::{RpcFilterType, Memcmp, MemcmpEncodedBytes};
+#[cfg(feature = "rpc-client")]
 use solana_account_decoder::UiAccountEncoding;
+#[cfg(feature = "rpc-client")]
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 
 /// Nonce account manager for PolliNet
@@ -28,7 +33,10 @@ pub struct NonceManager {
     /// Authority public key
     authority: Pubkey,
     /// RPC client for blockchain operations
+    #[cfg(feature = "rpc-client")]
     rpc_client: Option<RpcClient>,
+    #[cfg(not(feature = "rpc-client"))]
+    rpc_client: Option<()>,
 }
 
 impl NonceManager {
@@ -48,6 +56,7 @@ impl NonceManager {
     }
     
     /// Create a new nonce manager with RPC client
+    #[cfg(feature = "rpc-client")]
     pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, NonceError> {
         let nonce_account = Pubkey::new_unique();
         let authority = Pubkey::new_unique();
@@ -64,7 +73,13 @@ impl NonceManager {
         })
     }
     
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn new_with_rpc(_rpc_url: &str) -> Result<Self, NonceError> {
+        Err(NonceError::RpcError("RPC client not enabled for this build. Compile with 'rpc-client' feature.".to_string()))
+    }
+    
     /// Check if a nonce account exists and is valid
+    #[cfg(feature = "rpc-client")]
     pub async fn check_nonce_account_exists(
         &self,
         nonce_pubkey: &Pubkey,
@@ -88,6 +103,16 @@ impl NonceManager {
                 Ok(false)
             }
         }
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn check_nonce_account_exists(
+        &self,
+        _nonce_pubkey: &Pubkey,
+    ) -> Result<bool, NonceError> {
+        Err(NonceError::RpcError(
+            "RPC not available on iOS. Use native URLSession for nonce checks.".to_string()
+        ))
     }
     
     /// Get the current nonce value
@@ -176,6 +201,7 @@ fn parse_nonce_account(data: &[u8]) -> Result<NonceData, NonceError> {
 }
 
 /// Check if a specific nonce account exists
+#[cfg(feature = "rpc-client")]
 pub async fn check_nonce_account_exists(
     client: &RpcClient,
     nonce_pubkey: &Pubkey,
@@ -200,6 +226,7 @@ pub async fn check_nonce_account_exists(
 }
 
 /// Find all nonce accounts where the sender is the authority
+#[cfg(feature = "rpc-client")]
 pub async fn find_nonce_accounts_by_authority(
     client: &RpcClient,
     authority_pubkey: &Pubkey,
@@ -273,6 +300,7 @@ pub async fn find_nonce_accounts_by_authority(
 }
 
 /// Get the first available nonce account for a sender
+#[cfg(feature = "rpc-client")]
 pub async fn get_or_find_nonce_account(
     client: &RpcClient,
     sender_pubkey: &Pubkey,
@@ -334,6 +362,7 @@ pub async fn get_or_find_nonce_account(
 /// Create a nonce account on Solana
 /// The sender funds the nonce account and is set as the authority
 /// This allows the sender to advance the nonce when needed
+#[cfg(feature = "rpc-client")]
 pub async fn create_nonce_account(
     client: &RpcClient,
     sender_keypair: &Keypair,

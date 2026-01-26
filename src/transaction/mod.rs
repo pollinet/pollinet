@@ -603,7 +603,8 @@ impl TransactionCache {
 pub struct TransactionService {
     /// LZ4 compressor for transaction payloads
     compressor: crate::util::lz::Lz4Compressor,
-    /// RPC client for fetching nonce account data
+    /// RPC client for fetching nonce account data (only available with rpc-client feature)
+    #[cfg(feature = "rpc-client")]
     rpc_client: Option<Box<solana_client::rpc_client::RpcClient>>,
 }
 
@@ -615,11 +616,13 @@ impl TransactionService {
 
         Ok(Self {
             compressor,
+            #[cfg(feature = "rpc-client")]
             rpc_client: None,
         })
     }
 
     /// Create a new transaction service with RPC client
+    #[cfg(feature = "rpc-client")]
     pub async fn new_with_rpc(rpc_url: &str) -> Result<Self, TransactionError> {
         let compressor = crate::util::lz::Lz4Compressor::new()
             .map_err(|e| TransactionError::Compression(e.to_string()))?;
@@ -633,6 +636,11 @@ impl TransactionService {
             compressor,
             rpc_client: Some(rpc_client),
         })
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn new_with_rpc(_rpc_url: &str) -> Result<Self, TransactionError> {
+        Err(TransactionError::RpcClient("RPC client not enabled. iOS should handle RPC calls natively.".to_string()))
     }
 
     /// Add a signature to an unsigned transaction (base64 encoded)
@@ -777,6 +785,7 @@ impl TransactionService {
 
     /// Send and confirm a transaction from base64 encoded bytes
     /// Decodes base64, deserializes, and submits to Solana
+    #[cfg(feature = "rpc-client")]
     pub async fn send_and_confirm_transaction(
         &self,
         base64_tx: &str,
@@ -833,6 +842,16 @@ impl TransactionService {
         tracing::info!("✅ Transaction submitted successfully: {}", signature);
 
         Ok(signature.to_string())
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn send_and_confirm_transaction(
+        &self,
+        _base64_tx: &str,
+    ) -> Result<String, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession for transaction submission.".to_string()
+        ))
     }
 
     /// Create an unsigned SPL token transfer transaction with durable nonce
@@ -1466,7 +1485,8 @@ impl TransactionService {
     }
 
     /// Fetch nonce account data from the blockchain
-    async fn fetch_nonce_account_data(
+    #[cfg(feature = "rpc-client")]
+    pub async fn fetch_nonce_account_data(
         &self,
         nonce_pubkey: &Pubkey,
     ) -> Result<solana_sdk::nonce::state::Data, TransactionError> {
@@ -1529,11 +1549,22 @@ impl TransactionService {
 
         Ok(nonce_data)
     }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn fetch_nonce_account_data(
+        &self,
+        _nonce_pubkey: &Pubkey,
+    ) -> Result<solana_sdk::nonce::state::Data, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession to fetch nonce data.".to_string()
+        ))
+    }
 
     /// Prepare offline nonce data for creating transactions without internet
     /// Fetches and caches nonce account data that can be used offline
     /// 
     /// This should be called while online to prepare for offline transaction creation
+    #[cfg(feature = "rpc-client")]
     pub async fn prepare_offline_nonce_data(
         &self,
         nonce_account: &str,
@@ -1563,6 +1594,14 @@ impl TransactionService {
         tracing::info!("   Fee: {} lamports", cached.lamports_per_signature);
 
         Ok(cached)
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn prepare_offline_nonce_data(
+        &self,
+        _nonce_account: &str,
+    ) -> Result<CachedNonceData, TransactionError> {
+        Err(TransactionError::RpcClient("RPC client not enabled. iOS should handle RPC calls natively.".to_string()))
     }
 
     /// Discover and cache all nonce accounts for a given authority
@@ -1611,6 +1650,7 @@ impl TransactionService {
     }
     
     /// Returns the number of nonce accounts discovered and cached
+    #[cfg(feature = "rpc-client")]
     pub async fn discover_and_cache_nonce_accounts_by_authority(
         &self,
         authority_pubkey: &str,
@@ -1707,6 +1747,17 @@ impl TransactionService {
 
         Ok(cached_count)
     }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn discover_and_cache_nonce_accounts_by_authority(
+        &self,
+        _authority_pubkey: &str,
+        _bundle_file: Option<&str>,
+    ) -> Result<usize, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession to discover nonce accounts.".to_string()
+        ))
+    }
 
     /// Prepare multiple nonce accounts for offline use
     /// Smart bundle management: refreshes used nonces, creates new ones only when necessary
@@ -1722,6 +1773,7 @@ impl TransactionService {
     /// This saves money by reusing existing nonce accounts instead of creating new ones!
     /// 
     /// Returns an OfflineTransactionBundle ready to use
+    #[cfg(feature = "rpc-client")]
     pub async fn prepare_offline_bundle(
         &self,
         count: usize,
@@ -1838,6 +1890,18 @@ impl TransactionService {
         tracing::info!("   Available for offline transactions: {}", bundle.available_nonces());
 
         Ok(bundle)
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn prepare_offline_bundle(
+        &self,
+        _count: usize,
+        _sender_keypair: &Keypair,
+        _bundle_file: Option<&str>,
+    ) -> Result<OfflineTransactionBundle, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Prepare offline bundles on Android or desktop.".to_string()
+        ))
     }
 
     /// Create transaction completely offline using cached nonce data
@@ -2276,6 +2340,7 @@ impl TransactionService {
     /// Optionally verifies nonce is still valid before submission
     /// 
     /// Returns transaction signature if successful
+    #[cfg(feature = "rpc-client")]
     pub async fn submit_offline_transaction(
         &self,
         compressed_tx: &[u8],
@@ -2414,6 +2479,7 @@ impl TransactionService {
     /// to ensure the blockhash is fresh.
     /// 
     /// Returns: Base64-encoded unsigned transaction with fresh blockhash
+    #[cfg(feature = "rpc-client")]
     pub async fn refresh_blockhash_in_unsigned_transaction(
         &self,
         unsigned_tx_base64: &str,
@@ -2471,6 +2537,16 @@ impl TransactionService {
             updated_tx_bytes.len(), updated_tx_base64.len());
 
         Ok(updated_tx_base64)
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn refresh_blockhash_in_unsigned_transaction(
+        &self,
+        _unsigned_tx_base64: &str,
+    ) -> Result<String, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession to fetch fresh blockhash.".to_string()
+        ))
     }
 
     /// Process and relay a presigned custom transaction
@@ -2679,6 +2755,7 @@ impl TransactionService {
 
     /// Submit a transaction to Solana RPC
     /// Handles both compressed and uncompressed transactions
+    #[cfg(feature = "rpc-client")]
     pub async fn submit_to_solana(&self, transaction: &[u8]) -> Result<String, TransactionError> {
         let client = self.rpc_client.as_ref().ok_or_else(|| {
             TransactionError::RpcClient(
@@ -2743,6 +2820,13 @@ impl TransactionService {
         tracing::info!("✅ Transaction submitted successfully: {}", signature);
 
         Ok(signature.to_string())
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn submit_to_solana(&self, _transaction: &[u8]) -> Result<String, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession to submit transactions.".to_string()
+        ))
     }
 
     /// Broadcast confirmation after successful submission
@@ -2852,10 +2936,24 @@ impl TransactionService {
         tracing::info!("Final vote transaction size: {} bytes", compressed_tx.len());
         Ok(compressed_tx)
     }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn cast_vote(
+        &self,
+        _voter_keypair: &Keypair,
+        _vote_choice: &str,
+        _nonce_account: &str,
+        _nonce_authority: &Keypair,
+    ) -> Result<Vec<u8>, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession for nonce operations.".to_string()
+        ))
+    }
 
     /// Create and sign a new SPL token transfer transaction with durable nonce
     /// Creates a presigned SPL token transaction using a nonce account for longer lifetime
     /// Automatically derives Associated Token Accounts from wallet pubkeys and mint address
+    #[cfg(feature = "rpc-client")]
     pub async fn create_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -2978,6 +3076,21 @@ impl TransactionService {
 
         tracing::info!("Final SPL transaction size: {} bytes", compressed_tx.len());
         Ok(compressed_tx)
+    }
+    
+    #[cfg(not(feature = "rpc-client"))]
+    pub async fn create_spl_transaction(
+        &self,
+        _sender_keypair: &Keypair,
+        _recipient_wallet: &str,
+        _mint_address: &str,
+        _amount: u64,
+        _nonce_account: &str,
+        _nonce_authority: &Keypair,
+    ) -> Result<Vec<u8>, TransactionError> {
+        Err(TransactionError::RpcClient(
+            "RPC not available on iOS. Use native URLSession for nonce operations.".to_string()
+        ))
     }
 
     /// Build cast vote instruction (example governance use case)

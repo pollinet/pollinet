@@ -13,6 +13,7 @@ pub mod android;
 pub mod ios;
 pub mod types;
 pub mod runtime;
+#[cfg(feature = "android")]
 pub mod transport;
 
 #[cfg(feature = "android")]

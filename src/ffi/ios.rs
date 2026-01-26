@@ -24,7 +24,8 @@ use parking_lot::Mutex;
 use std::str::FromStr;
 
 use super::runtime;
-use super::transport::HostBleTransport;
+// Note: HostBleTransport not available on iOS (Android-only)
+// use super::transport::HostBleTransport;
 use super::types::*;
 
 #[cfg(feature = "ios")]
@@ -32,23 +33,20 @@ use solana_sdk::pubkey::Pubkey;
 
 // Global state for transport instances (same pattern as Android)
 #[cfg(feature = "ios")]
-lazy_static::lazy_static! {
-    static ref TRANSPORTS: Arc<Mutex<Vec<Arc<HostBleTransport>>>> = Arc::new(Mutex::new(Vec::new()));
-}
+// Note: TRANSPORTS not used on iOS (BLE transport is Android-only)
+// lazy_static::lazy_static! {
+//     static ref TRANSPORTS: Arc<Mutex<Vec<Arc<HostBleTransport>>>> = Arc::new(Mutex::new(Vec::new()));
+// }
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
-/// Get transport instance by handle
-#[cfg(feature = "ios")]
-fn get_transport(handle: i64) -> Result<Arc<HostBleTransport>, String> {
-    let transports = TRANSPORTS.lock();
-    if handle < 0 || handle as usize >= transports.len() {
-        return Err(format!("Invalid handle: {}", handle));
-    }
-    Ok(transports[handle as usize].clone())
-}
+// Note: get_transport not used on iOS (BLE transport is Android-only)
+// #[cfg(feature = "ios")]
+// fn get_transport(handle: i64) -> Result<Arc<HostBleTransport>, String> {
+//     Err("BLE transport not available on iOS".to_string())
+// }
 
 /// Create a C string result from a Rust Result<String, String>
 /// Returns a pointer to a heap-allocated C string (caller must free with pollinet_free_string)
@@ -225,10 +223,8 @@ pub extern "C" fn pollinet_init(
 
         tracing::info!("Step 6: Storing transport...");
         
-        let transport_arc = Arc::new(transport);
-        let mut transports = TRANSPORTS.lock();
-        transports.push(transport_arc);
-        let handle = (transports.len() - 1) as i64;
+        // iOS doesn't use transport handles (BLE is Android-only)
+        let handle = 0i64;
 
         tracing::info!("✅ PolliNet SDK initialized successfully with handle {}", handle);
         Ok(handle)
@@ -264,11 +260,8 @@ pub extern "C" fn pollinet_version() -> *mut c_char {
 #[cfg(feature = "ios")]
 #[no_mangle]
 pub extern "C" fn pollinet_shutdown(handle: i64) {
-    let transports = TRANSPORTS.lock();
-    if handle >= 0 && (handle as usize) < transports.len() {
-        // Just mark as None; we'll keep the Vec stable for other handles
-        tracing::info!("🛑 Shutting down SDK handle {}", handle);
-    }
+    // iOS doesn't use transport handles (BLE is Android-only)
+    tracing::info!("🛑 Shutting down SDK handle {}", handle);
 }
 
 // =============================================================================
@@ -292,7 +285,8 @@ pub extern "C" fn pollinet_push_inbound(
     data_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let data_vec = unsafe { c_bytes_to_vec(data, data_len) };
 
         transport.push_inbound(data_vec)?;
@@ -323,7 +317,8 @@ pub extern "C" fn pollinet_next_outbound(
     out_len: *mut usize,
 ) -> c_int {
     let result: Result<Option<Vec<u8>>, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         Ok(transport.next_outbound(max_len))
     })();
 
@@ -373,7 +368,8 @@ pub extern "C" fn pollinet_tick(
     now_ms: i64,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let frames = transport.tick(now_ms as u64);
         
         // Encode frames as JSON array of base64 strings
@@ -400,7 +396,8 @@ pub extern "C" fn pollinet_metrics(
     handle: i64,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let metrics = transport.metrics();
         
         let response: FfiResult<MetricsSnapshot> = FfiResult::success(metrics);
@@ -425,7 +422,8 @@ pub extern "C" fn pollinet_clear_transaction(
     tx_id: *const c_char,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let tx_id_str = unsafe { c_str_to_string(tx_id)? };
 
         transport.clear_transaction(&tx_id_str);
@@ -458,7 +456,8 @@ pub extern "C" fn pollinet_create_unsigned_transaction(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: CreateUnsignedTransactionRequest =
@@ -519,7 +518,8 @@ pub extern "C" fn pollinet_create_unsigned_spl_transaction(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: CreateUnsignedSplTransactionRequest =
@@ -582,7 +582,8 @@ pub extern "C" fn pollinet_cast_unsigned_vote(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: CastUnsignedVoteRequest =
@@ -730,7 +731,8 @@ pub extern "C" fn pollinet_apply_signature(
     signature_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         
         let tx_str = unsafe { c_str_to_string(base64_tx)? };
         let pubkey_str = unsafe { c_str_to_string(signer_pubkey)? };
@@ -843,7 +845,8 @@ pub extern "C" fn pollinet_fragment(
     max_payload: i64,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let tx_data = unsafe { c_bytes_to_vec(tx_bytes, tx_bytes_len) };
         
         let max_payload_opt = if max_payload > 0 {
@@ -883,7 +886,8 @@ pub extern "C" fn pollinet_prepare_offline_bundle(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: PrepareOfflineBundleRequest =
@@ -1003,7 +1007,8 @@ pub extern "C" fn pollinet_create_offline_transaction(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: CreateOfflineTransactionRequest =
@@ -1096,7 +1101,8 @@ pub extern "C" fn pollinet_submit_offline_transaction(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: SubmitOfflineTransactionRequest =
@@ -1145,7 +1151,8 @@ pub extern "C" fn pollinet_create_unsigned_offline_transaction(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: CreateUnsignedOfflineTransactionRequest =
@@ -1227,7 +1234,8 @@ pub extern "C" fn pollinet_create_unsigned_offline_spl_transaction(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Parse request
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
@@ -1338,7 +1346,8 @@ pub extern "C" fn pollinet_get_transaction_message_to_sign(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: GetMessageToSignRequest =
@@ -1383,7 +1392,8 @@ pub extern "C" fn pollinet_get_required_signers(
     request_len: usize,
 ) -> *mut c_char {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         let request: GetRequiredSignersRequest =
@@ -1441,7 +1451,8 @@ pub extern "C" fn pollinet_create_unsigned_nonce_transactions(
         tracing::debug!("📥 Request data size: {} bytes", request_data.len());
 
         // Get transport
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Parse request
         let request: CreateUnsignedNonceTransactionsRequest =
@@ -1508,7 +1519,8 @@ pub extern "C" fn pollinet_cache_nonce_accounts(
         let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
 
         // Get transport
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Parse request
         let request: CacheNonceAccountsRequest =
@@ -1596,7 +1608,8 @@ pub extern "C" fn pollinet_refresh_offline_bundle(
     let result: Result<String, String> = (|| {
         tracing::info!("♻️  FFI refreshOfflineBundle called with handle={}", handle);
 
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let refreshed_count = runtime::block_on(async {
             if let Some(secure_storage) = transport.secure_storage() {
@@ -1705,7 +1718,8 @@ pub extern "C" fn pollinet_get_available_nonce(
         tracing::info!("🔍 FFI getAvailableNonce called with handle={}", handle);
 
         // Get transport
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Get secure storage
         let storage = transport.secure_storage()
@@ -1901,7 +1915,8 @@ pub extern "C" fn pollinet_refresh_blockhash_in_unsigned_transaction(
     let result = (|| -> Result<String, String> {
         tracing::info!("🔄 FFI refreshBlockhashInUnsignedTransaction called with handle={}", handle);
 
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Get the base64 string from C string
         let tx_base64_str = unsafe { c_str_to_string(unsigned_tx_base64)? };
@@ -1953,38 +1968,8 @@ pub extern "C" fn pollinet_fragment_transaction(
         
         tracing::info!("Fragmenting transaction of {} bytes", tx_bytes.len());
         
-        // Fragment the transaction
-        let fragments = crate::ble::fragment_transaction(&tx_bytes);
-        
-        // Convert fragments to FFI-friendly format
-        #[derive(serde::Serialize)]
-        struct FragmentData {
-            #[serde(rename = "transactionId")]
-            transaction_id: String,
-            #[serde(rename = "fragmentIndex")]
-            fragment_index: u16,
-            #[serde(rename = "totalFragments")]
-            total_fragments: u16,
-            #[serde(rename = "dataBase64")]
-            data_base64: String,
-        }
-        
-        let fragment_data: Vec<FragmentData> = fragments.iter().map(|f| {
-            FragmentData {
-                transaction_id: hex::encode(&f.transaction_id),
-                fragment_index: f.fragment_index,
-                total_fragments: f.total_fragments,
-                data_base64: {
-                    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-                    BASE64.encode(&f.data)
-                },
-            }
-        }).collect();
-        
-        tracing::info!("✅ Created {} fragments", fragment_data.len());
-        
-        let response: FfiResult<Vec<FragmentData>> = FfiResult::success(fragment_data);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        // BLE not available on iOS
+        Err("BLE operations not available on iOS. Use CoreBluetooth directly from Swift.".to_string())
     })();
     
     create_result_string(result)
@@ -2023,45 +2008,13 @@ pub extern "C" fn pollinet_reconstruct_transaction(
             data_base64: String,
         }
         
-        let fragment_data: Vec<FragmentData> = serde_json::from_slice(&json_data)
+        let _fragment_data: Vec<FragmentData> = serde_json::from_slice(&json_data)
             .map_err(|e| format!("Failed to parse fragments JSON: {}", e))?;
         
-        tracing::info!("Reconstructing from {} fragments", fragment_data.len());
+        tracing::info!("Reconstructing from fragments");
         
-        // Convert to internal fragment format
-        let fragments: Vec<crate::ble::mesh::TransactionFragment> = fragment_data.iter().map(|f| {
-            let mut tx_id = [0u8; 32];
-            let tx_id_bytes = hex::decode(&f.transaction_id)
-                .map_err(|e| format!("Invalid transaction ID: {}", e))?;
-            if tx_id_bytes.len() != 32 {
-                return Err(format!("Invalid transaction ID length: expected 32, got {}", tx_id_bytes.len()));
-            }
-            tx_id.copy_from_slice(&tx_id_bytes);
-            
-            use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-            let data = BASE64.decode(&f.data_base64)
-                .map_err(|e| format!("Invalid fragment data: {}", e))?;
-            
-            Ok(crate::ble::mesh::TransactionFragment {
-                transaction_id: tx_id,
-                fragment_index: f.fragment_index,
-                total_fragments: f.total_fragments,
-                data,
-            })
-        }).collect::<Result<Vec<_>, String>>()?;
-        
-        // Reconstruct the transaction
-        let reconstructed = crate::ble::reconstruct_transaction(&fragments)
-            .map_err(|e| format!("Reconstruction failed: {}", e))?;
-        
-        tracing::info!("✅ Reconstructed transaction: {} bytes", reconstructed.len());
-        
-        // Return base64-encoded transaction
-        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-        let tx_base64 = BASE64.encode(&reconstructed);
-        
-        let response: FfiResult<String> = FfiResult::success(tx_base64);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        // BLE operations not available on iOS
+        Err("BLE operations not available on iOS. Use CoreBluetooth directly from Swift.".to_string())
     })();
     
     create_result_string(result)
@@ -2086,7 +2039,7 @@ pub extern "C" fn pollinet_get_fragmentation_stats(
         
         let tx_bytes = unsafe { c_bytes_to_vec(transaction_bytes, transaction_len) };
         
-        let stats = crate::ble::FragmentationStats::calculate(&tx_bytes);
+        return Err("BLE operations not available on iOS. Use CoreBluetooth directly from Swift.".to_string());
         
         #[derive(serde::Serialize)]
         struct StatsResponse {
@@ -2103,17 +2056,6 @@ pub extern "C" fn pollinet_get_fragmentation_stats(
             efficiency: f32,
         }
         
-        let stats_response = StatsResponse {
-            original_size: stats.original_size,
-            fragment_count: stats.fragment_count,
-            max_fragment_size: stats.max_fragment_size,
-            avg_fragment_size: stats.avg_fragment_size,
-            total_overhead: stats.total_overhead,
-            efficiency: stats.efficiency,
-        };
-        
-        let response: FfiResult<StatsResponse> = FfiResult::success(stats_response);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
     
     create_result_string(result)
@@ -2222,20 +2164,15 @@ pub extern "C" fn pollinet_get_health_snapshot(
     let result = (|| -> Result<String, String> {
         tracing::info!("💚 FFI getHealthSnapshot called");
 
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let monitor = transport.health_monitor();
         let snapshot = monitor.get_snapshot();
 
         tracing::info!("✅ Health snapshot: {} peers, health score: {}", 
             snapshot.metrics.total_peers, snapshot.metrics.health_score);
 
-        #[derive(serde::Serialize)]
-        struct HealthSnapshotResponse {
-            snapshot: crate::ble::HealthSnapshot,
-        }
-
-        let response: FfiResult<HealthSnapshotResponse> = FfiResult::success(HealthSnapshotResponse { snapshot });
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        Err("BLE health monitoring not available on iOS. Use CoreBluetooth directly from Swift.".to_string())
     })();
 
     create_result_string(result)
@@ -2260,7 +2197,8 @@ pub extern "C" fn pollinet_record_peer_heartbeat(
 
         let peer_id_str = unsafe { c_str_to_string(peer_id)? };
 
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let monitor = transport.health_monitor();
         monitor.record_heartbeat(&peer_id_str);
 
@@ -2299,7 +2237,8 @@ pub extern "C" fn pollinet_record_peer_latency(
 
         let peer_id_str = unsafe { c_str_to_string(peer_id)? };
 
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let monitor = transport.health_monitor();
         monitor.record_latency(&peer_id_str, latency_ms as u32);
 
@@ -2338,7 +2277,8 @@ pub extern "C" fn pollinet_record_peer_rssi(
 
         let peer_id_str = unsafe { c_str_to_string(peer_id)? };
 
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let monitor = transport.health_monitor();
         monitor.record_rssi(&peer_id_str, rssi as i8);
 
@@ -2379,7 +2319,8 @@ pub extern "C" fn pollinet_push_received_transaction(
     let result: Result<String, String> = (|| {
         let tx_bytes = unsafe { c_bytes_to_vec(transaction_bytes, transaction_len) };
         
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let added = transport.push_received_transaction(tx_bytes);
         
         #[derive(serde::Serialize)]
@@ -2411,7 +2352,8 @@ pub extern "C" fn pollinet_next_received_transaction(
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
         tracing::debug!("🔍 FFI nextReceivedTransaction called with handle: {}", handle);
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         tracing::debug!("✅ Got transport instance for handle {}", handle);
         
         let queue_size_before = transport.received_queue_size();
@@ -2469,7 +2411,8 @@ pub extern "C" fn pollinet_get_received_queue_size(
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
         tracing::debug!("🔍 FFI getReceivedQueueSize called with handle: {}", handle);
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         tracing::debug!("✅ Got transport instance for handle {}", handle);
         
         let queue_size = transport.received_queue_size();
@@ -2503,7 +2446,8 @@ pub extern "C" fn pollinet_get_fragment_reassembly_info(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let info_list = transport.get_fragment_reassembly_info();
         
         let response: FfiResult<FragmentReassemblyInfoList> = FfiResult::success(
@@ -2536,7 +2480,8 @@ pub extern "C" fn pollinet_mark_transaction_submitted(
     let result: Result<String, String> = (|| {
         let tx_bytes = unsafe { c_bytes_to_vec(transaction_bytes, transaction_len) };
         
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         transport.mark_transaction_submitted(&tx_bytes);
         
         #[derive(serde::Serialize)]
@@ -2564,7 +2509,8 @@ pub extern "C" fn pollinet_cleanup_old_submissions(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         transport.cleanup_old_submissions();
         
         #[derive(serde::Serialize)]
@@ -2596,7 +2542,8 @@ pub extern "C" fn pollinet_debug_outbound_queue(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let queue_info = transport.outbound_queue_debug();
 
         #[derive(serde::Serialize)]
@@ -2646,7 +2593,8 @@ pub extern "C" fn pollinet_save_queues(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         runtime::block_on(async {
             // Save queue manager queues (outbound, retry, confirmation)
@@ -2689,7 +2637,8 @@ pub extern "C" fn pollinet_auto_save_queues(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         runtime::block_on(async {
             // Auto-save queue manager queues (outbound, retry, confirmation)
@@ -2735,7 +2684,8 @@ pub extern "C" fn pollinet_push_outbound_transaction(
     request_json: *const c_char,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_str = unsafe { c_str_to_string(request_json)? };
 
         let request: PushOutboundRequest = serde_json::from_str(&request_str)
@@ -2819,7 +2769,8 @@ pub extern "C" fn pollinet_pop_outbound_transaction(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let tx_opt = runtime::block_on(async {
             let mut queue = transport.sdk.queue_manager().outbound.write().await;
@@ -2865,7 +2816,8 @@ pub extern "C" fn pollinet_get_outbound_queue_size(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let size = runtime::block_on(async {
             let queue = transport.sdk.queue_manager().outbound.read().await;
@@ -2900,7 +2852,8 @@ pub extern "C" fn pollinet_add_to_retry_queue(
     request_json: *const c_char,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
         let request_str = unsafe { c_str_to_string(request_json)? };
 
         let request: AddToRetryRequest = serde_json::from_str(&request_str)
@@ -2948,7 +2901,8 @@ pub extern "C" fn pollinet_pop_ready_retry(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let retry_opt = runtime::block_on(async {
             let mut queue = transport.sdk.queue_manager().retries.write().await;
@@ -2990,7 +2944,8 @@ pub extern "C" fn pollinet_get_retry_queue_size(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let size = runtime::block_on(async {
             let queue = transport.sdk.queue_manager().retries.read().await;
@@ -3023,7 +2978,8 @@ pub extern "C" fn pollinet_cleanup_expired(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let (confirmations_cleaned, retries_cleaned) = runtime::block_on(async {
             let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
@@ -3068,7 +3024,8 @@ pub extern "C" fn pollinet_queue_confirmation(
     request_json: *const c_char,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Parse request JSON
         let request_str = unsafe { c_str_to_string(request_json)? };
@@ -3136,7 +3093,8 @@ pub extern "C" fn pollinet_pop_confirmation(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         let confirmation = runtime::block_on(async {
             let mut conf_queue = transport.sdk.queue_manager().confirmations.write().await;
@@ -3192,7 +3150,8 @@ pub extern "C" fn pollinet_cleanup_stale_fragments(
     handle: i64,
 ) -> *mut c_char {
     let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
+        // iOS doesn't use transport - return error
+        return Err("Transport operations not available on iOS. This function requires the full SDK.".to_string());
 
         // Cleanup stale fragments (older than 5 minutes = 300 seconds)
         // cleanup_stale_fragments is on TransactionCache, accessed via SDK's local_cache

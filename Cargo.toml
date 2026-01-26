@@ -13,9 +13,9 @@ base64 = "0.22.1"
 bincode = "2.0.1"
 bincode1 = { package = "bincode", version = "1.3" }
 bs58 = "0.5"
-btleplug = "0.11.8"
+btleplug = { version = "0.11.8", optional = true }
 uuid = { version = "1.0", features = ["v4", "serde"] }
-config = "0.15.13"
+config = { version = "0.15.13", optional = true }
 dotenv = "0.15.0"
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -23,17 +23,20 @@ serde_json = "1.0"
 lz4 = "1.24"
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
-solana-account-decoder = "2.3.0"
-solana-client = "2.3.0"
-solana-sdk = "2.3.0"
-solana-program = "2.3.0"
-spl-associated-token-account = { version = "4.0", features = ["no-entrypoint"] }
-spl-token = { version = "4.0", features = ["no-entrypoint"] }
+solana-account-decoder = { version = "2.3.0", optional = true }
+solana-client = { version = "2.3.0", optional = true }
+# iOS: enable full feature for signature and transaction types
+solana-sdk = { version = "2.3.0", default-features = false, features = ["full"] }
+solana-program = { version = "2.3.0", default-features = false }
+spl-associated-token-account = { version = "4.0", default-features = false, features = ["no-entrypoint"] }
+spl-token = { version = "4.0", default-features = false, features = ["no-entrypoint"] }
 thiserror = "2.0.12"
-tokio = { version = "1.46.1", features = ["full", "signal"] }
+tokio = { version = "1.46.1", features = ["rt-multi-thread", "sync", "time", "macros", "io-util", "fs", "net"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3"
 rand = "0.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
 bluer = { version = "0.16", optional = true, features = ["bluetoothd"] }
 async-trait = "0.1"
 futures = "0.3"
@@ -47,19 +50,23 @@ lazy_static = "1.4"
 log = "0.4"
 android_logger = { version = "0.14", optional = true }
 
-# OpenSSL for Android (vendored to avoid system dependency issues)
-openssl = { version = "0.10", features = ["vendored"], optional = true }
-
 [features]
-default = ["linux"]
-linux = ["bluer"]
-macos = []  # Uses btleplug (already in dependencies, Central role only)
-windows = []
-android = ["jni", "openssl", "android_logger"]
+default = ["rpc-client", "ble", "config-file"]
+linux = ["ble"]
+macos = ["ble"]
+windows = ["ble"]
+android = ["jni", "android_logger", "rpc-client", "ble", "config-file"]
 ios = []
+rpc-client = ["solana-client", "solana-account-decoder"]
+ble = ["btleplug"]
+config-file = ["config"]
 
-[target.'cfg(target_os = "android")'.dependencies]
-# Android-specific dependencies are already in main dependencies with jni feature flag
+# Platform-specific OpenSSL configuration
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
 tempfile = "3.8"
