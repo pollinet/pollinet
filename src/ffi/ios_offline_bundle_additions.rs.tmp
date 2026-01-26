@@ -1,0 +1,141 @@
+/// Create offline transaction using cached nonce data
+/// NO internet required - core PolliNet offline feature
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `request_json` - JSON request bytes
+/// * `request_len` - Length of request bytes
+/// 
+/// # Returns
+/// JSON result string containing base64-encoded transaction (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_create_offline_transaction(
+    handle: i64,
+    request_json: *const u8,
+    request_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
+
+        let request: CreateOfflineTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        // Parse keypairs
+        let sender_bytes = base64::decode(&request.sender_keypair_base64)
+            .map_err(|e| format!("Invalid sender keypair: {}", e))?;
+        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&sender_bytes)
+            .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
+
+        let authority_bytes = base64::decode(&request.nonce_authority_keypair_base64)
+            .map_err(|e| format!("Invalid authority keypair: {}", e))?;
+        let authority_keypair = solana_sdk::signature::Keypair::from_bytes(&authority_bytes)
+            .map_err(|e| format!("Invalid authority keypair bytes: {}", e))?;
+
+        tracing::info!("📴 Creating OFFLINE transaction (no internet required)");
+
+        // Load bundle from secure storage
+        let storage = transport.secure_storage()
+            .ok_or_else(|| "Secure storage not configured".to_string())?;
+        
+        let mut bundle = storage.load_bundle()
+            .map_err(|e| format!("Failed to load bundle: {}", e))?
+            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+        
+        tracing::info!("📂 Loaded bundle: {} total nonces, {} available", 
+            bundle.nonce_caches.len(), bundle.available_nonces());
+        
+        // Find first available (unused) nonce
+        let nonce_to_use = bundle.nonce_caches.iter_mut()
+            .find(|n| !n.used)
+            .ok_or_else(|| "No available nonces - all have been used. Call prepareOfflineBundle to refresh.".to_string())?;
+        
+        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+        tracing::info!("   Blockhash: {}", nonce_to_use.blockhash);
+        
+        // Clone the nonce data before marking as used (for transaction creation)
+        let cached_nonce = nonce_to_use.clone();
+        
+        // Mark nonce as used BEFORE creating transaction
+        nonce_to_use.used = true;
+        tracing::info!("✅ Marked nonce as used");
+        
+        // Save updated bundle immediately
+        storage.save_bundle(&bundle)
+            .map_err(|e| format!("Failed to save bundle: {}", e))?;
+        tracing::info!("💾 Bundle saved with updated nonce status");
+        tracing::info!("   Available nonces remaining: {}", bundle.available_nonces());
+
+        // Create transaction offline using the selected nonce
+        let compressed_tx = transport
+            .transaction_service()
+            .create_offline_transaction(
+                &sender_keypair,
+                &request.recipient,
+                request.amount,
+                &authority_keypair,
+                &cached_nonce,
+            )
+            .map_err(|e| format!("Failed to create offline transaction: {}", e))?;
+
+        tracing::info!("✅ Offline transaction created: {} bytes", compressed_tx.len());
+
+        // Encode to base64
+        let tx_base64 = base64::encode(&compressed_tx);
+
+        let response: FfiResult<String> = FfiResult::success(tx_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
+
+/// Submit offline-created transaction to blockchain
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `request_json` - JSON request bytes
+/// * `request_len` - Length of request bytes
+/// 
+/// # Returns
+/// JSON result string containing transaction signature (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_submit_offline_transaction(
+    handle: i64,
+    request_json: *const u8,
+    request_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
+
+        let request: SubmitOfflineTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        // Decode transaction from base64
+        let tx_bytes = base64::decode(&request.transaction_base64)
+            .map_err(|e| format!("Invalid transaction base64: {}", e))?;
+
+        tracing::info!("Submitting offline transaction to blockchain");
+
+        // Submit transaction
+        let signature = runtime::block_on(async {
+            transport
+                .transaction_service()
+                .submit_offline_transaction(&tx_bytes, request.verify_nonce)
+                .await
+        })
+        .map_err(|e| format!("Failed to submit transaction: {}", e))?;
+
+        tracing::info!("✅ Transaction submitted: {}", signature);
+
+        let response: FfiResult<String> = FfiResult::success(signature);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}

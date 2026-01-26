@@ -1,0 +1,221 @@
+// =============================================================================
+// Signature Operations
+// =============================================================================
+
+/// Prepare sign payload - Extract message bytes that need to be signed
+/// 
+/// # Arguments
+/// * `base64_tx` - Base64-encoded transaction (C string, null-terminated)
+/// * `out_payload` - Output buffer for payload bytes (must be large enough)
+/// * `out_len` - Output parameter for actual payload length
+/// 
+/// # Returns
+/// 1 if successful and payload written to out_payload, 0 on error
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_prepare_sign_payload(
+    base64_tx: *const c_char,
+    out_payload: *mut u8,
+    out_len: *mut usize,
+) -> c_int {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    
+    let result: Result<Vec<u8>, String> = (|| {
+        let tx_str = unsafe { c_str_to_string(base64_tx)? };
+
+        // Decode from base64
+        let tx_bytes = BASE64
+            .decode(&tx_str)
+            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+        // Deserialize transaction
+        let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)
+            .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
+
+        // Serialize the message (this is what needs to be signed)
+        let message_bytes = bincode1::serialize(&tx.message)
+            .map_err(|e| format!("Failed to serialize message: {}", e))?;
+
+        tracing::info!("✅ Prepared sign payload: {} bytes", message_bytes.len());
+        Ok(message_bytes)
+    })();
+
+    match result {
+        Ok(payload) => {
+            // Check if output buffer is large enough
+            let payload_len = payload.len();
+            unsafe {
+                if out_payload.is_null() || out_len.is_null() {
+                    tracing::error!("prepare_sign_payload: null output parameters");
+                    return 0;
+                }
+                // Assume caller provides enough space (they should check returned length)
+                ptr::copy_nonoverlapping(payload.as_ptr(), out_payload, payload_len);
+                *out_len = payload_len;
+            }
+            1
+        }
+        Err(e) => {
+            tracing::error!("prepare_sign_payload error: {}", e);
+            unsafe {
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+            }
+            0
+        }
+    }
+}
+
+/// Apply signature to unsigned transaction
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `base64_tx` - Base64-encoded unsigned transaction (C string, null-terminated)
+/// * `signer_pubkey` - Signer public key (C string, null-terminated)
+/// * `signature_bytes` - Signature bytes (64 bytes)
+/// * `signature_len` - Length of signature bytes (must be 64)
+/// 
+/// # Returns
+/// JSON result string containing signed transaction (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_apply_signature(
+    handle: i64,
+    base64_tx: *const c_char,
+    signer_pubkey: *const c_char,
+    signature_bytes: *const u8,
+    signature_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        
+        let tx_str = unsafe { c_str_to_string(base64_tx)? };
+        let pubkey_str = unsafe { c_str_to_string(signer_pubkey)? };
+        let sig_bytes = unsafe { c_bytes_to_vec(signature_bytes, signature_len) };
+
+        // Parse pubkey
+        let pubkey = Pubkey::from_str(&pubkey_str)
+            .map_err(|e| format!("Invalid signer pubkey: {}", e))?;
+
+        // Convert signature bytes to Solana signature
+        if sig_bytes.len() != 64 {
+            return Err(format!("Invalid signature length: expected 64, got {}", sig_bytes.len()));
+        }
+        let mut sig_array = [0u8; 64];
+        sig_array.copy_from_slice(&sig_bytes);
+        let signature = solana_sdk::signature::Signature::from(sig_array);
+
+        // Apply signature
+        let updated_tx = transport
+            .transaction_service()
+            .add_signature(&tx_str, &pubkey, &signature)
+            .map_err(|e| format!("Failed to apply signature: {}", e))?;
+
+        tracing::info!("✅ Applied signature for {}", pubkey_str);
+        
+        let response: FfiResult<String> = FfiResult::success(updated_tx);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
+
+/// Verify and serialize transaction for submission
+/// 
+/// # Arguments
+/// * `base64_tx` - Base64-encoded transaction (C string, null-terminated)
+/// 
+/// # Returns
+/// JSON result string containing serialized transaction (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_verify_and_serialize(
+    base64_tx: *const c_char,
+) -> *mut c_char {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    
+    let result = (|| {
+        let tx_str = unsafe { c_str_to_string(base64_tx)? };
+
+        // Decode from base64
+        let tx_bytes = BASE64
+            .decode(&tx_str)
+            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+        // Deserialize transaction
+        let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)
+            .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
+
+        // Verify transaction has valid signatures
+        let valid_sigs = tx
+            .signatures
+            .iter()
+            .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
+            .count();
+
+        if valid_sigs == 0 {
+            return Err("Transaction has no valid signatures".to_string());
+        }
+
+        tracing::info!("✅ Transaction verified: {}/{} valid signatures", valid_sigs, tx.signatures.len());
+
+        // Serialize for submission (bincode1 format)
+        let wire_tx = bincode1::serialize(&tx)
+            .map_err(|e| format!("Failed to serialize transaction: {}", e))?;
+
+        // Return as base64 for consistency
+        let wire_tx_base64 = BASE64.encode(&wire_tx);
+        
+        tracing::info!("Transaction ready for submission: {} bytes", wire_tx.len());
+        
+        let response: FfiResult<String> = FfiResult::success(wire_tx_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
+
+// =============================================================================
+// Fragmentation API
+// =============================================================================
+
+/// Fragment a transaction for BLE transmission
+/// 
+/// Optionally accepts max_payload (MTU - 10) for MTU-aware fragmentation
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `tx_bytes` - Transaction bytes
+/// * `tx_bytes_len` - Length of transaction bytes
+/// * `max_payload` - Maximum payload size (0 = use default)
+/// 
+/// # Returns
+/// JSON result string containing fragment list (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_fragment(
+    handle: i64,
+    tx_bytes: *const u8,
+    tx_bytes_len: usize,
+    max_payload: i64,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let tx_data = unsafe { c_bytes_to_vec(tx_bytes, tx_bytes_len) };
+        
+        let max_payload_opt = if max_payload > 0 {
+            Some(max_payload as usize)
+        } else {
+            None
+        };
+
+        let fragments = transport.queue_transaction(tx_data, max_payload_opt)?;
+        
+        let fragment_list = FragmentList { fragments };
+        let response: FfiResult<FragmentList> = FfiResult::success(fragment_list);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}

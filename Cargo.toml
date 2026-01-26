@@ -56,6 +56,7 @@ linux = ["bluer"]
 macos = []  # Uses btleplug (already in dependencies, Central role only)
 windows = []
 android = ["jni", "openssl", "android_logger"]
+ios = []
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Android-specific dependencies are already in main dependencies with jni feature flag

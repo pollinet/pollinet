@@ -1,0 +1,294 @@
+/// Create UNSIGNED offline transaction for MWA signing
+/// Takes PUBLIC KEYS only (no private keys) - MWA-compatible
+/// Returns unsigned transaction that MWA/Seed Vault can sign
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `request_json` - JSON request bytes
+/// * `request_len` - Length of request bytes
+/// 
+/// # Returns
+/// JSON result string containing base64-encoded unsigned transaction (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_create_unsigned_offline_transaction(
+    handle: i64,
+    request_json: *const u8,
+    request_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
+
+        let request: CreateUnsignedOfflineTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("🔓 Creating UNSIGNED offline transaction for MWA");
+        tracing::info!("   Sender pubkey: {}", request.sender_pubkey);
+        tracing::info!("   NO private keys involved - MWA will sign");
+
+        // Load bundle from secure storage
+        let storage = transport.secure_storage()
+            .ok_or_else(|| "Secure storage not configured".to_string())?;
+        
+        let mut bundle = storage.load_bundle()
+            .map_err(|e| format!("Failed to load bundle: {}", e))?
+            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+        
+        tracing::info!("📂 Loaded bundle: {} total nonces, {} available", 
+            bundle.nonce_caches.len(), bundle.available_nonces());
+        
+        // Find first available (unused) nonce
+        let nonce_to_use = bundle.nonce_caches.iter_mut()
+            .find(|n| !n.used)
+            .ok_or_else(|| "No available nonces - all have been used. Call prepareOfflineBundle to refresh.".to_string())?;
+        
+        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+        
+        // Clone the nonce data before marking as used
+        let cached_nonce = nonce_to_use.clone();
+        
+        // Mark nonce as used BEFORE creating transaction
+        nonce_to_use.used = true;
+        tracing::info!("✅ Marked nonce as used");
+        
+        // Save updated bundle immediately
+        storage.save_bundle(&bundle)
+            .map_err(|e| format!("Failed to save bundle: {}", e))?;
+        tracing::info!("💾 Bundle saved with updated nonce status");
+        tracing::info!("   Available nonces remaining: {}", bundle.available_nonces());
+
+        // Use provided nonce data if available, otherwise use bundle nonce
+        let cached_nonce_to_use = if let Some(ref ffi_nonce) = request.nonce_data {
+            crate::transaction::CachedNonceData {
+                nonce_account: ffi_nonce.nonce_account.clone(),
+                authority: ffi_nonce.authority.clone(),
+                blockhash: ffi_nonce.blockhash.clone(),
+                lamports_per_signature: ffi_nonce.lamports_per_signature,
+                cached_at: ffi_nonce.cached_at,
+                used: ffi_nonce.used,
+            }
+        } else {
+            cached_nonce
+        };
+
+        // Create UNSIGNED transaction
+        let unsigned_tx = transport
+            .transaction_service()
+            .create_unsigned_offline_transaction(
+                &request.sender_pubkey,
+                &request.recipient,
+                request.amount,
+                &request.nonce_authority_pubkey,
+                &cached_nonce_to_use,
+            )
+            .map_err(|e| format!("Failed to create unsigned transaction: {}", e))?;
+
+        tracing::info!("✅ Unsigned transaction created for MWA signing");
+        tracing::info!("   Transaction ready for Seed Vault signature");
+
+        let response: FfiResult<String> = FfiResult::success(unsigned_tx);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
+
+/// Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing
+/// Uses cached nonce data from the offline bundle (no RPC required).
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `request_json` - JSON request bytes
+/// * `request_len` - Length of request bytes
+/// 
+/// # Returns
+/// JSON result string containing base64-encoded unsigned transaction (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_create_unsigned_offline_spl_transaction(
+    handle: i64,
+    request_json: *const u8,
+    request_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+
+        // Parse request
+        let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
+
+        let request: CreateUnsignedOfflineSplTransactionRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("🔓 Creating UNSIGNED offline SPL transaction for MWA");
+        tracing::info!("   Sender wallet: {}", request.sender_wallet);
+        tracing::info!("   Recipient wallet: {}", request.recipient_wallet);
+
+        // Get nonce data: use provided cached data, or get from bundle
+        let cached_nonce = if let Some(ref ffi_nonce) = request.nonce_data {
+            // Use provided nonce data
+            tracing::info!("Using provided cached nonce data");
+            crate::transaction::CachedNonceData {
+                nonce_account: ffi_nonce.nonce_account.clone(),
+                authority: ffi_nonce.authority.clone(),
+                blockhash: ffi_nonce.blockhash.clone(),
+                lamports_per_signature: ffi_nonce.lamports_per_signature,
+                cached_at: ffi_nonce.cached_at,
+                used: ffi_nonce.used,
+            }
+        } else {
+            // Load bundle from secure storage and get available nonce
+            let storage = transport
+                .secure_storage()
+                .ok_or_else(|| "Secure storage not configured".to_string())?;
+
+            let mut bundle = storage
+                .load_bundle()
+                .map_err(|e| format!("Failed to load bundle: {}", e))?
+                .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
+
+            tracing::info!(
+                "📂 Loaded bundle: {} total nonces, {} available",
+                bundle.nonce_caches.len(),
+                bundle.available_nonces()
+            );
+
+            // Find first available (unused) nonce
+            let nonce_to_use = bundle
+                .nonce_caches
+                .iter_mut()
+                .find(|n| !n.used)
+                .ok_or_else(|| {
+                    "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
+                        .to_string()
+                })?;
+
+            tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
+
+            // Clone the nonce data
+            let cached_nonce = nonce_to_use.clone();
+
+            // Mark as used and save bundle
+            nonce_to_use.used = true;
+            storage
+                .save_bundle(&bundle)
+                .map_err(|e| format!("Failed to save bundle: {}", e))?;
+
+            tracing::info!(
+                "💾 Bundle saved (available nonces remaining: {})",
+                bundle.available_nonces()
+            );
+            
+            cached_nonce
+        };
+
+        // Create UNSIGNED offline SPL transaction
+        let unsigned_tx = transport
+            .transaction_service()
+            .create_unsigned_offline_spl_transaction(
+                &request.sender_wallet,
+                &request.recipient_wallet,
+                &request.fee_payer,
+                &request.mint_address,
+                request.amount,
+                &cached_nonce,
+            )
+            .map_err(|e| format!("Failed to create unsigned offline SPL transaction: {}", e))?;
+
+        tracing::info!("✅ Unsigned offline SPL transaction created for MWA signing");
+
+        let response: FfiResult<String> = FfiResult::success(unsigned_tx);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
+
+/// Get the message bytes that need to be signed by MWA
+/// Extracts the raw message from unsigned transaction for MWA/Seed Vault
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `request_json` - JSON request bytes
+/// * `request_len` - Length of request bytes
+/// 
+/// # Returns
+/// JSON result string containing base64-encoded message bytes (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_get_transaction_message_to_sign(
+    handle: i64,
+    request_json: *const u8,
+    request_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
+
+        let request: GetMessageToSignRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("📝 Extracting message to sign for MWA");
+
+        // Get message bytes
+        let message_bytes = transport
+            .transaction_service()
+            .get_transaction_message_to_sign(&request.unsigned_transaction_base64)
+            .map_err(|e| format!("Failed to extract message: {}", e))?;
+
+        // Encode to base64 for transport
+        let message_base64 = base64::encode(&message_bytes);
+
+        tracing::info!("✅ Message extracted: {} bytes", message_bytes.len());
+
+        let response: FfiResult<String> = FfiResult::success(message_base64);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
+
+/// Get list of public keys that need to sign this transaction
+/// Returns array of public key strings in signing order
+/// 
+/// # Arguments
+/// * `handle` - SDK handle
+/// * `request_json` - JSON request bytes
+/// * `request_len` - Length of request bytes
+/// 
+/// # Returns
+/// JSON result string containing array of signer pubkeys (must be freed with pollinet_free_string)
+#[cfg(feature = "ios")]
+#[no_mangle]
+pub extern "C" fn pollinet_get_required_signers(
+    handle: i64,
+    request_json: *const u8,
+    request_len: usize,
+) -> *mut c_char {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let request_data = unsafe { c_bytes_to_vec(request_json, request_len) };
+
+        let request: GetRequiredSignersRequest =
+            serde_json::from_slice(&request_data)
+                .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        tracing::info!("👥 Getting required signers for transaction");
+
+        // Get signers
+        let signers = transport
+            .transaction_service()
+            .get_required_signers(&request.unsigned_transaction_base64)
+            .map_err(|e| format!("Failed to get signers: {}", e))?;
+
+        tracing::info!("✅ Found {} required signers", signers.len());
+
+        let response: FfiResult<Vec<String>> = FfiResult::success(signers);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(result)
+}
