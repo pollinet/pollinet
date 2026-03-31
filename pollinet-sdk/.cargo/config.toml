@@ -1,0 +1,8 @@
+[build]
+# Target for Android builds
+# This file tells cargo which target to use when building in this directory
+
+[env]
+# Disable default features when building for Android
+# This prevents pulling in platform-specific dependencies like bluer
+
