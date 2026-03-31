@@ -1,54 +1,24 @@
-//! Windows BLE implementation stub
-//!
-//! This module provides a stub implementation for Windows.
-//! In the future, this will use Windows Bluetooth APIs.
+//! Windows BLE adapter stub — not yet implemented.
 
-use super::adapter::{AdapterInfo, BleAdapter, BleError};
+use super::adapter::{AdapterInfo, BleAdapter, BleError, DiscoveredDevice};
 use async_trait::async_trait;
 
-/// Windows BLE adapter implementation (stub)
-pub struct WindowsBleAdapter {
-    // Future: Windows Bluetooth implementation
-}
+pub struct WindowsBleAdapter;
 
 impl WindowsBleAdapter {
-    /// Create a new Windows BLE adapter (stub)
     pub async fn new() -> Result<Self, BleError> {
-        Err(BleError::OperationNotSupported(
-            "Windows BLE adapter not yet implemented".to_string(),
-        ))
+        Err(BleError::OperationNotSupported("Windows BLE not yet implemented".to_string()))
     }
 }
 
 #[async_trait]
 impl BleAdapter for WindowsBleAdapter {
-    async fn start_advertising(
-        &self,
-        _service_uuid: &str,
-        _service_name: &str,
-    ) -> Result<(), BleError> {
-        unimplemented!("Windows BLE adapter not yet implemented")
-    }
-
-    async fn stop_advertising(&self) -> Result<(), BleError> {
-        unimplemented!("Windows BLE adapter not yet implemented")
-    }
-
-    async fn send_packet(&self, _data: &[u8]) -> Result<(), BleError> {
-        unimplemented!("Windows BLE adapter not yet implemented")
-    }
-
-    fn on_receive(&self, _callback: Box<dyn Fn(Vec<u8>) + Send + 'static>) {
-        unimplemented!("Windows BLE adapter not yet implemented")
-    }
-
-    fn is_advertising(&self) -> bool {
-        false
-    }
-
-    async fn connected_clients_count(&self) -> usize {
-        0
-    }
+    async fn start_advertising(&self, _: &str, _: &str) -> Result<(), BleError> { unimplemented!() }
+    async fn stop_advertising(&self) -> Result<(), BleError> { unimplemented!() }
+    async fn send_packet(&self, _: &[u8]) -> Result<(), BleError> { unimplemented!() }
+    fn on_receive(&self, _: Box<dyn Fn(Vec<u8>) + Send + 'static>) { unimplemented!() }
+    fn is_advertising(&self) -> bool { false }
+    async fn connected_clients_count(&self) -> usize { 0 }
 
     fn get_adapter_info(&self) -> AdapterInfo {
         AdapterInfo {
@@ -61,22 +31,12 @@ impl BleAdapter for WindowsBleAdapter {
     }
 
     async fn start_scanning(&self) -> Result<(), BleError> {
-        Err(BleError::OperationNotSupported(
-            "Windows BLE scanning not yet implemented".to_string(),
-        ))
+        Err(BleError::OperationNotSupported("Windows BLE not yet implemented".to_string()))
     }
-
     async fn stop_scanning(&self) -> Result<(), BleError> {
-        Err(BleError::OperationNotSupported(
-            "Windows BLE scanning not yet implemented".to_string(),
-        ))
+        Err(BleError::OperationNotSupported("Windows BLE not yet implemented".to_string()))
     }
-
-    async fn get_discovered_devices(
-        &self,
-    ) -> Result<Vec<super::adapter::DiscoveredDevice>, BleError> {
-        Err(BleError::OperationNotSupported(
-            "Windows BLE discovery not yet implemented".to_string(),
-        ))
+    async fn get_discovered_devices(&self) -> Result<Vec<DiscoveredDevice>, BleError> {
+        Err(BleError::OperationNotSupported("Windows BLE not yet implemented".to_string()))
     }
 }

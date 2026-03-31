@@ -770,62 +770,8 @@ impl PolliNetSDK {
         &self,
         fragments: Vec<transaction::Fragment>,
     ) -> Result<(), PolliNetError> {
-        // TEMPORARY FIX: Use broadcast mode due to GATT MTU limitations
-        // GATT notifications are limited to ~20 bytes by default MTU
-        // Broadcast mode doesn't have this limitation
-        tracing::info!(
-            "📤 Using broadcast mode for {} fragments (bypassing GATT MTU limitation)",
-            fragments.len()
-        );
-        return Ok(self.ble_bridge.send_fragments(fragments).await?);
-
-        // TODO: Implement proper MTU negotiation for GATT write
-        // Once MTU is negotiated to 512 bytes, re-enable GATT write path below:
-
-        /* DISABLED - MTU issue causes only 4 bytes to be received
-        let connected_peer = self.connected_peer.read().await;
-
-        if let Some(peer_address) = connected_peer.as_ref() {
-            // Try to send to the connected peer using write_to_device (central mode)
-            tracing::info!("📤 Attempting to send {} fragments to connected peer: {}", fragments.len(), peer_address);
-
-            let mut write_succeeded = true;
-            let fragments_clone = fragments.clone();
-
-            for fragment in &fragments_clone {
-                let data = serde_json::to_vec(&fragment)
-                    .map_err(|e| PolliNetError::Serialization(e.to_string()))?;
-
-                match self.ble_bridge.write_to_device(peer_address, &data).await {
-                    Ok(_) => {
-                        tracing::debug!("✅ Fragment sent via GATT write");
-                    }
-                    Err(e) => {
-                        tracing::warn!("⚠️  GATT write failed: {}", e);
-                        tracing::info!("   Falling back to broadcast mode...");
-                        write_succeeded = false;
-                        break;
-                    }
-                }
-
-                // Small delay between fragments to avoid overwhelming the connection
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-
-            if write_succeeded {
-                tracing::info!("✅ All fragments sent successfully via GATT to peer: {}", peer_address);
-                Ok(())
-            } else {
-                // Fallback to broadcast mode if GATT write failed
-                tracing::info!("📤 Falling back to broadcast mode for all fragments");
-                Ok(self.ble_bridge.send_fragments(fragments).await?)
-            }
-        } else {
-            // No connected peer, use broadcast mode (peripheral mode)
-            tracing::info!("📤 Broadcasting {} fragments (no specific peer connected)", fragments.len());
-            Ok(self.ble_bridge.send_fragments(fragments).await?)
-        }
-        */
+        tracing::info!("📤 Relaying {} fragments via broadcast", fragments.len());
+        Ok(self.ble_bridge.send_fragments(fragments).await?)
     }
 
     /// Broadcast confirmation after successful submission
