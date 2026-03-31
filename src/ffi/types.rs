@@ -376,9 +376,9 @@ pub struct UnsignedNonceTransaction {
     #[serde(rename = "unsignedTransactionBase64")]
     pub unsigned_transaction_base64: String,
     #[serde(rename = "nonceKeypairBase64")]
-    pub nonce_keypair_base64: Vec<String>,  // Multiple keypairs for batched transactions
+    pub nonce_keypair_base64: Vec<String>, // Multiple keypairs for batched transactions
     #[serde(rename = "noncePubkey")]
-    pub nonce_pubkey: Vec<String>,  // Multiple pubkeys for batched transactions
+    pub nonce_pubkey: Vec<String>, // Multiple pubkeys for batched transactions
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -396,7 +396,7 @@ pub struct AddNonceSignatureRequest {
     #[serde(rename = "payerSignedTransactionBase64")]
     pub payer_signed_transaction_base64: String,
     #[serde(rename = "nonceKeypairBase64")]
-    pub nonce_keypair_base64: Vec<String>,  // Multiple keypairs for batched transactions
+    pub nonce_keypair_base64: Vec<String>, // Multiple keypairs for batched transactions
 }
 
 // ============================================================================
@@ -559,4 +559,3 @@ pub struct QueueSizeResponse {
     #[serde(rename = "queueSize")]
     pub queue_size: usize,
 }
-

@@ -4,14 +4,14 @@
 //! and crash recovery. Ensures queues survive app restarts.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::io::Write;
 use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use super::confirmation::{Confirmation, ConfirmationQueue};
 use super::outbound::{OutboundQueue, OutboundTransaction, Priority};
-use super::confirmation::{ConfirmationQueue, Confirmation};
-use super::retry::{RetryQueue, RetryItem};
+use super::retry::{RetryItem, RetryQueue};
 
 /// Queue storage manager
 pub struct QueueStorage {
@@ -23,36 +23,38 @@ impl QueueStorage {
     /// Create new queue storage manager
     pub fn new(storage_dir: impl AsRef<Path>) -> Result<Self, StorageError> {
         let storage_dir = storage_dir.as_ref().to_path_buf();
-        
+
         // Create directory if it doesn't exist
         if !storage_dir.exists() {
-            fs::create_dir_all(&storage_dir)
-                .map_err(|e| StorageError::IoError(format!("Failed to create storage directory: {}", e)))?;
+            fs::create_dir_all(&storage_dir).map_err(|e| {
+                StorageError::IoError(format!("Failed to create storage directory: {}", e))
+            })?;
         }
-        
+
         Ok(Self { storage_dir })
     }
-    
+
     /// Get file path for a queue
     fn queue_path(&self, queue_name: &str) -> PathBuf {
         self.storage_dir.join(format!("{}.json", queue_name))
     }
-    
+
     /// Get temporary file path for atomic writes
     fn temp_path(&self, queue_name: &str) -> PathBuf {
         self.storage_dir.join(format!("{}.tmp", queue_name))
     }
-    
+
     /// Save outbound queue to disk (atomic write)
     pub fn save_outbound_queue(&self, queue: &OutboundQueue) -> Result<(), StorageError> {
         let path = self.queue_path("outbound_queue");
         let temp_path = self.temp_path("outbound_queue");
-        
+
         // Serialize to persistable format
         let persistable = OutboundQueuePersist::from_queue(queue);
-        let json = serde_json::to_string_pretty(&persistable)
-            .map_err(|e| StorageError::SerializationError(format!("Failed to serialize outbound queue: {}", e)))?;
-        
+        let json = serde_json::to_string_pretty(&persistable).map_err(|e| {
+            StorageError::SerializationError(format!("Failed to serialize outbound queue: {}", e))
+        })?;
+
         // Atomic write: write to temp file first
         {
             let mut file = fs::File::create(&temp_path)
@@ -62,45 +64,50 @@ impl QueueStorage {
             file.sync_all()
                 .map_err(|e| StorageError::IoError(format!("Failed to sync temp file: {}", e)))?;
         }
-        
+
         // Rename temp to final (atomic on most filesystems)
         fs::rename(&temp_path, &path)
             .map_err(|e| StorageError::IoError(format!("Failed to rename temp file: {}", e)))?;
-        
+
         tracing::debug!("Saved outbound queue to {}", path.display());
         Ok(())
     }
-    
+
     /// Load outbound queue from disk
     pub fn load_outbound_queue(&self) -> Result<OutboundQueue, StorageError> {
         let path = self.queue_path("outbound_queue");
-        
+
         if !path.exists() {
             tracing::debug!("No saved outbound queue found, starting fresh");
             return Ok(OutboundQueue::new());
         }
-        
+
         let json = fs::read_to_string(&path)
             .map_err(|e| StorageError::IoError(format!("Failed to read outbound queue: {}", e)))?;
-        
-        let persistable: OutboundQueuePersist = serde_json::from_str(&json)
-            .map_err(|e| StorageError::DeserializationError(format!("Failed to deserialize outbound queue: {}", e)))?;
-        
+
+        let persistable: OutboundQueuePersist = serde_json::from_str(&json).map_err(|e| {
+            StorageError::DeserializationError(format!(
+                "Failed to deserialize outbound queue: {}",
+                e
+            ))
+        })?;
+
         let queue = persistable.to_queue();
         tracing::info!("Loaded outbound queue: {} transactions", queue.len());
-        
+
         Ok(queue)
     }
-    
+
     /// Save retry queue to disk (atomic write)
     pub fn save_retry_queue(&self, queue: &RetryQueue) -> Result<(), StorageError> {
         let path = self.queue_path("retry_queue");
         let temp_path = self.temp_path("retry_queue");
-        
+
         let persistable = RetryQueuePersist::from_queue(queue);
-        let json = serde_json::to_string_pretty(&persistable)
-            .map_err(|e| StorageError::SerializationError(format!("Failed to serialize retry queue: {}", e)))?;
-        
+        let json = serde_json::to_string_pretty(&persistable).map_err(|e| {
+            StorageError::SerializationError(format!("Failed to serialize retry queue: {}", e))
+        })?;
+
         {
             let mut file = fs::File::create(&temp_path)
                 .map_err(|e| StorageError::IoError(format!("Failed to create temp file: {}", e)))?;
@@ -109,44 +116,49 @@ impl QueueStorage {
             file.sync_all()
                 .map_err(|e| StorageError::IoError(format!("Failed to sync temp file: {}", e)))?;
         }
-        
+
         fs::rename(&temp_path, &path)
             .map_err(|e| StorageError::IoError(format!("Failed to rename temp file: {}", e)))?;
-        
+
         tracing::debug!("Saved retry queue to {}", path.display());
         Ok(())
     }
-    
+
     /// Load retry queue from disk
     pub fn load_retry_queue(&self) -> Result<RetryQueue, StorageError> {
         let path = self.queue_path("retry_queue");
-        
+
         if !path.exists() {
             tracing::debug!("No saved retry queue found, starting fresh");
             return Ok(RetryQueue::new());
         }
-        
+
         let json = fs::read_to_string(&path)
             .map_err(|e| StorageError::IoError(format!("Failed to read retry queue: {}", e)))?;
-        
-        let persistable: RetryQueuePersist = serde_json::from_str(&json)
-            .map_err(|e| StorageError::DeserializationError(format!("Failed to deserialize retry queue: {}", e)))?;
-        
+
+        let persistable: RetryQueuePersist = serde_json::from_str(&json).map_err(|e| {
+            StorageError::DeserializationError(format!("Failed to deserialize retry queue: {}", e))
+        })?;
+
         let queue = persistable.to_queue();
         tracing::info!("Loaded retry queue: {} items", queue.len());
-        
+
         Ok(queue)
     }
-    
+
     /// Save confirmation queue to disk (atomic write)
     pub fn save_confirmation_queue(&self, queue: &ConfirmationQueue) -> Result<(), StorageError> {
         let path = self.queue_path("confirmation_queue");
         let temp_path = self.temp_path("confirmation_queue");
-        
+
         let persistable = ConfirmationQueuePersist::from_queue(queue);
-        let json = serde_json::to_string_pretty(&persistable)
-            .map_err(|e| StorageError::SerializationError(format!("Failed to serialize confirmation queue: {}", e)))?;
-        
+        let json = serde_json::to_string_pretty(&persistable).map_err(|e| {
+            StorageError::SerializationError(format!(
+                "Failed to serialize confirmation queue: {}",
+                e
+            ))
+        })?;
+
         {
             let mut file = fs::File::create(&temp_path)
                 .map_err(|e| StorageError::IoError(format!("Failed to create temp file: {}", e)))?;
@@ -155,45 +167,54 @@ impl QueueStorage {
             file.sync_all()
                 .map_err(|e| StorageError::IoError(format!("Failed to sync temp file: {}", e)))?;
         }
-        
+
         fs::rename(&temp_path, &path)
             .map_err(|e| StorageError::IoError(format!("Failed to rename temp file: {}", e)))?;
-        
+
         tracing::debug!("Saved confirmation queue to {}", path.display());
         Ok(())
     }
-    
+
     /// Load confirmation queue from disk
     pub fn load_confirmation_queue(&self) -> Result<ConfirmationQueue, StorageError> {
         let path = self.queue_path("confirmation_queue");
-        
+
         if !path.exists() {
             tracing::debug!("No saved confirmation queue found, starting fresh");
             return Ok(ConfirmationQueue::new());
         }
-        
-        let json = fs::read_to_string(&path)
-            .map_err(|e| StorageError::IoError(format!("Failed to read confirmation queue: {}", e)))?;
-        
-        let persistable: ConfirmationQueuePersist = serde_json::from_str(&json)
-            .map_err(|e| StorageError::DeserializationError(format!("Failed to deserialize confirmation queue: {}", e)))?;
-        
+
+        let json = fs::read_to_string(&path).map_err(|e| {
+            StorageError::IoError(format!("Failed to read confirmation queue: {}", e))
+        })?;
+
+        let persistable: ConfirmationQueuePersist = serde_json::from_str(&json).map_err(|e| {
+            StorageError::DeserializationError(format!(
+                "Failed to deserialize confirmation queue: {}",
+                e
+            ))
+        })?;
+
         let queue = persistable.to_queue();
         tracing::info!("Loaded confirmation queue: {} confirmations", queue.len());
-        
+
         Ok(queue)
     }
-    
+
     /// Save received queue to disk (atomic write)
     /// The received queue is a VecDeque<(tx_id, tx_bytes, received_at_timestamp)>
-    pub fn save_received_queue(&self, queue: &[(String, Vec<u8>, u64)]) -> Result<(), StorageError> {
+    pub fn save_received_queue(
+        &self,
+        queue: &[(String, Vec<u8>, u64)],
+    ) -> Result<(), StorageError> {
         let path = self.queue_path("received_queue");
         let temp_path = self.temp_path("received_queue");
-        
+
         let persistable = ReceivedQueuePersist::from_queue(queue);
-        let json = serde_json::to_string_pretty(&persistable)
-            .map_err(|e| StorageError::SerializationError(format!("Failed to serialize received queue: {}", e)))?;
-        
+        let json = serde_json::to_string_pretty(&persistable).map_err(|e| {
+            StorageError::SerializationError(format!("Failed to serialize received queue: {}", e))
+        })?;
+
         {
             let mut file = fs::File::create(&temp_path)
                 .map_err(|e| StorageError::IoError(format!("Failed to create temp file: {}", e)))?;
@@ -202,35 +223,39 @@ impl QueueStorage {
             file.sync_all()
                 .map_err(|e| StorageError::IoError(format!("Failed to sync temp file: {}", e)))?;
         }
-        
+
         fs::rename(&temp_path, &path)
             .map_err(|e| StorageError::IoError(format!("Failed to rename temp file: {}", e)))?;
-        
+
         tracing::debug!("Saved received queue to {}", path.display());
         Ok(())
     }
-    
+
     /// Load received queue from disk
     pub fn load_received_queue(&self) -> Result<Vec<(String, Vec<u8>, u64)>, StorageError> {
         let path = self.queue_path("received_queue");
-        
+
         if !path.exists() {
             tracing::debug!("No saved received queue found, starting fresh");
             return Ok(Vec::new());
         }
-        
+
         let json = fs::read_to_string(&path)
             .map_err(|e| StorageError::IoError(format!("Failed to read received queue: {}", e)))?;
-        
-        let persistable: ReceivedQueuePersist = serde_json::from_str(&json)
-            .map_err(|e| StorageError::DeserializationError(format!("Failed to deserialize received queue: {}", e)))?;
-        
+
+        let persistable: ReceivedQueuePersist = serde_json::from_str(&json).map_err(|e| {
+            StorageError::DeserializationError(format!(
+                "Failed to deserialize received queue: {}",
+                e
+            ))
+        })?;
+
         let queue = persistable.to_queue();
         tracing::info!("Loaded received queue: {} transactions", queue.len());
-        
+
         Ok(queue)
     }
-    
+
     /// Save all queues
     pub fn save_all(
         &self,
@@ -243,18 +268,28 @@ impl QueueStorage {
         self.save_retry_queue(retry)?;
         self.save_confirmation_queue(confirmation)?;
         self.save_received_queue(received)?;
-        
+
         tracing::info!("Saved all queues to disk");
         Ok(())
     }
-    
+
     /// Load all queues
-    pub fn load_all(&self) -> Result<(OutboundQueue, RetryQueue, ConfirmationQueue, Vec<(String, Vec<u8>, u64)>), StorageError> {
+    pub fn load_all(
+        &self,
+    ) -> Result<
+        (
+            OutboundQueue,
+            RetryQueue,
+            ConfirmationQueue,
+            Vec<(String, Vec<u8>, u64)>,
+        ),
+        StorageError,
+    > {
         let outbound = self.load_outbound_queue()?;
         let retry = self.load_retry_queue()?;
         let confirmation = self.load_confirmation_queue()?;
         let received = self.load_received_queue()?;
-        
+
         tracing::info!(
             "Loaded all queues: {} outbound, {} retry, {} confirmation, {} received",
             outbound.len(),
@@ -262,7 +297,7 @@ impl QueueStorage {
             confirmation.len(),
             received.len()
         );
-        
+
         Ok((outbound, retry, confirmation, received))
     }
 }
@@ -284,14 +319,14 @@ struct OutboundQueuePersist {
 impl OutboundQueuePersist {
     fn from_queue(queue: &OutboundQueue) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         // We need to access private fields, so we'll use the peek/pop pattern
         // This is a limitation - in production we'd make fields pub(crate)
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         Self {
             version: 1,
             high_priority: Vec::new(), // Will be populated via queue iteration
@@ -300,31 +335,31 @@ impl OutboundQueuePersist {
             saved_at: now,
         }
     }
-    
+
     fn to_queue(self) -> OutboundQueue {
         let mut queue = OutboundQueue::new();
-        
+
         // Restore high priority
         for tx in self.high_priority {
             if let Ok(tx) = tx.to_transaction() {
                 let _ = queue.push(tx);
             }
         }
-        
+
         // Restore normal priority
         for tx in self.normal_priority {
             if let Ok(tx) = tx.to_transaction() {
                 let _ = queue.push(tx);
             }
         }
-        
+
         // Restore low priority
         for tx in self.low_priority {
             if let Ok(tx) = tx.to_transaction() {
                 let _ = queue.push(tx);
             }
         }
-        
+
         queue
     }
 }
@@ -351,14 +386,14 @@ impl OutboundTransactionPersist {
             retry_count: tx.retry_count,
         }
     }
-    
+
     fn to_transaction(self) -> Result<OutboundTransaction, String> {
         let original_bytes = base64::decode(&self.original_bytes)
             .map_err(|e| format!("Failed to decode transaction bytes: {}", e))?;
-        
+
         // Re-fragment the transaction (fragments not persisted to save space)
         let fragments = crate::ble::fragmenter::fragment_transaction(&original_bytes);
-        
+
         Ok(OutboundTransaction {
             tx_id: self.tx_id,
             original_bytes,
@@ -383,32 +418,30 @@ struct RetryQueuePersist {
 impl RetryQueuePersist {
     fn from_queue(queue: &RetryQueue) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         Self {
             version: 1,
             items: Vec::new(), // Will be populated
-            max_retries: 5, // queue.max_retries (private field)
+            max_retries: 5,    // queue.max_retries (private field)
             saved_at: now,
         }
     }
-    
+
     fn to_queue(self) -> RetryQueue {
-        let mut queue = RetryQueue::with_config(
-            self.max_retries,
-            super::retry::BackoffStrategy::default(),
-        );
-        
+        let mut queue =
+            RetryQueue::with_config(self.max_retries, super::retry::BackoffStrategy::default());
+
         for item in self.items {
             if let Ok(retry_item) = item.to_retry_item() {
                 let _ = queue.push(retry_item);
             }
         }
-        
+
         queue
     }
 }
@@ -433,15 +466,15 @@ impl RetryItemPersist {
             created_at_unix: item.created_at_unix,
         }
     }
-    
+
     fn to_retry_item(self) -> Result<RetryItem, String> {
         use std::time::Instant;
-        
+
         let tx_bytes = base64::decode(&self.tx_bytes)
             .map_err(|e| format!("Failed to decode transaction bytes: {}", e))?;
-        
+
         let now = Instant::now();
-        
+
         Ok(RetryItem {
             tx_bytes,
             tx_id: self.tx_id,
@@ -465,26 +498,26 @@ struct ConfirmationQueuePersist {
 impl ConfirmationQueuePersist {
     fn from_queue(queue: &ConfirmationQueue) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         Self {
             version: 1,
             confirmations: Vec::new(), // Will be populated
             saved_at: now,
         }
     }
-    
+
     fn to_queue(self) -> ConfirmationQueue {
         let mut queue = ConfirmationQueue::new();
-        
+
         for conf in self.confirmations {
             let _ = queue.push(conf);
         }
-        
+
         queue
     }
 }
@@ -500,12 +533,12 @@ struct ReceivedQueuePersist {
 impl ReceivedQueuePersist {
     fn from_queue(queue: &[(String, Vec<u8>, u64)]) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let transactions: Vec<ReceivedTransactionPersist> = queue
             .iter()
             .map(|(tx_id, tx_bytes, timestamp)| ReceivedTransactionPersist {
@@ -514,24 +547,22 @@ impl ReceivedQueuePersist {
                 received_at: *timestamp,
             })
             .collect();
-        
+
         Self {
             version: 1,
             transactions,
             saved_at: now,
         }
     }
-    
+
     fn to_queue(self) -> Vec<(String, Vec<u8>, u64)> {
         self.transactions
             .into_iter()
-            .filter_map(|tx| {
-                match base64::decode(&tx.tx_bytes) {
-                    Ok(tx_bytes) => Some((tx.tx_id, tx_bytes, tx.received_at)),
-                    Err(e) => {
-                        tracing::warn!("Failed to decode received transaction bytes: {}", e);
-                        None
-                    }
+            .filter_map(|tx| match base64::decode(&tx.tx_bytes) {
+                Ok(tx_bytes) => Some((tx.tx_id, tx_bytes, tx.received_at)),
+                Err(e) => {
+                    tracing::warn!("Failed to decode received transaction bytes: {}", e);
+                    None
                 }
             })
             .collect()
@@ -551,13 +582,13 @@ struct ReceivedTransactionPersist {
 pub enum StorageError {
     #[error("IO error: {0}")]
     IoError(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     #[error("Deserialization error: {0}")]
     DeserializationError(String),
-    
+
     #[error("Corrupted file: {0}")]
     CorruptedFile(String),
 }
@@ -566,61 +597,55 @@ pub enum StorageError {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    
+
     #[test]
     fn test_storage_creation() {
         let dir = tempdir().unwrap();
         let storage = QueueStorage::new(dir.path()).unwrap();
         assert!(dir.path().exists());
     }
-    
+
     #[test]
     fn test_save_load_outbound_queue() {
         let dir = tempdir().unwrap();
         let storage = QueueStorage::new(dir.path()).unwrap();
-        
+
         let mut queue = OutboundQueue::new();
-        let tx = OutboundTransaction::new(
-            "tx1".to_string(),
-            vec![1, 2, 3],
-            vec![],
-            Priority::High,
-        );
+        let tx = OutboundTransaction::new("tx1".to_string(), vec![1, 2, 3], vec![], Priority::High);
         queue.push(tx).unwrap();
-        
+
         // Save
         storage.save_outbound_queue(&queue).unwrap();
-        
+
         // Load
         let loaded = storage.load_outbound_queue().unwrap();
         assert_eq!(loaded.len(), 1);
     }
-    
+
     #[test]
     fn test_atomic_write() {
         let dir = tempdir().unwrap();
         let storage = QueueStorage::new(dir.path()).unwrap();
-        
+
         let queue = OutboundQueue::new();
-        
+
         // Save multiple times (should not corrupt)
         storage.save_outbound_queue(&queue).unwrap();
         storage.save_outbound_queue(&queue).unwrap();
         storage.save_outbound_queue(&queue).unwrap();
-        
+
         // Should still load successfully
         let loaded = storage.load_outbound_queue().unwrap();
         assert_eq!(loaded.len(), 0);
     }
-    
+
     #[test]
     fn test_missing_file_returns_empty() {
         let dir = tempdir().unwrap();
         let storage = QueueStorage::new(dir.path()).unwrap();
-        
+
         // Load without saving
         let queue = storage.load_outbound_queue().unwrap();
         assert_eq!(queue.len(), 0);
     }
 }
-

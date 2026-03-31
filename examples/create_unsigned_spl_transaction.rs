@@ -182,9 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("\n=== Submitting Fully Signed SPL Transaction ===");
         info!("Submitting to Solana using submit_transaction...");
 
-        let signature = sdk
-            .submit_transaction(partially_signed_tx.as_str())
-            .await?;
+        let signature = sdk.submit_transaction(partially_signed_tx.as_str()).await?;
         info!("✅ SPL token transfer submitted successfully!");
         info!("   Transaction signature: {}", signature);
         info!(

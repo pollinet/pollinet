@@ -71,21 +71,22 @@ impl PolliNetSDK {
 
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-        
+
         // Initialize queue manager with persistence (Phase 5)
         // Use default app data directory for queue storage
         let queue_manager = if let Ok(storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
             tracing::info!("Using persistent queue storage: {}", storage_dir);
-            Arc::new(queue::QueueManager::with_storage(storage_dir)
-                .unwrap_or_else(|e| {
+            Arc::new(
+                queue::QueueManager::with_storage(storage_dir).unwrap_or_else(|e| {
                     tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
                     queue::QueueManager::new()
-                }))
+                }),
+            )
         } else {
             tracing::info!("No persistent storage configured, queues will not persist");
             Arc::new(queue::QueueManager::new())
         };
-        
+
         Ok(Self {
             ble_bridge,
             transaction_service,
@@ -110,20 +111,21 @@ impl PolliNetSDK {
 
         // Initialize local cache
         let local_cache = Arc::new(RwLock::new(transaction::TransactionCache::new()));
-        
+
         // Initialize queue manager with persistence (Phase 5)
         let queue_manager = if let Ok(storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
             tracing::info!("Using persistent queue storage: {}", storage_dir);
-            Arc::new(queue::QueueManager::with_storage(storage_dir)
-                .unwrap_or_else(|e| {
+            Arc::new(
+                queue::QueueManager::with_storage(storage_dir).unwrap_or_else(|e| {
                     tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
                     queue::QueueManager::new()
-                }))
+                }),
+            )
         } else {
             tracing::info!("No persistent storage configured, queues will not persist");
             Arc::new(queue::QueueManager::new())
         };
-        
+
         Ok(Self {
             ble_bridge,
             transaction_service,
@@ -133,31 +135,31 @@ impl PolliNetSDK {
             queue_manager,
         })
     }
-    
+
     // =========================================================================
     // Queue Management Methods (Phase 2)
     // =========================================================================
-    
+
     /// Get queue manager reference
     pub fn queue_manager(&self) -> &Arc<queue::QueueManager> {
         &self.queue_manager
     }
-    
+
     /// Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
     /// Note: This does NOT clear nonce data
     pub async fn clear_all_queues(&self) -> Result<(), PolliNetError> {
         // Clear queue manager queues
         self.queue_manager.clear_all_queues().await;
-        
+
         tracing::info!("✅ Cleared all queues via SDK");
         Ok(())
     }
-    
+
     /// Get queue metrics
     pub async fn get_queue_metrics(&self) -> queue::QueueMetrics {
         self.queue_manager.get_metrics().await
     }
-    
+
     /// Get queue health status
     pub async fn get_queue_health(&self) -> queue::HealthStatus {
         self.queue_manager.get_health().await
@@ -177,7 +179,7 @@ impl PolliNetSDK {
     /// Create an unsigned transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned transaction
     /// Sender is used as nonce authority
-    /// 
+    ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn create_unsigned_transaction(
@@ -206,7 +208,7 @@ impl PolliNetSDK {
     /// Returns base64 encoded uncompressed, unsigned SPL token transaction
     /// Automatically derives ATAs from wallet pubkeys and mint address
     /// Sender is used as nonce authority
-    /// 
+    ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn create_unsigned_spl_transaction(
@@ -232,7 +234,7 @@ impl PolliNetSDK {
             )
             .await?)
     }
-    
+
     /// Create an UNSIGNED offline SPL token transfer transaction using cached nonce data
     /// This variant is designed for MWA/Seed Vault workflows where private keys do not
     /// leave the device and nonce/blockhash data comes from an offline bundle.
@@ -258,11 +260,11 @@ impl PolliNetSDK {
                 cached_nonce,
             )?)
     }
-    
+
     /// Create an unsigned governance vote transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned vote transaction
     /// Voter is used as nonce authority
-    /// 
+    ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     pub async fn cast_unsigned_vote(
@@ -303,15 +305,15 @@ impl PolliNetSDK {
             .prepare_offline_nonce_data(nonce_account)
             .await?)
     }
-    
+
     /// Get an available nonce account from cached bundle
-    /// 
+    ///
     /// Loads the bundle from the specified file path and returns the first
     /// available (unused) nonce account data.
-    /// 
+    ///
     /// This allows users to either manage their own nonce accounts or let
     /// PolliNet manage them automatically.
-    /// 
+    ///
     /// Returns None if:
     /// - Bundle file doesn't exist
     /// - Bundle has no available nonces (all are used)
@@ -323,7 +325,7 @@ impl PolliNetSDK {
             .transaction_service
             .get_available_nonce_from_bundle(bundle_file)?)
     }
-    
+
     /// Prepare multiple nonce accounts for offline use
     /// Smart bundle management: refreshes used nonces (FREE!), creates new ones only when necessary
     ///
@@ -475,40 +477,40 @@ impl PolliNetSDK {
             .transaction_service
             .add_signature(base64_tx, signer_pubkey, signature)?)
     }
-    
+
     /// Submit a transaction to Solana
-    /// 
+    ///
     /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
     /// Automatically detects the input format and processes accordingly.
-    /// 
+    ///
     /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
     /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
-    /// 
+    ///
     /// Returns transaction signature if successful.
-    /// 
+    ///
     /// # Examples
     /// ```rust,no_run
     /// // Submit from base64 string
     /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
-    /// 
+    ///
     /// // Submit from raw bytes
     /// let signature = sdk.submit_transaction(&tx_bytes).await?;
     /// ```
     /// Submit a transaction to Solana
-    /// 
+    ///
     /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
     /// Automatically detects the input format and processes accordingly.
-    /// 
+    ///
     /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
     /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
-    /// 
+    ///
     /// Returns transaction signature if successful.
-    /// 
+    ///
     /// # Examples
     /// ```rust,no_run
     /// // Submit from base64 string
     /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
-    /// 
+    ///
     /// // Submit from raw bytes
     /// let signature = sdk.submit_transaction(&tx_bytes).await?;
     /// ```
@@ -518,9 +520,9 @@ impl PolliNetSDK {
     ) -> Result<String, PolliNetError> {
         transaction.submit(self).await
     }
-    
+
     /// Refresh the blockhash in an unsigned transaction
-    /// 
+    ///
     /// Use this right before sending an unsigned transaction to MWA for signing
     /// to ensure the blockhash is fresh and won't expire during the signing process.
     pub async fn refresh_blockhash_in_unsigned_transaction(
@@ -532,20 +534,20 @@ impl PolliNetSDK {
             .refresh_blockhash_in_unsigned_transaction(unsigned_tx_base64)
             .await?)
     }
-    
+
     /// Accept and queue a pre-signed transaction from external partners
-    /// 
+    ///
     /// This method is designed for accepting transactions from external partners.
     /// It verifies the transaction is properly signed, compresses it if needed,
     /// fragments it for BLE transmission, and adds it to the outbound queue for relay.
-    /// 
+    ///
     /// # Arguments
     /// * `base64_signed_tx` - Base64-encoded pre-signed Solana transaction
     /// * `max_payload` - Optional maximum payload size (typically MTU - 10). If None, uses default.
-    /// 
+    ///
     /// # Returns
     /// Transaction ID (SHA-256 hash as hex string) for tracking
-    /// 
+    ///
     /// # Errors
     /// Returns error if:
     /// - Transaction is not properly signed
@@ -558,58 +560,68 @@ impl PolliNetSDK {
         base64_signed_tx: &str,
         max_payload: Option<usize>,
     ) -> Result<String, PolliNetError> {
-        use sha2::{Sha256, Digest};
-        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
         use crate::ble::fragmenter;
         use crate::queue::{OutboundTransaction, Priority};
-        
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        use sha2::{Digest, Sha256};
+
         tracing::info!("📥 Accepting external pre-signed transaction for relay");
-        
+
         // Decode from base64
-        let tx_bytes = BASE64.decode(base64_signed_tx)
-            .map_err(|e| PolliNetError::Transaction(
-                transaction::TransactionError::Serialization(format!("Failed to decode base64: {}", e))
-            ))?;
-        
+        let tx_bytes = BASE64.decode(base64_signed_tx).map_err(|e| {
+            PolliNetError::Transaction(transaction::TransactionError::Serialization(format!(
+                "Failed to decode base64: {}",
+                e
+            )))
+        })?;
+
         tracing::info!("Decoded transaction: {} bytes", tx_bytes.len());
-        
+
         // Deserialize and verify transaction
-        let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)
-            .map_err(|e| PolliNetError::Transaction(
-                transaction::TransactionError::Serialization(format!("Failed to deserialize transaction: {}", e))
-            ))?;
-        
+        let tx: solana_sdk::transaction::Transaction =
+            bincode1::deserialize(&tx_bytes).map_err(|e| {
+                PolliNetError::Transaction(transaction::TransactionError::Serialization(format!(
+                    "Failed to deserialize transaction: {}",
+                    e
+                )))
+            })?;
+
         // Verify transaction has valid signatures
         let valid_sigs = tx
             .signatures
             .iter()
             .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
             .count();
-        
+
         if valid_sigs == 0 {
             return Err(PolliNetError::Transaction(
                 transaction::TransactionError::Serialization(
-                    "Transaction must be signed before queuing for relay".to_string()
-                )
+                    "Transaction must be signed before queuing for relay".to_string(),
+                ),
             ));
         }
-        
+
         // Verify transaction signatures
         if let Err(err) = tx.verify() {
             tracing::error!("❌ Transaction signature verification failed: {}", err);
             return Err(PolliNetError::Transaction(
-                transaction::TransactionError::Serialization(
-                    format!("Transaction signature verification failed: {}", err)
-                )
+                transaction::TransactionError::Serialization(format!(
+                    "Transaction signature verification failed: {}",
+                    err
+                )),
             ));
         }
-        
-        tracing::info!("✅ Transaction verified: {}/{} valid signatures", valid_sigs, tx.signatures.len());
+
+        tracing::info!(
+            "✅ Transaction verified: {}/{} valid signatures",
+            valid_sigs,
+            tx.signatures.len()
+        );
         tracing::info!("   Instructions: {}", tx.message.instructions.len());
-        
+
         // Store original bytes for transaction ID calculation
         let original_tx_bytes = tx_bytes.clone();
-        
+
         // Compress the transaction if it exceeds the threshold
         // Use the transaction service's compression logic via process_and_relay_transaction
         // but we'll do it manually to avoid creating fragments twice
@@ -619,14 +631,16 @@ impl PolliNetSDK {
                 crate::COMPRESSION_THRESHOLD
             );
             // Create a temporary compressor to compress
-            let compressor = crate::util::lz::Lz4Compressor::new()
-                .map_err(|e| PolliNetError::Transaction(
-                    transaction::TransactionError::Compression(e.to_string())
-                ))?;
-            let compressed = compressor.compress_with_size(&tx_bytes)
-                .map_err(|e| PolliNetError::Transaction(
-                    transaction::TransactionError::Compression(e.to_string())
-                ))?;
+            let compressor = crate::util::lz::Lz4Compressor::new().map_err(|e| {
+                PolliNetError::Transaction(transaction::TransactionError::Compression(
+                    e.to_string(),
+                ))
+            })?;
+            let compressed = compressor.compress_with_size(&tx_bytes).map_err(|e| {
+                PolliNetError::Transaction(transaction::TransactionError::Compression(
+                    e.to_string(),
+                ))
+            })?;
             tracing::info!(
                 "Compressed: {} bytes -> {} bytes",
                 tx_bytes.len(),
@@ -637,23 +651,26 @@ impl PolliNetSDK {
             tracing::info!("Transaction below compression threshold, keeping uncompressed");
             tx_bytes
         };
-        
+
         tracing::info!("Final transaction size: {} bytes", compressed_tx.len());
-        
+
         // Fragment the transaction
         let mesh_fragments = if let Some(max_payload) = max_payload {
             fragmenter::fragment_transaction_with_max_payload(&compressed_tx, max_payload)
         } else {
             fragmenter::fragment_transaction(&compressed_tx)
         };
-        
-        tracing::info!("✅ Created {} fragments for BLE transmission", mesh_fragments.len());
-        
+
+        tracing::info!(
+            "✅ Created {} fragments for BLE transmission",
+            mesh_fragments.len()
+        );
+
         // Calculate transaction ID (SHA-256 hash of original uncompressed transaction)
         let mut hasher = Sha256::new();
         hasher.update(&original_tx_bytes);
         let tx_id = hex::encode(hasher.finalize());
-        
+
         // Create outbound transaction with NORMAL priority (external partner transactions)
         let outbound_tx = OutboundTransaction::new(
             tx_id.clone(),
@@ -661,17 +678,19 @@ impl PolliNetSDK {
             mesh_fragments,
             Priority::Normal, // External partner transactions use normal priority
         );
-        
+
         // Add to outbound queue
         let mut queue = self.queue_manager.outbound.write().await;
-        queue.push(outbound_tx)
-            .map_err(|e| PolliNetError::Transaction(
-                transaction::TransactionError::Serialization(format!("Failed to add transaction to queue: {}", e))
-            ))?;
+        queue.push(outbound_tx).map_err(|e| {
+            PolliNetError::Transaction(transaction::TransactionError::Serialization(format!(
+                "Failed to add transaction to queue: {}",
+                e
+            )))
+        })?;
         drop(queue);
-        
+
         tracing::info!("✅ External transaction queued for relay: {}", tx_id);
-        
+
         Ok(tx_id)
     }
 
@@ -806,19 +825,19 @@ impl PolliNetSDK {
     }
 
     /// Discover nearby BLE peers
-    /// 
+    ///
     /// Scans for BLE devices and returns them in the specified format.
     /// Automatically stops scanning after discovery completes.
-    /// 
+    ///
     /// # Arguments
     /// * `wait_seconds` - How long to wait for devices to be discovered (default: 3 seconds)
     /// * `format` - Return format: `PeerInfo` (detailed) or `String` (addresses only)
-    /// 
+    ///
     /// # Examples
     /// ```rust,no_run
     /// // Get detailed peer information
     /// let peers = sdk.discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo).await?;
-    /// 
+    ///
     /// // Get just device addresses
     /// let addresses = sdk.discover_ble_peers_with_format(5, DiscoveryFormat::Addresses).await?;
     /// ```
@@ -827,68 +846,77 @@ impl PolliNetSDK {
         wait_seconds: u64,
         format: DiscoveryFormat,
     ) -> Result<DiscoveryResult, PolliNetError> {
-        tracing::info!("🔍 Starting BLE peer discovery (wait: {}s)...", wait_seconds);
-        
+        tracing::info!(
+            "🔍 Starting BLE peer discovery (wait: {}s)...",
+            wait_seconds
+        );
+
         // Start scanning
         self.ble_bridge.start_scanning().await?;
-        
+
         // Wait for devices to be discovered
         tokio::time::sleep(tokio::time::Duration::from_secs(wait_seconds)).await;
-        
+
         // Get discovered devices
         let discovered = self.ble_bridge.get_discovered_devices().await?;
-        
+
         // Stop scanning
         self.ble_bridge.stop_scanning().await?;
-        
+
         tracing::info!("✅ Found {} BLE devices", discovered.len());
-        
+
         // Convert to requested format
         let result = match format {
             DiscoveryFormat::PeerInfo => {
-        let peers: Vec<ble::PeerInfo> = discovered.into_iter().map(|device| {
-            ble::PeerInfo {
-                peer_id: device.address.clone(),
-                device_uuid: None,
-                capabilities: vec!["CAN_RELAY".to_string()],
-                rssi: device.rssi.unwrap_or(-100),
-                first_seen: device.last_seen,
-                last_seen: device.last_seen,
-                state: ble::PeerState::Discovered,
-                connection_attempts: 0,
-                last_attempt: None,
-            }
-        }).collect();
+                let peers: Vec<ble::PeerInfo> = discovered
+                    .into_iter()
+                    .map(|device| ble::PeerInfo {
+                        peer_id: device.address.clone(),
+                        device_uuid: None,
+                        capabilities: vec!["CAN_RELAY".to_string()],
+                        rssi: device.rssi.unwrap_or(-100),
+                        first_seen: device.last_seen,
+                        last_seen: device.last_seen,
+                        state: ble::PeerState::Discovered,
+                        connection_attempts: 0,
+                        last_attempt: None,
+                    })
+                    .collect();
                 DiscoveryResult::PeerInfo(peers)
             }
             DiscoveryFormat::Addresses => {
-                let addresses: Vec<String> = discovered.into_iter()
-                    .map(|d| d.address.clone())
-                    .collect();
+                let addresses: Vec<String> =
+                    discovered.into_iter().map(|d| d.address.clone()).collect();
                 DiscoveryResult::Addresses(addresses)
             }
         };
-        
+
         Ok(result)
     }
-    
+
     /// Discover nearby BLE peers (returns detailed PeerInfo)
-    /// 
+    ///
     /// Convenience method that calls `discover_ble_peers_with_format()` with default settings.
     /// Scans for 3 seconds and returns detailed peer information.
     pub async fn discover_ble_peers(&self) -> Result<Vec<ble::PeerInfo>, PolliNetError> {
-        match self.discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo).await? {
+        match self
+            .discover_ble_peers_with_format(3, DiscoveryFormat::PeerInfo)
+            .await?
+        {
             DiscoveryResult::PeerInfo(peers) => Ok(peers),
             DiscoveryResult::Addresses(_) => unreachable!(),
         }
     }
-    
+
     /// Scan all BLE devices (returns device addresses)
-    /// 
+    ///
     /// Convenience method that calls `discover_ble_peers_with_format()` with address format.
     /// Scans for 5 seconds and returns device addresses as strings.
     pub async fn scan_all_devices(&self) -> Result<Vec<String>, PolliNetError> {
-        match self.discover_ble_peers_with_format(5, DiscoveryFormat::Addresses).await? {
+        match self
+            .discover_ble_peers_with_format(5, DiscoveryFormat::Addresses)
+            .await?
+        {
             DiscoveryResult::PeerInfo(_) => unreachable!(),
             DiscoveryResult::Addresses(addresses) => Ok(addresses),
         }
@@ -939,7 +967,7 @@ impl PolliNetSDK {
 
         Ok(status)
     }
-    
+
     /// Start continuous BLE scanning
     pub async fn start_ble_scanning(&self) -> Result<(), PolliNetError> {
         self.ble_bridge.start_scanning().await?;
@@ -1096,10 +1124,7 @@ impl TransactionInput for String {
 
 impl TransactionInput for &[u8] {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError> {
-        Ok(sdk
-            .transaction_service
-            .submit_to_solana(self)
-            .await?)
+        Ok(sdk.transaction_service.submit_to_solana(self).await?)
     }
 }
 

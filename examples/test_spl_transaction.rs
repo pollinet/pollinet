@@ -26,8 +26,8 @@ mod wallet_utils;
 use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 
 use base64;
-use pollinet::PolliNetSDK;
 use pollinet::nonce;
+use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -44,8 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Initialize the SDK and RPC client
     let rpc_url = get_rpc_url();
     let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
-    let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
+    let rpc_client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
     // 2. Load sender keypair from .env (WALLET_PRIVATE_KEY) or create a new funded wallet
@@ -68,16 +67,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating a new nonce account...");
     info!("   Sender will fund and control the nonce account");
     info!("   Nonce authority: {} (sender)", sender_keypair.pubkey());
-    
+
     let nonce_keypair = nonce::create_nonce_account(&rpc_client, &sender_keypair)
         .await
         .map_err(|e| format!("Failed to create nonce account: {}", e))?;
-    
+
     let nonce_account = nonce_keypair.pubkey().to_string();
     info!("✅ Nonce account created successfully!");
     info!("   Nonce account: {}", nonce_account);
     info!("   Waiting for confirmation...");
-    
+
     // Wait for confirmation
     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
     info!("✅ Nonce account confirmed and ready to use");
@@ -125,12 +124,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n=== Verifying Transaction Structure ===");
     let tx_bytes = base64::decode(&unsigned_tx)?;
     let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)?;
-    
+
     info!("✅ Transaction deserialized successfully");
-    info!("   Number of instructions: {}", tx.message.instructions.len());
+    info!(
+        "   Number of instructions: {}",
+        tx.message.instructions.len()
+    );
     info!("   Number of accounts: {}", tx.message.account_keys.len());
     info!("   Number of signatures: {}", tx.signatures.len());
-    
+
     // Verify we have exactly 3 instructions
     if tx.message.instructions.len() == 3 {
         info!("✅ Correct number of instructions: 3");
@@ -141,7 +143,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!(
             "Expected 3 instructions, but found {}",
             tx.message.instructions.len()
-        ).into());
+        )
+        .into());
     }
 
     // Check that all signatures are empty (unsigned)
@@ -150,7 +153,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
         .count();
-    info!("   Valid signatures: {}/{} (should be 0 for unsigned)", valid_sigs, tx.signatures.len());
+    info!(
+        "   Valid signatures: {}/{} (should be 0 for unsigned)",
+        valid_sigs,
+        tx.signatures.len()
+    );
 
     if valid_sigs != 0 {
         return Err("Transaction should be unsigned, but contains signatures".into());
@@ -159,9 +166,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8. Display transaction details
     info!("\n=== Unsigned SPL Transaction Details ===");
     info!("✅ Transaction is ready for signing!");
-    info!("   Instructions: [1] Advance nonce, [2] Create ATA (idempotent), [3] SPL Token Transfer");
+    info!(
+        "   Instructions: [1] Advance nonce, [2] Create ATA (idempotent), [3] SPL Token Transfer"
+    );
     info!("   Required signers:");
-    info!("     - Sender/Token owner (as nonce authority): {}", sender_wallet);
+    info!(
+        "     - Sender/Token owner (as nonce authority): {}",
+        sender_wallet
+    );
     info!("     - Fee payer: {}", fee_payer);
     info!("   Blockhash: From nonce account (durable)");
     info!("\nBase64 transaction (first 80 chars):");
@@ -184,7 +196,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signed_tx = sdk.add_signature(&unsigned_tx, &sender_keypair.pubkey(), &sender_signature)?;
 
     info!("✅ Signature added successfully");
-    info!("   Updated transaction: {} characters (base64)", signed_tx.len());
+    info!(
+        "   Updated transaction: {} characters (base64)",
+        signed_tx.len()
+    );
 
     // Verify transaction is fully signed
     let final_tx_bytes = base64::decode(&signed_tx)?;
@@ -208,10 +223,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Submitting to Solana using submit_transaction...");
         info!("This will test the idempotent ATA creation in a real transaction");
 
-        let signature = sdk
-            .submit_transaction(signed_tx.as_str())
-            .await?;
-        
+        let signature = sdk.submit_transaction(signed_tx.as_str()).await?;
+
         info!("✅ SPL token transfer submitted successfully!");
         info!("   Transaction signature: {}", signature);
         info!("   Transferred: 0.1 USDC to {}", recipient_wallet);
@@ -243,7 +256,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if final_valid_sigs == final_tx.signatures.len() {
         info!("✅ 8. Submitted fully signed SPL transaction to Solana");
         info!("✅ 9. Tested idempotent ATA creation in real transaction");
-        info!("✅ 10. Successfully transferred 0.1 USDC to {}", recipient_wallet);
+        info!(
+            "✅ 10. Successfully transferred 0.1 USDC to {}",
+            recipient_wallet
+        );
     } else {
         info!("⚠️  8. Transaction ready for additional signatures");
     }

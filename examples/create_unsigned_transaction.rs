@@ -80,7 +80,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Transaction will NOT be signed or compressed");
 
     let unsigned_tx = sdk
-        .create_unsigned_transaction(&sender, &recipient, &fee_payer, amount, Some(&nonce_account), None)
+        .create_unsigned_transaction(
+            &sender,
+            &recipient,
+            &fee_payer,
+            amount,
+            Some(&nonce_account),
+            None,
+        )
         .await?;
 
     // Mark nonce as used after creating transaction
@@ -162,9 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
 
-        let signature = sdk
-            .submit_transaction(partially_signed_tx.as_str())
-            .await?;
+        let signature = sdk.submit_transaction(partially_signed_tx.as_str()).await?;
         info!("✅ Transaction submitted successfully!");
         info!("   Transaction signature: {}", signature);
         info!(

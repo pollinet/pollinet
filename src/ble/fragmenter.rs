@@ -35,7 +35,11 @@ pub fn fragment_transaction_with_max_payload(
     transaction_bytes: &[u8],
     max_payload: usize,
 ) -> Vec<TransactionFragment> {
-    tracing::info!("Fragmenting transaction: {} bytes (max_payload: {})", transaction_bytes.len(), max_payload);
+    tracing::info!(
+        "Fragmenting transaction: {} bytes (max_payload: {})",
+        transaction_bytes.len(),
+        max_payload
+    );
 
     // Calculate transaction ID (SHA256 hash)
     let mut hasher = Sha256::new();
@@ -57,10 +61,10 @@ pub fn fragment_transaction_with_max_payload(
     // Total overhead: ~45-50 bytes (measured: 44 bytes actual, using 50 for safety margin)
     let bincode_overhead = 50; // Increased from 40 to account for actual measured overhead
     let max_data = max_payload.saturating_sub(bincode_overhead);
-    
+
     // Ensure minimum fragment size (but allow much larger with good MTU)
     let max_data = max_data.max(20).min(512); // 20 bytes min, 512 bytes max
-    
+
     // Calculate number of fragments needed using the same max_data that we'll use for chunking
     // CRITICAL FIX: Use max_data instead of MAX_FRAGMENT_DATA to match actual chunking
     let total_fragments = (transaction_bytes.len() + max_data - 1) / max_data;
@@ -152,17 +156,17 @@ pub fn reconstruct_transaction(fragments: &[TransactionFragment]) -> Result<Vec<
     // Verify we have all required indices (0..total_fragments-1)
     // Use HashSet to check for duplicates and missing indices
     use std::collections::HashSet;
-    let received_indices: HashSet<u16> = sorted_fragments.iter()
-        .map(|f| f.fragment_index)
-        .collect();
-    
+    let received_indices: HashSet<u16> =
+        sorted_fragments.iter().map(|f| f.fragment_index).collect();
+
     let expected_indices: HashSet<u16> = (0..total_fragments as u16).collect();
-    
+
     // Check for missing indices
-    let missing_indices: Vec<u16> = expected_indices.difference(&received_indices)
+    let missing_indices: Vec<u16> = expected_indices
+        .difference(&received_indices)
         .cloned()
         .collect();
-    
+
     if !missing_indices.is_empty() {
         return Err(format!(
             "Missing fragment indices: {:?} (have {} fragments, expected indices 0..{})",
@@ -171,7 +175,7 @@ pub fn reconstruct_transaction(fragments: &[TransactionFragment]) -> Result<Vec<
             total_fragments - 1
         ));
     }
-    
+
     // Check for duplicate indices (shouldn't happen if we have exactly total_fragments unique fragments)
     if received_indices.len() != total_fragments as usize {
         return Err(format!(
