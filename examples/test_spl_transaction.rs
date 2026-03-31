@@ -2,16 +2,16 @@
 //!
 //! This example demonstrates creating and testing SPL token transfer transactions
 //! with automatic idempotent ATA (Associated Token Account) creation.
-//! 
+//!
 //! Key features:
-//! - Loads wallet from private key
+//! - Loads wallet from WALLET_PRIVATE_KEY env var (or creates a new funded wallet)
 //! - Creates SPL token transfer with idempotent ATA creation
 //! - Verifies transaction structure (3 instructions: advance nonce, create ATA, transfer)
 //! - Tests both online and offline transaction creation
 //! - Demonstrates signing and submission
 //!
 //! Flow:
-//! 1. Load sender keypair from private key
+//! 1. Load sender keypair from .env (WALLET_PRIVATE_KEY / SOLANA_URL)
 //! 2. Verify sender balance and token account
 //! 3. Create unsigned SPL transaction (with idempotent ATA creation)
 //! 4. Verify transaction has 3 instructions
@@ -22,14 +22,15 @@
 //! Run with:
 //!   cargo run --example test_spl_transaction
 
+mod wallet_utils;
+use wallet_utils::{create_and_fund_wallet, get_rpc_url};
+
 use base64;
-use bs58;
 use pollinet::PolliNetSDK;
 use pollinet::nonce;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use tracing::info;
 
@@ -41,27 +42,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("=== PolliNet SPL Transaction Test with Idempotent ATA Creation ===\n");
 
     // 1. Initialize the SDK and RPC client
-    let rpc_url = "https://solana-devnet.g.alchemy.com/v2/XuGpQPCCl-F1SSI-NYtsr0mSxQ8P8ts6";
-    let sdk = PolliNetSDK::new_with_rpc(rpc_url).await?;
+    let rpc_url = get_rpc_url();
+    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
     let rpc_client =
-        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::finalized());
+        RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::finalized());
     info!("✅ SDK initialized with RPC client: {}", rpc_url);
 
-    // 2. Load sender keypair from private key
-    info!("\n=== Loading Sender Keypair from Private Key ===");
-    let sender_private_key =
-        "5zRwe731N375MpGuQvQoUjSMUpoXNLqsGWE9J8SoqHKfivhUpNxwt3o9Gdu6jjCby4dJRCGBA6HdBzrhvLVhUaqu";
-
-    let private_key_bytes = bs58::decode(sender_private_key)
-        .into_vec()
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let sender_keypair = Keypair::try_from(&private_key_bytes[..])
-        .map_err(|e| format!("Failed to create keypair from private key: {}", e))?;
-
-    info!("✅ Sender wallet loaded from private key");
+    // 2. Load sender keypair from .env (WALLET_PRIVATE_KEY) or create a new funded wallet
+    info!("\n=== Loading Sender Keypair ===");
+    let sender_keypair = create_and_fund_wallet(&rpc_client, 2.0).await?;
+    info!("✅ Sender wallet ready");
     info!("   Public key: {}", sender_keypair.pubkey());
-    info!("   Private key length: {} bytes", private_key_bytes.len());
 
     // 3. Check sender SOL balance
     info!("\n=== Checking Sender Balance ===");
@@ -71,10 +62,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sender_balance,
         sender_balance as f64 / LAMPORTS_PER_SOL as f64
     );
-
-    if sender_balance < 2_000_000 {
-        return Err("Sender has insufficient balance. Please fund the wallet with at least 0.002 SOL (0.001 for nonce account + 0.001 for fees).".into());
-    }
 
     // 4. Create or use existing nonce account
     info!("\n=== Setting Up Nonce Account ===");
@@ -246,7 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 11. Summary
     info!("\n=== Test Summary ===");
-    info!("✅ 1. Loaded sender wallet from private key");
+    info!("✅ 1. Loaded sender wallet from .env (WALLET_PRIVATE_KEY) or created new wallet");
     info!("✅ 2. Verified sender SOL balance");
     info!("✅ 3. Created new nonce account: {}", nonce_account);
     info!("✅ 4. Created unsigned SPL transaction with idempotent ATA creation");
@@ -262,7 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("\n=== Key Features Tested ===");
-    info!("• Wallet import from private key (bs58)");
+    info!("• Wallet loaded from .env (WALLET_PRIVATE_KEY) or auto-created");
     info!("• SPL token transfer transaction creation");
     info!("• Idempotent ATA creation instruction");
     info!("• Transaction structure verification (3 instructions)");

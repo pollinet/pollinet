@@ -81,7 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &vote_account,
             vote_choice,
             &fee_payer,
-            &nonce_account,
+            Some(nonce_account.as_str()),
+            None,
         )
         .await?;
 
