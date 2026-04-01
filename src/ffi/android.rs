@@ -784,6 +784,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareOfflineBundle(
     _class: JClass,
     handle: jlong,
     request_json: JByteArray,
+    sender_keypair_bytes: JByteArray,
 ) -> jstring {
     let result = (|| {
         let transport = get_transport(handle)?;
@@ -794,11 +795,12 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareOfflineBundle(
         let request: PrepareOfflineBundleRequest = serde_json::from_slice(&request_data)
             .map_err(|e| format!("Failed to parse request: {}", e))?;
 
-        // Parse sender keypair from base64
-        let keypair_bytes = base64::decode(&request.sender_keypair_base64)
-            .map_err(|e| format!("Invalid keypair base64: {}", e))?;
+        // Parse sender keypair from raw bytes (never passes through JSON)
+        let keypair_bytes: Vec<u8> = env
+            .convert_byte_array(&sender_keypair_bytes)
+            .map_err(|e| format!("Failed to read sender keypair bytes: {}", e))?;
         let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
-            .map_err(|e| format!("Invalid keypair bytes: {}", e))?;
+            .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
 
         tracing::info!(
             "📦 Preparing offline bundle for {} transactions",
@@ -916,6 +918,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createOfflineTransaction(
     _class: JClass,
     handle: jlong,
     request_json: JByteArray,
+    sender_keypair_bytes: JByteArray,
 ) -> jstring {
     let result = (|| {
         let transport = get_transport(handle)?;
@@ -926,15 +929,15 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createOfflineTransaction(
         let request: CreateOfflineTransactionRequest = serde_json::from_slice(&request_data)
             .map_err(|e| format!("Failed to parse request: {}", e))?;
 
-        // Parse keypairs
-        let sender_bytes = base64::decode(&request.sender_keypair_base64)
-            .map_err(|e| format!("Invalid sender keypair: {}", e))?;
-        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&sender_bytes)
+        // Parse sender keypair from raw bytes (never passes through JSON).
+        // The sender is also the nonce authority (set at nonce account creation time).
+        let keypair_bytes: Vec<u8> = env
+            .convert_byte_array(&sender_keypair_bytes)
+            .map_err(|e| format!("Failed to read sender keypair bytes: {}", e))?;
+        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
             .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
-
-        let authority_bytes = base64::decode(&request.nonce_authority_keypair_base64)
-            .map_err(|e| format!("Invalid authority keypair: {}", e))?;
-        let authority_keypair = solana_sdk::signature::Keypair::from_bytes(&authority_bytes)
+        // Authority is always the sender (enforced at nonce account creation)
+        let authority_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
             .map_err(|e| format!("Invalid authority keypair bytes: {}", e))?;
 
         tracing::info!("📴 Creating OFFLINE transaction (no internet required)");
@@ -1664,160 +1667,6 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getAvailableNonce(
 
         let response: FfiResult<Option<crate::ffi::types::CachedNonceData>> =
             FfiResult::success(ffi_nonce);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Add nonce signature to a payer-signed transaction
-/// This is called after MWA has added the payer signature (first signature)
-/// to add the nonce keypair signature (second signature)
-#[no_mangle]
-#[cfg(feature = "android")]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addNonceSignature(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| -> Result<String, String> {
-        tracing::info!("✍️  FFI addNonceSignature called with handle={}", handle);
-
-        // Convert request
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        tracing::debug!("📥 Request data size: {} bytes", request_data.len());
-
-        // Parse request
-        #[derive(serde::Deserialize)]
-        struct AddNonceSignatureRequest {
-            #[serde(default = "crate::ffi::types::default_version")]
-            version: u32,
-            #[serde(rename = "payerSignedTransactionBase64")]
-            payer_signed_transaction_base64: String,
-            #[serde(rename = "nonceKeypairBase64")]
-            nonce_keypair_base64: Vec<String>,
-        }
-
-        let request: AddNonceSignatureRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!(
-            "✍️  Adding {} nonce signature(s) to payer-signed transaction",
-            request.nonce_keypair_base64.len()
-        );
-        tracing::debug!("   Request version: {}", request.version);
-        tracing::debug!(
-            "   Payer-signed transaction size: {} bytes (base64)",
-            request.payer_signed_transaction_base64.len()
-        );
-
-        // Decode payer-signed transaction
-        tracing::debug!("🔓 Decoding payer-signed transaction from base64...");
-        let payer_signed_tx_bytes = base64::decode(&request.payer_signed_transaction_base64)
-            .map_err(|e| {
-                tracing::error!("❌ Failed to decode payer-signed transaction: {}", e);
-                format!("Failed to decode payer-signed transaction: {}", e)
-            })?;
-
-        tracing::debug!(
-            "   Decoded transaction size: {} bytes",
-            payer_signed_tx_bytes.len()
-        );
-
-        // Deserialize transaction
-        let mut tx: solana_sdk::transaction::Transaction =
-            bincode1::deserialize(&payer_signed_tx_bytes)
-                .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
-
-        tracing::info!(
-            "Transaction has {} signatures before adding nonce signature",
-            tx.signatures.len()
-        );
-
-        // Decode all nonce keypairs
-        tracing::debug!(
-            "🔑 Decoding {} nonce keypair(s)...",
-            request.nonce_keypair_base64.len()
-        );
-        let mut nonce_keypairs = Vec::new();
-        for (i, keypair_base64) in request.nonce_keypair_base64.iter().enumerate() {
-            tracing::debug!(
-                "   Decoding keypair {} (base64 size: {} bytes)...",
-                i + 1,
-                keypair_base64.len()
-            );
-            let nonce_keypair_bytes = base64::decode(keypair_base64).map_err(|e| {
-                tracing::error!("❌ Failed to decode nonce keypair {}: {}", i, e);
-                format!("Failed to decode nonce keypair {}: {}", i, e)
-            })?;
-
-            if nonce_keypair_bytes.len() != 64 {
-                return Err(format!(
-                    "Invalid nonce keypair length: expected 64, got {}",
-                    nonce_keypair_bytes.len()
-                ));
-            }
-
-            let nonce_keypair = solana_sdk::signature::Keypair::from_bytes(&nonce_keypair_bytes)
-                .map_err(|e| {
-                    tracing::error!("❌ Failed to create keypair {} from bytes: {}", i, e);
-                    format!("Failed to create keypair {} from bytes: {}", i, e)
-                })?;
-
-            tracing::info!(
-                "  🔑 Nonce keypair {} pubkey: {}",
-                i + 1,
-                nonce_keypair.pubkey()
-            );
-            nonce_keypairs.push(nonce_keypair);
-        }
-
-        tracing::debug!("✅ Decoded {} nonce keypair(s)", nonce_keypairs.len());
-
-        // Get the blockhash from the transaction
-        let blockhash = tx.message.recent_blockhash;
-        tracing::debug!("   Using blockhash: {}", blockhash);
-
-        // Add all nonce signatures (each nonce account needs to sign)
-        // Convert Vec<Keypair> to Vec<&Keypair> for try_partial_sign
-        tracing::debug!(
-            "✍️  Signing transaction with {} nonce keypair(s)...",
-            nonce_keypairs.len()
-        );
-        let nonce_keypair_refs: Vec<&solana_sdk::signature::Keypair> =
-            nonce_keypairs.iter().collect();
-        tx.try_partial_sign(&nonce_keypair_refs, blockhash)
-            .map_err(|e| {
-                tracing::error!("❌ Failed to add nonce signatures: {}", e);
-                format!("Failed to add nonce signatures: {}", e)
-            })?;
-
-        tracing::info!(
-            "✅ Transaction now has {} signatures (payer + nonce)",
-            tx.signatures.len()
-        );
-
-        // Serialize the fully-signed transaction
-        tracing::debug!("💾 Serializing fully-signed transaction...");
-        let fully_signed_bytes = bincode1::serialize(&tx).map_err(|e| {
-            tracing::error!("❌ Failed to serialize fully-signed transaction: {}", e);
-            format!("Failed to serialize fully-signed transaction: {}", e)
-        })?;
-
-        tracing::debug!("   Serialized size: {} bytes", fully_signed_bytes.len());
-
-        let fully_signed_base64 = base64::encode(&fully_signed_bytes);
-
-        tracing::info!(
-            "✅ Fully-signed transaction ready for submission ({} bytes)",
-            fully_signed_bytes.len()
-        );
-
-        let response: FfiResult<String> = FfiResult::success(fully_signed_base64);
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
 

@@ -2077,24 +2077,30 @@ impl TransactionService {
             tracing::debug!("     Payer: {}", payer_pubkey);
             tracing::debug!("     Blockhash: {}", recent_blockhash);
 
-            // Create transaction with all batched instructions (completely unsigned)
+            // Create transaction with all batched instructions
             let mut tx = Transaction::new_with_payer(&instructions, Some(&payer_pubkey));
             tx.message.recent_blockhash = recent_blockhash;
 
-            // DO NOT sign yet - keep it completely unsigned
-            // MWA will add payer signature first, then we'll add nonce signatures
-            tracing::info!("  📦 Creating unsigned batched transaction (no signatures yet)");
+            // Sign with nonce keypairs now — private keys never leave Rust
+            let nonce_keypair_refs: Vec<&Keypair> = nonce_keypairs.iter().collect();
+            tx.try_partial_sign(&nonce_keypair_refs, recent_blockhash)
+                .map_err(|e| {
+                    TransactionError::Signing(format!(
+                        "Failed to sign with nonce keypairs: {}",
+                        e
+                    ))
+                })?;
+
+            tracing::info!(
+                "  📦 Nonce-pre-signed transaction ready (needs payer signature via MWA)"
+            );
             tracing::debug!(
                 "     Transaction has {} account(s) in message",
                 tx.message.account_keys.len()
             );
-            tracing::debug!(
-                "     Transaction has {} signature slot(s) (all empty)",
-                tx.signatures.len()
-            );
 
-            // Serialize unsigned transaction
-            tracing::debug!("  💾 Serializing unsigned transaction...");
+            // Serialize transaction (already has nonce signatures, awaiting payer)
+            tracing::debug!("  💾 Serializing transaction...");
             let tx_bytes = bincode1::serialize(&tx).map_err(|e| {
                 tracing::error!("❌ Failed to serialize transaction: {}", e);
                 TransactionError::Serialization(format!("Failed to serialize transaction: {}", e))
@@ -2102,34 +2108,13 @@ impl TransactionService {
 
             tracing::debug!("     Serialized transaction size: {} bytes", tx_bytes.len());
 
-            // Serialize all nonce keypairs (will be used to add signatures after MWA signs)
-            tracing::debug!(
-                "  🔐 Serializing {} nonce keypair(s)...",
-                nonce_keypairs.len()
-            );
-            let nonce_keypair_base64_vec: Vec<String> = nonce_keypairs
-                .iter()
-                .map(|kp| base64::encode(&kp.to_bytes()))
-                .collect();
-
             let nonce_pubkey_vec: Vec<String> =
                 nonce_pubkeys.iter().map(|pk| pk.to_string()).collect();
 
-            tracing::debug!(
-                "     Serialized {} keypair(s) and {} pubkey(s)",
-                nonce_keypair_base64_vec.len(),
-                nonce_pubkey_vec.len()
-            );
-
             let unsigned_tx_base64 = base64::encode(&tx_bytes);
-            tracing::debug!(
-                "     Base64 encoded transaction size: {} bytes",
-                unsigned_tx_base64.len()
-            );
 
             result.push(UnsignedNonceTransaction {
                 unsigned_transaction_base64: unsigned_tx_base64,
-                nonce_keypair_base64: nonce_keypair_base64_vec,
                 nonce_pubkey: nonce_pubkey_vec,
             });
 

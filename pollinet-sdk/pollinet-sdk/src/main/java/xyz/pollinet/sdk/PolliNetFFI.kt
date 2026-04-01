@@ -147,17 +147,19 @@ object PolliNetFFI {
      * Prepare offline bundle for creating transactions without internet
      * This is a CORE PolliNet feature for offline/mesh transaction creation
      * @param requestJson JSON-encoded PrepareOfflineBundleRequest
+     * @param senderKeypairBytes Raw 64-byte sender keypair (never serialized into JSON)
      * @return JSON FfiResult with OfflineTransactionBundle JSON string
      */
-    external fun prepareOfflineBundle(handle: Long, requestJson: ByteArray): String
+    external fun prepareOfflineBundle(handle: Long, requestJson: ByteArray, senderKeypairBytes: ByteArray): String
 
     /**
      * Create transaction completely offline using cached nonce data
      * NO internet required - core PolliNet offline feature
      * @param requestJson JSON-encoded CreateOfflineTransactionRequest
+     * @param senderKeypairBytes Raw 64-byte sender keypair (never serialized into JSON)
      * @return JSON FfiResult with base64-encoded compressed transaction
      */
-    external fun createOfflineTransaction(handle: Long, requestJson: ByteArray): String
+    external fun createOfflineTransaction(handle: Long, requestJson: ByteArray, senderKeypairBytes: ByteArray): String
 
     /**
      * Submit offline-created transaction to blockchain
@@ -245,9 +247,7 @@ object PolliNetFFI {
     external fun refreshOfflineBundle(handle: Long): String
 
     external fun getAvailableNonce(handle: Long): String
-    
-    external fun addNonceSignature(handle: Long, requestJson: ByteArray): String
-    
+
     /**
      * Refresh the blockhash in an unsigned transaction.
      * 

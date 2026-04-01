@@ -1452,15 +1452,14 @@ private fun SplVoteNonceTestContent(
                                         refreshedTxBase64
                                     )
                                     
-                                    // Add nonce signatures (co-sign all nonce accounts in this batch)
-                                    val finalTxResult = sdk!!.addNonceSignature(
-                                        payerSignedTransactionBase64 = android.util.Base64.encodeToString(
-                                            signedTxBytes,
-                                            android.util.Base64.NO_WRAP
-                                        ),
-                                        nonceKeypairBase64 = unsignedTx.nonceKeypairBase64
+                                    // Transaction is already fully signed: nonce keypairs pre-signed in Rust,
+                                    // payer signature just added by MWA — submit directly.
+                                    val finalTxBase64 = android.util.Base64.encodeToString(
+                                        signedTxBytes,
+                                        android.util.Base64.NO_WRAP
                                     )
-                                    
+                                    val finalTxResult = Result.success(finalTxBase64)
+
                                     finalTxResult.fold(
                                         onSuccess = { finalTxBase64 ->
                                             // Submit to blockchain and automatically cache
