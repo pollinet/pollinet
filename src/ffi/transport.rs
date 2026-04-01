@@ -78,6 +78,12 @@ macro_rules! t_error {
 /// Maximum MTU size for BLE
 const MAX_MTU: usize = 512;
 
+/// Maximum number of distinct transactions buffered for reassembly at once
+const MAX_PENDING_TRANSACTIONS: usize = 64;
+
+/// Maximum number of fragments buffered per transaction
+const MAX_FRAGMENTS_PER_TRANSACTION: usize = 256;
+
 /// Host-driven BLE transport bridge
 pub struct HostBleTransport {
     /// Queue of outbound frames ready to send
@@ -110,6 +116,9 @@ pub struct HostBleTransport {
 
     /// PolliNet SDK instance (Phase 2 - for queue access)
     pub sdk: Arc<crate::PolliNetSDK>,
+
+    /// Queue storage directory (replaces POLLINET_QUEUE_STORAGE env var)
+    queue_storage_dir: Mutex<Option<String>>,
 }
 
 impl HostBleTransport {
@@ -138,10 +147,6 @@ impl HostBleTransport {
             .await
             .map_err(|e| format!("Failed to create transaction service: {}", e))?;
 
-        let sdk = crate::PolliNetSDK::new()
-            .await
-            .map_err(|e| format!("Failed to create SDK: {}", e))?;
-
         t_info!("✅ TransactionService created (no RPC)");
 
         let sdk = crate::PolliNetSDK::new()
@@ -161,6 +166,7 @@ impl HostBleTransport {
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
             sdk: Arc::new(sdk),
+            queue_storage_dir: Mutex::new(None),
         };
 
         t_info!("✅ HostBleTransport::new() initialized");
@@ -177,10 +183,6 @@ impl HostBleTransport {
         let transaction_service = TransactionService::new_with_rpc(rpc_url)
             .await
             .map_err(|e| format!("Failed to create transaction service: {}", e))?;
-
-        let sdk = crate::PolliNetSDK::new_with_rpc(rpc_url)
-            .await
-            .map_err(|e| format!("Failed to create SDK: {}", e))?;
 
         t_info!("✅ TransactionService created with RPC");
 
@@ -201,6 +203,7 @@ impl HostBleTransport {
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
             sdk: Arc::new(sdk),
+            queue_storage_dir: Mutex::new(None),
         };
 
         t_info!("✅ HostBleTransport::new_with_rpc() initialized");
@@ -271,6 +274,16 @@ impl HostBleTransport {
         Ok(())
     }
 
+    /// Set queue storage directory (thread-safe, no env var mutation)
+    pub fn set_queue_storage_dir(&self, dir: String) {
+        *self.queue_storage_dir.lock() = Some(dir);
+    }
+
+    /// Get queue storage directory
+    pub fn get_queue_storage_dir(&self) -> Option<String> {
+        self.queue_storage_dir.lock().clone()
+    }
+
     /// Get secure storage if available
     pub fn secure_storage(&self) -> Option<&Arc<SecureStorage>> {
         if self.secure_storage.is_some() {
@@ -320,8 +333,30 @@ impl HostBleTransport {
 
         let mut buffers = self.inbound_buffers.lock();
 
+        // Enforce per-transaction and total buffer limits (DoS prevention)
+        if buffers.len() >= MAX_PENDING_TRANSACTIONS && !buffers.contains_key(&tx_id) {
+            let error_msg = format!(
+                "Inbound buffer full ({} pending txs), dropping fragment for {}",
+                buffers.len(),
+                tx_id
+            );
+            t_warn!("⚠️ {}", error_msg);
+            drop(buffers);
+            return Err(error_msg);
+        }
+
         // Store TransactionFragment directly (no conversion needed)
         let buffer = buffers.entry(tx_id.clone()).or_insert_with(Vec::new);
+
+        if buffer.len() >= MAX_FRAGMENTS_PER_TRANSACTION {
+            let error_msg = format!(
+                "Too many fragments for tx {} (max {})",
+                tx_id, MAX_FRAGMENTS_PER_TRANSACTION
+            );
+            t_warn!("⚠️ {}", error_msg);
+            drop(buffers);
+            return Err(error_msg);
+        }
         let buffer_size_before = buffer.len();
 
         // Validate fragment index is within expected range
@@ -796,39 +831,40 @@ impl HostBleTransport {
             tx_hash.len()
         );
 
-        // Duplicate check commented out - all reassembled transactions are queued
-        // // Check if transaction was already submitted
-        // let submitted = self.submitted_tx_hashes.lock();
-        // if submitted.contains_key(&tx_hash) {
-        //     drop(submitted);
-        //     t_warn!("⚠️ Transaction {} already submitted (duplicate detected)",
-        //         tx_hash_hex.chars().take(16).collect::<String>());
-        //     t_info!("❌ push_received_transaction() returning false (duplicate - already submitted)");
-        //     return false;
-        // }
-        // drop(submitted);
-        //
-        // // Check if transaction is already in the received queue
-        // let queue = self.received_tx_queue.lock();
-        // for (_, queued_tx_bytes, _) in queue.iter() {
-        //     let mut queued_hasher = Sha256::new();
-        //     queued_hasher.update(queued_tx_bytes);
-        //     let queued_hash = queued_hasher.finalize().to_vec();
-        //
-        //     if queued_hash == tx_hash {
-        //         drop(queue);
-        //         t_warn!("⚠️ Transaction {} already in received queue (duplicate detected)",
-        //             tx_hash_hex.chars().take(16).collect::<String>());
-        //         t_info!("❌ push_received_transaction() returning false (duplicate - already queued)");
-        //         return false;
-        //     }
-        // }
-        // drop(queue);
+        // Check if transaction was already submitted
+        let submitted = self.submitted_tx_hashes.lock();
+        if submitted.contains_key(&tx_hash) {
+            drop(submitted);
+            t_warn!(
+                "⚠️ Transaction {} already submitted (duplicate detected)",
+                tx_hash_hex.chars().take(16).collect::<String>()
+            );
+            return false;
+        }
+        drop(submitted);
 
-        // Proceed with adding to queue (no duplicate check)
+        // Check if transaction is already in the received queue
+        let queue = self.received_tx_queue.lock();
+        for (_, queued_tx_bytes, _) in queue.iter() {
+            let mut queued_hasher = Sha256::new();
+            queued_hasher.update(queued_tx_bytes);
+            let queued_hash = queued_hasher.finalize().to_vec();
+
+            if queued_hash == tx_hash {
+                drop(queue);
+                t_warn!(
+                    "⚠️ Transaction {} already in received queue (duplicate detected)",
+                    tx_hash_hex.chars().take(16).collect::<String>()
+                );
+                return false;
+            }
+        }
+        drop(queue);
+
+        // Proceed with adding to queue
         let now = Self::current_timestamp();
         t_debug!(
-            "📥 Processing transaction {} (no duplicate check)",
+            "📥 Processing transaction {}",
             tx_hash_hex.chars().take(16).collect::<String>()
         );
 

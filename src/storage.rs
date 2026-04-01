@@ -48,22 +48,26 @@ impl SecureStorage {
         self.storage_dir.join(BUNDLE_FILENAME)
     }
 
-    /// Derive encryption key from environment variable or use default
-    fn get_encryption_key() -> Key<Aes256Gcm> {
-        let key_str = env::var("POLLINET_ENCRYPTION_KEY")
-            .unwrap_or_else(|_| "pollinet-default-encryption-key".to_string());
+    /// Derive encryption key from environment variable.
+    /// Returns an error if POLLINET_ENCRYPTION_KEY is not set — no insecure fallback.
+    fn get_encryption_key() -> Result<Key<Aes256Gcm>, StorageError> {
+        let key_str = env::var("POLLINET_ENCRYPTION_KEY").map_err(|_| {
+            StorageError::Encryption(
+                "POLLINET_ENCRYPTION_KEY must be set — no insecure fallback allowed".to_string(),
+            )
+        })?;
 
         // Derive 256-bit key from the string using SHA-256
         // This ensures we always have exactly 32 bytes for AES-256-GCM
         let mut hasher = Sha256::new();
         hasher.update(key_str.as_bytes());
         let key_bytes = hasher.finalize();
-        *Key::<Aes256Gcm>::from_slice(&key_bytes)
+        Ok(*Key::<Aes256Gcm>::from_slice(&key_bytes))
     }
 
     /// Encrypt data using AES-256-GCM
     fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>, StorageError> {
-        let key = Self::get_encryption_key();
+        let key = Self::get_encryption_key()?;
         let cipher = Aes256Gcm::new(&key);
 
         // Generate random nonce
@@ -99,7 +103,7 @@ impl SecureStorage {
             ));
         }
 
-        let key = Self::get_encryption_key();
+        let key = Self::get_encryption_key()?;
         let cipher = Aes256Gcm::new(&key);
 
         // Extract nonce and ciphertext
@@ -165,10 +169,12 @@ impl SecureStorage {
                 StorageError::Decryption(format!("Invalid UTF-8 after decryption: {}", e))
             })?
         } else {
-            // File is plain JSON (backward compatibility with old unencrypted files)
-            tracing::warn!("⚠️  Loading unencrypted bundle file (backward compatibility mode)");
-            String::from_utf8(encrypted_data)
-                .map_err(|e| StorageError::Io(format!("Failed to read bundle as UTF-8: {}", e)))?
+            return Err(StorageError::Decryption(
+                "Bundle file is not encrypted (missing PNET header). \
+                 Refusing to load for security. Delete the file and call \
+                 prepareOfflineBundle to recreate it."
+                    .to_string(),
+            ));
         };
 
         // Deserialize bundle

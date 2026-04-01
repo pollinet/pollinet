@@ -3,7 +3,7 @@
 //! Handles broadcasting signed Solana transactions across the BLE mesh network.
 //! Fragments are sent to all connected peers with flood prevention and tracking.
 
-use crate::ble::mesh::{MeshPacket, MeshRouter, PacketType, TransactionFragment};
+use crate::ble::mesh::{MeshPacket, PacketType, TransactionFragment};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

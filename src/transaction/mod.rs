@@ -2970,6 +2970,3 @@ impl From<crate::util::lz::Lz4Error> for TransactionError {
 
 // Re-export for convenience
 pub use solana_sdk::hash::Hash;
-
-pub mod pollinet_message;
-pub use pollinet_message::{HopRecord, PolliNetMessage};

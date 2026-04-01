@@ -38,7 +38,7 @@ static ANDROID_LOGGER_INIT: Once = Once::new();
 // Global state for transport instances
 #[cfg(feature = "android")]
 lazy_static::lazy_static! {
-    static ref TRANSPORTS: Arc<Mutex<Vec<Arc<HostBleTransport>>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref TRANSPORTS: Arc<Mutex<Vec<Option<Arc<HostBleTransport>>>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
 // =============================================================================
@@ -143,9 +143,9 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
             })?;
             info!("✅ Secure storage configured");
 
-            // Phase 5: Set queue storage directory (queues will persist to subdirectory)
+            // Phase 5: Set queue storage directory (stored on transport, no env var mutation)
             let queue_storage_dir = format!("{}/queues", storage_dir);
-            std::env::set_var("POLLINET_QUEUE_STORAGE", &queue_storage_dir);
+            transport.set_queue_storage_dir(queue_storage_dir.clone());
             info!("✅ Queue persistence enabled at: {}", queue_storage_dir);
         } else {
             info!("ℹ️  No storage directory provided - bundle persistence disabled");
@@ -155,7 +155,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
 
         let transport_arc = Arc::new(transport);
         let mut transports = TRANSPORTS.lock();
-        transports.push(transport_arc);
+        transports.push(Some(transport_arc));
         let handle = (transports.len() - 1) as jlong;
 
         info!(
@@ -199,10 +199,10 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_shutdown(
     _class: JClass,
     handle: jlong,
 ) {
-    let transports = TRANSPORTS.lock();
+    let mut transports = TRANSPORTS.lock();
     if handle >= 0 && (handle as usize) < transports.len() {
-        // Just mark as None; we'll keep the Vec stable for other handles
-        tracing::info!("🛑 Shutting down SDK handle {}", handle);
+        transports[handle as usize] = None;
+        tracing::info!("🛑 SDK handle {} shut down and invalidated", handle);
     }
 }
 
@@ -736,7 +736,9 @@ fn get_transport(handle: jlong) -> Result<Arc<HostBleTransport>, String> {
     if handle < 0 || handle as usize >= transports.len() {
         return Err(format!("Invalid handle: {}", handle));
     }
-    Ok(transports[handle as usize].clone())
+    transports[handle as usize]
+        .clone()
+        .ok_or_else(|| format!("Handle {} has been shut down", handle))
 }
 
 #[cfg(feature = "android")]
@@ -2583,7 +2585,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_saveQueues(
                 .map_err(|e| format!("Failed to save queues: {}", e))?;
 
             // Save received queue if storage directory is available
-            if let Ok(queue_storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+            if let Some(queue_storage_dir) = transport.get_queue_storage_dir() {
                 if let Err(e) = transport.save_received_queue(&queue_storage_dir) {
                     log::warn!("⚠️ Failed to save received queue: {}", e);
                     // Don't fail the entire operation if received queue save fails
@@ -2623,7 +2625,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_autoSaveQueues(
 
             // Auto-save received queue if storage directory is available
             // Note: Received queue uses the same debouncing as queue manager
-            if let Ok(queue_storage_dir) = std::env::var("POLLINET_QUEUE_STORAGE") {
+            if let Some(queue_storage_dir) = transport.get_queue_storage_dir() {
                 if let Err(e) = transport.save_received_queue(&queue_storage_dir) {
                     log::warn!("⚠️ Failed to auto-save received queue: {}", e);
                     // Don't fail the entire operation if received queue save fails
