@@ -2,6 +2,8 @@
 //!
 //! Handles creation, signing, compression, fragmentation, and submission of Solana transactions
 
+#![allow(deprecated)]
+
 use crate::{BLE_MTU_SIZE, COMPRESSION_THRESHOLD};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -74,71 +76,10 @@ pub struct OfflineTransactionBundle {
     pub created_at: u64,
 }
 
-/// Transaction packet for BLE transmission
-/// Contains pre-signed transaction and metadata
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BLETransactionPacket {
-    /// Pre-signed, possibly compressed transaction bytes
-    pub transaction_bytes: Vec<u8>,
-    /// Metadata for diagnostics and verification
-    pub metadata: TransactionMetadata,
-    /// SHA-256 checksum for integrity verification
-    pub checksum: [u8; 32],
-}
-
-/// Nonce refresh request sent from online device back to offline device
-/// Used when nonce has been advanced and transaction needs to be rebuilt
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NonceRefreshRequest {
-    /// Nonce account that was advanced
-    pub nonce_account: String,
-    /// New blockhash from advanced nonce
-    pub new_blockhash: String,
-    /// New nonce authority
-    pub new_authority: String,
-    /// Original transaction recipient
-    pub original_recipient: String,
-    /// Original transaction amount
-    pub original_amount: u64,
-    /// Timestamp of refresh request
-    pub timestamp: u64,
-}
-
-/// Success confirmation sent back over BLE
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SuccessConfirmation {
-    /// Transaction signature
-    pub signature: String,
-    /// Timestamp of successful submission
-    pub timestamp: u64,
-}
-
-/// Pending transaction in local cache
-#[derive(Debug, Clone)]
-pub struct PendingTransaction {
-    /// Transaction ID
-    pub id: String,
-    /// Serialized transaction data
-    pub data: Vec<u8>,
-    /// Creation timestamp
-    pub created_at: std::time::Instant,
-    /// Transaction metadata
-    pub metadata: TransactionMetadata,
-}
-
-/// Transaction metadata
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TransactionMetadata {
-    /// Sender public key
-    pub sender: String,
-    /// Recipient public key
-    pub recipient: String,
-    /// Transaction amount
-    pub amount: u64,
-    /// Maximum fee
-    pub max_fee: u64,
-    /// Expiration timestamp
-    pub expires_at: Option<std::time::SystemTime>,
+impl Default for OfflineTransactionBundle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OfflineTransactionBundle {
@@ -218,14 +159,14 @@ impl OfflineTransactionBundle {
     pub fn is_empty(&self) -> bool {
         self.available_nonces() == 0
     }
-    
+
     /// Get the next available nonce account data
     /// Returns a clone of the first unused nonce, or None if all are used
     pub fn get_available_nonce(&self) -> Option<CachedNonceData> {
         self.get_next_available_nonce()
             .map(|(_, nonce)| nonce.clone())
     }
-    
+
     /// Get the age of this bundle in hours
     pub fn age_hours(&self) -> u64 {
         let now = std::time::SystemTime::now()
@@ -253,31 +194,6 @@ impl OfflineTransactionBundle {
         let json = std::fs::read_to_string(path)?;
         let bundle: Self = serde_json::from_str(&json)?;
         Ok(bundle)
-    }
-}
-
-impl BLETransactionPacket {
-    /// Create a new BLE transaction packet
-    pub fn new(transaction_bytes: Vec<u8>, metadata: TransactionMetadata) -> Self {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(&transaction_bytes);
-        let checksum: [u8; 32] = hasher.finalize().into();
-
-        Self {
-            transaction_bytes,
-            metadata,
-            checksum,
-        }
-    }
-
-    /// Verify the checksum matches the transaction bytes
-    pub fn verify_checksum(&self) -> bool {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(&self.transaction_bytes);
-        let computed: [u8; 32] = hasher.finalize().into();
-        computed == self.checksum
     }
 }
 
@@ -311,144 +227,79 @@ impl FragmentSet {
             last_updated: now,
         }
     }
-    
+
     /// Get number of fragments received
     pub fn received_count(&self) -> usize {
-        self.received_fragments.iter().filter(|f| f.is_some()).count()
-    }
-    
-    /// Estimate expected transaction size from received fragments
-    pub fn expected_size(&self) -> usize {
-        if self.received_count() == 0 {
-            return 0;
-        }
-        
-        let total_data: usize = self.received_fragments
+        self.received_fragments
             .iter()
-            .flatten()
-            .map(|f| f.data.len())
-            .sum();
-        
-        let avg_size = total_data / self.received_count();
-        avg_size * self.total_fragments as usize
+            .filter(|f| f.is_some())
+            .count()
     }
-    
-    /// Check if all fragments have been received
-    pub fn is_complete(&self) -> bool {
-        self.received_fragments.iter().all(|f| f.is_some())
-    }
-    
+
     /// Check if fragment set is stale (older than timeout)
     pub fn is_stale(&self, timeout_secs: u64) -> bool {
         self.first_received.elapsed().as_secs() > timeout_secs
     }
-    
+
     /// Get age in seconds
     pub fn age_seconds(&self) -> u64 {
         self.first_received.elapsed().as_secs()
     }
 }
 
-/// Reassembly buffer metrics
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ReassemblyMetrics {
-    /// Number of incomplete transactions
-    pub incomplete_transactions: usize,
-    /// Average reassembly time in milliseconds
-    pub avg_reassembly_time_ms: u64,
-    /// Fragments per transaction histogram
-    pub fragments_per_transaction: HashMap<String, usize>,
+/// Local transaction cache for reassembly and stale-fragment cleanup
+pub struct TransactionCache {
+    reassembly_buffers: HashMap<String, FragmentSet>,
 }
 
-/// Local transaction cache for store-and-forward functionality
-pub struct TransactionCache {
-    /// Pending transactions awaiting submission
-    pending_transactions: HashMap<String, PendingTransaction>,
-    /// Fragments being reassembled (enhanced with FragmentSet)
-    reassembly_buffers: HashMap<String, FragmentSet>,
-    /// Legacy fragment buffers (for backward compatibility)
-    legacy_buffers: HashMap<String, Vec<Option<Fragment>>>,
+impl Default for TransactionCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TransactionCache {
-    /// Create a new transaction cache
     pub fn new() -> Self {
         Self {
-            pending_transactions: HashMap::new(),
             reassembly_buffers: HashMap::new(),
-            legacy_buffers: HashMap::new(),
         }
     }
 
-    /// Store a pending transaction
-    pub fn store_pending(&mut self, tx: PendingTransaction) {
-        self.pending_transactions.insert(tx.id.clone(), tx);
-    }
-
-    /// Get a pending transaction by ID
-    pub fn get_pending(&self, id: &str) -> Option<&PendingTransaction> {
-        self.pending_transactions.get(id)
-    }
-
-    /// Remove a pending transaction (after successful submission)
-    pub fn remove_pending(&mut self, id: &str) {
-        self.pending_transactions.remove(id);
-    }
-
-    /// Add a fragment to reassembly buffer (legacy method - for backward compatibility)
-    pub fn add_fragment(&mut self, fragment: Fragment) {
-        let buffer = self
-            .legacy_buffers
-            .entry(fragment.id.clone())
-            .or_insert_with(|| vec![None; fragment.total]);
-
-        if fragment.index < buffer.len() {
-            buffer[fragment.index] = Some(fragment.clone());
-        }
-    }
-    
-    /// Add BLE mesh fragment to reassembly buffer (optimized O(1) insertion)
-    /// Uses transaction_id (SHA-256 hash) for grouping fragments across devices
-    pub fn add_ble_fragment(&mut self, fragment: crate::ble::mesh::TransactionFragment) -> Result<(), String> {
-        let tx_id_hex = hex::encode(&fragment.transaction_id);
-        
-        // Get or create fragment set
-        let fragment_set = self.reassembly_buffers
+    /// Add a BLE mesh fragment to the reassembly buffer (O(1) insertion by index)
+    pub fn add_ble_fragment(
+        &mut self,
+        fragment: crate::ble::mesh::TransactionFragment,
+    ) -> Result<(), String> {
+        let tx_id_hex = hex::encode(fragment.transaction_id);
+        let fragment_set = self
+            .reassembly_buffers
             .entry(tx_id_hex.clone())
             .or_insert_with(|| FragmentSet::new(fragment.transaction_id, fragment.total_fragments));
-        
-        // Validate fragment consistency
+
         if fragment_set.transaction_id != fragment.transaction_id {
             return Err(format!("Transaction ID mismatch for {}", tx_id_hex));
         }
-        
         if fragment_set.total_fragments != fragment.total_fragments {
             return Err(format!("Total fragments mismatch for {}", tx_id_hex));
         }
-        
-        // Check fragment index validity
         if fragment.fragment_index >= fragment.total_fragments {
             return Err(format!(
                 "Invalid fragment index {} (total: {})",
-                fragment.fragment_index,
-                fragment.total_fragments
+                fragment.fragment_index, fragment.total_fragments
             ));
         }
-        
-        // Convert BLE fragment to internal Fragment format
+
         let internal_fragment = Fragment {
             id: tx_id_hex.clone(),
             index: fragment.fragment_index as usize,
             total: fragment.total_fragments as usize,
             data: fragment.data,
-            fragment_type: FragmentType::FragmentContinue, // Default type
+            fragment_type: FragmentType::FragmentContinue,
             checksum: fragment.transaction_id,
         };
-        
-        // O(1) insertion using fragment_index
         fragment_set.received_fragments[fragment.fragment_index as usize] = Some(internal_fragment);
         fragment_set.last_updated = Instant::now();
-        
+
         tracing::debug!(
             "Added fragment {}/{} for tx {} (received: {}/{})",
             fragment.fragment_index + 1,
@@ -457,95 +308,18 @@ impl TransactionCache {
             fragment_set.received_count(),
             fragment_set.total_fragments
         );
-        
         Ok(())
     }
 
-    /// Check if all fragments for a transaction are received
-    pub fn all_fragments_received(&self, tx_id: &str) -> bool {
-        // Check enhanced buffer first
-        if let Some(fragment_set) = self.reassembly_buffers.get(tx_id) {
-            return fragment_set.is_complete();
-        }
-        
-        // Fall back to legacy buffer
-        if let Some(buffer) = self.legacy_buffers.get(tx_id) {
-            return buffer.iter().all(|f| f.is_some());
-        }
-        
-        false
-    }
-
-    /// Reassemble fragments into complete transaction
-    pub fn reassemble_fragments(&self, tx_id: &str) -> Option<Vec<u8>> {
-        // Try enhanced buffer first
-        if let Some(fragment_set) = self.reassembly_buffers.get(tx_id) {
-            if fragment_set.is_complete() {
-                let mut data = Vec::new();
-                for fragment in fragment_set.received_fragments.iter().flatten() {
-                    data.extend_from_slice(&fragment.data);
-                }
-                
-                // Verify checksum matches transaction_id
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(&data);
-                let hash_result: [u8; 32] = hasher.finalize().into();
-                
-                if hash_result != fragment_set.transaction_id {
-                    tracing::error!(
-                        "Checksum mismatch for tx {}: expected {:?}, got {:?}",
-                        tx_id,
-                        fragment_set.transaction_id,
-                        hash_result
-                    );
-                    return None;
-                }
-                
-                tracing::info!(
-                    "✅ Reassembled transaction {} ({} bytes, {} fragments, age: {}s)",
-                    tx_id.chars().take(8).collect::<String>(),
-                    data.len(),
-                    fragment_set.total_fragments,
-                    fragment_set.age_seconds()
-                );
-                
-                return Some(data);
-            }
-            return None;
-        }
-        
-        // Fall back to legacy buffer
-        if let Some(buffer) = self.legacy_buffers.get(tx_id) {
-            if buffer.iter().all(|f| f.is_some()) {
-                let mut data = Vec::new();
-                for fragment in buffer.iter().flatten() {
-                    data.extend_from_slice(&fragment.data);
-                }
-                return Some(data);
-            }
-        }
-        
-        None
-    }
-    
-    /// Remove completed transaction from reassembly buffer
-    pub fn remove_reassembly(&mut self, tx_id: &str) {
-        self.reassembly_buffers.remove(tx_id);
-        self.legacy_buffers.remove(tx_id);
-    }
-    
-    /// Cleanup stale fragments (older than timeout_secs)
-    /// Returns number of transactions cleaned up
+    /// Remove stale reassembly buffers older than `timeout_secs`. Returns count removed.
     pub fn cleanup_stale_fragments(&mut self, timeout_secs: u64) -> usize {
-        let stale_keys: Vec<String> = self.reassembly_buffers
+        let stale_keys: Vec<String> = self
+            .reassembly_buffers
             .iter()
             .filter(|(_, set)| set.is_stale(timeout_secs))
             .map(|(k, _)| k.clone())
             .collect();
-        
         let count = stale_keys.len();
-        
         for key in stale_keys {
             if let Some(set) = self.reassembly_buffers.remove(&key) {
                 tracing::info!(
@@ -557,46 +331,7 @@ impl TransactionCache {
                 );
             }
         }
-        
-        // Also cleanup legacy buffers (simple age-based for now)
-        // Note: Legacy buffers don't have timestamps, so we just remove old entries periodically
-        
         count
-    }
-    
-    /// Get reassembly metrics
-    pub fn get_reassembly_metrics(&self) -> ReassemblyMetrics {
-        let incomplete = self.reassembly_buffers.len();
-        
-        let mut fragments_map = HashMap::new();
-        for (tx_id, set) in &self.reassembly_buffers {
-            fragments_map.insert(
-                format!("{}...{}", &tx_id[..8], &tx_id[tx_id.len()-8..]),
-                set.received_count()
-            );
-        }
-        
-        // Calculate average reassembly time (for completed transactions in this snapshot)
-        let avg_time_ms = if incomplete > 0 {
-            let total_time: u64 = self.reassembly_buffers
-                .values()
-                .map(|set| set.first_received.elapsed().as_millis() as u64)
-                .sum();
-            total_time / incomplete as u64
-        } else {
-            0
-        };
-        
-        ReassemblyMetrics {
-            incomplete_transactions: incomplete,
-            avg_reassembly_time_ms: avg_time_ms,
-            fragments_per_transaction: fragments_map,
-        }
-    }
-    
-    /// Get number of incomplete transactions
-    pub fn incomplete_count(&self) -> usize {
-        self.reassembly_buffers.len() + self.legacy_buffers.len()
     }
 }
 
@@ -839,6 +574,7 @@ impl TransactionService {
     /// Create an unsigned SPL token transfer transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned SPL token transaction
     /// Automatically derives ATAs from wallet pubkeys and mint address
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_unsigned_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -878,49 +614,65 @@ impl TransactionService {
         tracing::info!("  Mint: {}", mint_pubkey);
 
         // Get nonce data: use provided cached data, or fetch from blockchain
-        let (nonce_account_pubkey, nonce_blockhash, nonce_authority_pubkey) = if let Some(cached_nonce) = nonce_data {
-            // Use provided cached nonce data
-            tracing::info!("Using provided cached nonce data");
-            let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid nonce account in cached data: {}", e))
-            })?;
-            let blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid blockhash in cached data: {}", e))
-            })?;
-            let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid authority in cached data: {}", e))
-            })?;
-            
-            // Verify authority matches sender
-            if authority != sender_pubkey {
+        let (nonce_account_pubkey, nonce_blockhash, nonce_authority_pubkey) =
+            if let Some(cached_nonce) = nonce_data {
+                // Use provided cached nonce data
+                tracing::info!("Using provided cached nonce data");
+                let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid nonce account in cached data: {}",
+                        e
+                    ))
+                })?;
+                let blockhash =
+                    solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                        TransactionError::InvalidPublicKey(format!(
+                            "Invalid blockhash in cached data: {}",
+                            e
+                        ))
+                    })?;
+                let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid authority in cached data: {}",
+                        e
+                    ))
+                })?;
+
+                // Verify authority matches sender
+                if authority != sender_pubkey {
+                    return Err(TransactionError::InvalidPublicKey(format!(
+                        "Nonce authority {} does not match sender {}",
+                        authority, sender_pubkey
+                    )));
+                }
+
+                (nonce_pubkey, blockhash, authority)
+            } else if let Some(nonce_account_str) = nonce_account {
+                // Fetch nonce account data from blockchain
+                tracing::info!("Fetching nonce account data from blockchain...");
+                let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid nonce account public key: {}",
+                        e
+                    ))
+                })?;
+                let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+                let authority = nonce_data.authority;
+
+                // Verify authority matches sender
+                if authority != sender_pubkey {
+                    return Err(TransactionError::InvalidPublicKey(format!(
+                        "Nonce authority {} does not match sender {}",
+                        authority, sender_pubkey
+                    )));
+                }
+
+                (nonce_account_pubkey, nonce_data.blockhash(), authority)
+            } else {
                 return Err(TransactionError::InvalidPublicKey(
-                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
+                    "Either nonce_account or nonce_data must be provided".to_string(),
                 ));
-            }
-            
-            (nonce_pubkey, blockhash, authority)
-        } else if let Some(nonce_account_str) = nonce_account {
-            // Fetch nonce account data from blockchain
-            tracing::info!("Fetching nonce account data from blockchain...");
-            let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
-            })?;
-            let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
-            let authority = nonce_data.authority;
-            
-            // Verify authority matches sender
-            if authority != sender_pubkey {
-                return Err(TransactionError::InvalidPublicKey(
-                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
-                ));
-            }
-            
-            (nonce_account_pubkey, nonce_data.blockhash(), authority)
-        } else {
-            return Err(TransactionError::InvalidPublicKey(
-                "Either nonce_account or nonce_data must be provided".to_string()
-            ));
-        };
+            };
 
         tracing::info!("Building unsigned SPL token transfer instructions...");
 
@@ -937,10 +689,10 @@ impl TransactionService {
         // Create idempotent ATA creation instruction for recipient
         // This instruction is idempotent - it won't fail if the account already exists
         let create_ata_ix = ata_instruction::create_associated_token_account_idempotent(
-            &fee_payer_pubkey,      // Payer (funds the account creation)
-            &recipient_pubkey,      // Owner of the token account
-            &mint_pubkey,           // Mint address
-            &spl_token::id(),       // Token program ID
+            &fee_payer_pubkey, // Payer (funds the account creation)
+            &recipient_pubkey, // Owner of the token account
+            &mint_pubkey,      // Mint address
+            &spl_token::id(),  // Token program ID
         );
         tracing::info!("✅ Instruction 2: Create recipient ATA (idempotent)");
         tracing::info!("   Recipient ATA: {}", recipient_token_account);
@@ -1039,17 +791,17 @@ impl TransactionService {
         tracing::info!("  Mint: {}", mint_pubkey);
 
         // Use cached nonce data (no RPC)
-        let nonce_blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(
-            |e| TransactionError::InvalidPublicKey(format!("Invalid cached blockhash: {}", e)),
-        )?;
+        let nonce_blockhash =
+            solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                TransactionError::InvalidPublicKey(format!("Invalid cached blockhash: {}", e))
+            })?;
 
         tracing::info!("(offline) Building unsigned SPL token transfer instructions...");
 
         // Advance nonce using cached nonce account / authority
-        let nonce_authority_pubkey =
-            Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid cached nonce authority: {}", e))
-            })?;
+        let nonce_authority_pubkey = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+            TransactionError::InvalidPublicKey(format!("Invalid cached nonce authority: {}", e))
+        })?;
 
         let advance_nonce_ix = system_instruction::advance_nonce_account(
             &nonce_account_pubkey,
@@ -1062,10 +814,10 @@ impl TransactionService {
         // Create idempotent ATA creation instruction for recipient
         // This instruction is idempotent - it won't fail if the account already exists
         let create_ata_ix = ata_instruction::create_associated_token_account_idempotent(
-            &fee_payer_pubkey,      // Payer (funds the account creation)
-            &recipient_pubkey,      // Owner of the token account
-            &mint_pubkey,           // Mint address
-            &spl_token::id(),       // Token program ID
+            &fee_payer_pubkey, // Payer (funds the account creation)
+            &recipient_pubkey, // Owner of the token account
+            &mint_pubkey,      // Mint address
+            &spl_token::id(),  // Token program ID
         );
         tracing::info!("✅ (offline) Instruction 2: Create recipient ATA (idempotent)");
         tracing::info!("   Recipient ATA: {}", recipient_token_account);
@@ -1083,7 +835,10 @@ impl TransactionService {
         )
         .map_err(|e| TransactionError::SolanaInstruction(e.to_string()))?;
 
-        tracing::info!("✅ (offline) Instruction 3: SPL Token Transfer {} tokens", amount);
+        tracing::info!(
+            "✅ (offline) Instruction 3: SPL Token Transfer {} tokens",
+            amount
+        );
         tracing::info!("   From token account: {}", sender_token_account);
         tracing::info!("   To token account: {}", recipient_token_account);
         tracing::info!("   Owner: {}", sender_pubkey);
@@ -1114,7 +869,10 @@ impl TransactionService {
         );
 
         let base64_tx = base64::encode(&serialized);
-        tracing::info!("(offline) Encoded to base64: {} characters", base64_tx.len());
+        tracing::info!(
+            "(offline) Encoded to base64: {} characters",
+            base64_tx.len()
+        );
         tracing::info!("(offline) SPL transaction is ready for MWA signing");
 
         Ok(base64_tx)
@@ -1122,10 +880,11 @@ impl TransactionService {
 
     /// Create an unsigned governance vote transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned vote transaction
-    /// 
+    ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     /// If neither is provided, it will return an error.
+    #[allow(clippy::too_many_arguments)]
     pub async fn cast_unsigned_vote(
         &self,
         voter: &str,
@@ -1155,43 +914,58 @@ impl TransactionService {
             // Use provided cached nonce data
             tracing::info!("Using provided cached nonce data for vote transaction");
             let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid nonce account in cached data: {}", e))
+                TransactionError::InvalidPublicKey(format!(
+                    "Invalid nonce account in cached data: {}",
+                    e
+                ))
             })?;
-            let blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid blockhash in cached data: {}", e))
-            })?;
+            let blockhash =
+                solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid blockhash in cached data: {}",
+                        e
+                    ))
+                })?;
             let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid authority in cached data: {}", e))
+                TransactionError::InvalidPublicKey(format!(
+                    "Invalid authority in cached data: {}",
+                    e
+                ))
             })?;
-            
+
             // Verify authority matches voter (voter is the nonce authority for vote transactions)
             if authority != voter_pubkey {
-                return Err(TransactionError::InvalidPublicKey(
-                    format!("Nonce authority {} does not match voter {}", authority, voter_pubkey)
-                ));
+                return Err(TransactionError::InvalidPublicKey(format!(
+                    "Nonce authority {} does not match voter {}",
+                    authority, voter_pubkey
+                )));
             }
-            
+
             (nonce_pubkey, blockhash)
         } else if let Some(nonce_account_str) = nonce_account {
             // Fetch nonce account data from blockchain
             tracing::info!("Fetching nonce account data from blockchain...");
             let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
+                TransactionError::InvalidPublicKey(format!(
+                    "Invalid nonce account public key: {}",
+                    e
+                ))
             })?;
             let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
             let authority = nonce_data.authority;
-            
+
             // Verify authority matches voter
             if authority != voter_pubkey {
-                return Err(TransactionError::InvalidPublicKey(
-                    format!("Nonce authority {} does not match voter {}", authority, voter_pubkey)
-                ));
+                return Err(TransactionError::InvalidPublicKey(format!(
+                    "Nonce authority {} does not match voter {}",
+                    authority, voter_pubkey
+                )));
             }
-            
+
             (nonce_account_pubkey, nonce_data.blockhash())
         } else {
             return Err(TransactionError::InvalidPublicKey(
-                "Either nonce_account or nonce_data must be provided".to_string()
+                "Either nonce_account or nonce_data must be provided".to_string(),
             ));
         };
 
@@ -1248,7 +1022,7 @@ impl TransactionService {
 
     /// Create an unsigned transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned transaction
-    /// 
+    ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     /// If neither is provided, it will try to get an available nonce from storage.
@@ -1273,49 +1047,65 @@ impl TransactionService {
         })?;
 
         // Get nonce data: use provided cached data, or fetch from blockchain, or get from storage
-        let (nonce_account_pubkey, nonce_blockhash, nonce_authority_pubkey) = if let Some(cached_nonce) = nonce_data {
-            // Use provided cached nonce data
-            tracing::info!("Using provided cached nonce data");
-            let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid nonce account in cached data: {}", e))
-            })?;
-            let blockhash = solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid blockhash in cached data: {}", e))
-            })?;
-            let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid authority in cached data: {}", e))
-            })?;
-            
-            // Verify authority matches sender
-            if authority != sender_pubkey {
+        let (nonce_account_pubkey, nonce_blockhash, _nonce_authority_pubkey) =
+            if let Some(cached_nonce) = nonce_data {
+                // Use provided cached nonce data
+                tracing::info!("Using provided cached nonce data");
+                let nonce_pubkey = Pubkey::from_str(&cached_nonce.nonce_account).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid nonce account in cached data: {}",
+                        e
+                    ))
+                })?;
+                let blockhash =
+                    solana_sdk::hash::Hash::from_str(&cached_nonce.blockhash).map_err(|e| {
+                        TransactionError::InvalidPublicKey(format!(
+                            "Invalid blockhash in cached data: {}",
+                            e
+                        ))
+                    })?;
+                let authority = Pubkey::from_str(&cached_nonce.authority).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid authority in cached data: {}",
+                        e
+                    ))
+                })?;
+
+                // Verify authority matches sender
+                if authority != sender_pubkey {
+                    return Err(TransactionError::InvalidPublicKey(format!(
+                        "Nonce authority {} does not match sender {}",
+                        authority, sender_pubkey
+                    )));
+                }
+
+                (nonce_pubkey, blockhash, authority)
+            } else if let Some(nonce_account_str) = nonce_account {
+                // Fetch nonce account data from blockchain
+                tracing::info!("Fetching nonce account data from blockchain...");
+                let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
+                    TransactionError::InvalidPublicKey(format!(
+                        "Invalid nonce account public key: {}",
+                        e
+                    ))
+                })?;
+                let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
+                let authority = nonce_data.authority;
+
+                // Verify authority matches sender
+                if authority != sender_pubkey {
+                    return Err(TransactionError::InvalidPublicKey(format!(
+                        "Nonce authority {} does not match sender {}",
+                        authority, sender_pubkey
+                    )));
+                }
+
+                (nonce_account_pubkey, nonce_data.blockhash(), authority)
+            } else {
                 return Err(TransactionError::InvalidPublicKey(
-                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
+                    "Either nonce_account or nonce_data must be provided".to_string(),
                 ));
-            }
-            
-            (nonce_pubkey, blockhash, authority)
-        } else if let Some(nonce_account_str) = nonce_account {
-            // Fetch nonce account data from blockchain
-            tracing::info!("Fetching nonce account data from blockchain...");
-            let nonce_account_pubkey = Pubkey::from_str(nonce_account_str).map_err(|e| {
-                TransactionError::InvalidPublicKey(format!("Invalid nonce account public key: {}", e))
-            })?;
-            let nonce_data = self.fetch_nonce_account_data(&nonce_account_pubkey).await?;
-            let authority = nonce_data.authority;
-            
-            // Verify authority matches sender
-            if authority != sender_pubkey {
-                return Err(TransactionError::InvalidPublicKey(
-                    format!("Nonce authority {} does not match sender {}", authority, sender_pubkey)
-                ));
-            }
-            
-            (nonce_account_pubkey, nonce_data.blockhash(), authority)
-        } else {
-            return Err(TransactionError::InvalidPublicKey(
-                "Either nonce_account or nonce_data must be provided".to_string()
-            ));
-        };
+            };
 
         tracing::info!("Building unsigned transaction instructions...");
 
@@ -1487,7 +1277,7 @@ impl TransactionService {
                 client_url,
                 CommitmentConfig::confirmed(),
             );
-            blocking_client.get_account(&nonce_pubkey)
+            blocking_client.get_account(&nonce_pubkey).map_err(Box::new)
         })
         .await
         .map_err(|e| TransactionError::RpcClient(format!("Task join error: {}", e)))?
@@ -1567,23 +1357,23 @@ impl TransactionService {
     }
 
     /// Discover and cache all nonce accounts for a given authority
-    /// 
+    ///
     /// This method:
     /// 1. Searches for all nonce accounts where the provided pubkey is the authority
     /// 2. Fetches the latest nonce data for each found account
     /// 3. Caches all nonce accounts in the offline bundle
-    /// 
+    ///
     /// Useful for discovering and caching existing nonce accounts without knowing their pubkeys.
-    /// 
+    ///
     /// Get an available nonce account from cached bundle
-    /// 
+    ///
     /// Loads the bundle from the specified file path and returns the first
     /// available (unused) nonce account data.
-    /// 
+    ///
     /// Returns None if:
     /// - Bundle file doesn't exist
     /// - Bundle has no available nonces (all are used)
-    /// 
+    ///
     /// This allows users to either manage their own nonce accounts or let
     /// PolliNet manage them automatically.
     pub fn get_available_nonce_from_bundle(
@@ -1591,26 +1381,30 @@ impl TransactionService {
         bundle_file: &str,
     ) -> Result<Option<CachedNonceData>, TransactionError> {
         tracing::info!("Loading bundle from: {}", bundle_file);
-        
+
         // Load bundle from file
-        let bundle = OfflineTransactionBundle::load_from_file(bundle_file)
-            .map_err(|e| TransactionError::Serialization(format!("Failed to load bundle: {}", e)))?;
-        
-        tracing::info!("Bundle loaded: {} total nonces, {} available", 
-            bundle.total_nonces(), bundle.available_nonces());
-        
+        let bundle = OfflineTransactionBundle::load_from_file(bundle_file).map_err(|e| {
+            TransactionError::Serialization(format!("Failed to load bundle: {}", e))
+        })?;
+
+        tracing::info!(
+            "Bundle loaded: {} total nonces, {} available",
+            bundle.total_nonces(),
+            bundle.available_nonces()
+        );
+
         // Get next available nonce
         let available_nonce = bundle.get_available_nonce();
-        
+
         if let Some(ref nonce) = available_nonce {
             tracing::info!("✅ Found available nonce account: {}", nonce.nonce_account);
         } else {
             tracing::warn!("⚠️  No available nonces in bundle (all are used)");
         }
-        
+
         Ok(available_nonce)
     }
-    
+
     /// Returns the number of nonce accounts discovered and cached
     pub async fn discover_and_cache_nonce_accounts_by_authority(
         &self,
@@ -1632,23 +1426,31 @@ impl TransactionService {
         // Step 1: Search for all nonce accounts with this authority
         let nonce_accounts = crate::nonce::find_nonce_accounts_by_authority(client, &authority)
             .await
-            .map_err(|e| TransactionError::RpcClient(format!("Failed to search for nonce accounts: {}", e)))?;
+            .map_err(|e| {
+                TransactionError::RpcClient(format!("Failed to search for nonce accounts: {}", e))
+            })?;
 
         if nonce_accounts.is_empty() {
             tracing::info!("No nonce accounts found for authority: {}", authority);
             return Ok(0);
         }
 
-        tracing::info!("✅ Found {} nonce account(s) for authority: {}", nonce_accounts.len(), authority);
+        tracing::info!(
+            "✅ Found {} nonce account(s) for authority: {}",
+            nonce_accounts.len(),
+            authority
+        );
 
         // Step 2: Load or create bundle
         let mut bundle = if let Some(bundle_path) = bundle_file {
             if std::path::Path::new(bundle_path).exists() {
                 tracing::info!("📂 Loading existing bundle from: {}", bundle_path);
-                let bundle_data = std::fs::read_to_string(bundle_path)
-                    .map_err(|e| TransactionError::Serialization(format!("Failed to read bundle file: {}", e)))?;
-                serde_json::from_str::<OfflineTransactionBundle>(&bundle_data)
-                    .map_err(|e| TransactionError::Serialization(format!("Failed to parse bundle: {}", e)))?
+                let bundle_data = std::fs::read_to_string(bundle_path).map_err(|e| {
+                    TransactionError::Serialization(format!("Failed to read bundle file: {}", e))
+                })?;
+                serde_json::from_str::<OfflineTransactionBundle>(&bundle_data).map_err(|e| {
+                    TransactionError::Serialization(format!("Failed to parse bundle: {}", e))
+                })?
             } else {
                 tracing::info!("📂 Bundle file not found, creating new bundle");
                 OfflineTransactionBundle::new()
@@ -1661,22 +1463,33 @@ impl TransactionService {
         let mut cached_count = 0;
         for (nonce_pubkey, _) in nonce_accounts {
             let nonce_pubkey_str = nonce_pubkey.to_string();
-            
+
             // Check if already cached - refresh it if so
-            if let Some(existing_nonce) = bundle.nonce_caches.iter_mut()
-                .find(|n| n.nonce_account == nonce_pubkey_str) {
-                tracing::info!("   ℹ️  Nonce account {} already cached, refreshing...", nonce_pubkey);
+            if let Some(existing_nonce) = bundle
+                .nonce_caches
+                .iter_mut()
+                .find(|n| n.nonce_account == nonce_pubkey_str)
+            {
+                tracing::info!(
+                    "   ℹ️  Nonce account {} already cached, refreshing...",
+                    nonce_pubkey
+                );
                 match self.prepare_offline_nonce_data(&nonce_pubkey_str).await {
                     Ok(refreshed_data) => {
                         existing_nonce.blockhash = refreshed_data.blockhash;
-                        existing_nonce.lamports_per_signature = refreshed_data.lamports_per_signature;
+                        existing_nonce.lamports_per_signature =
+                            refreshed_data.lamports_per_signature;
                         existing_nonce.cached_at = refreshed_data.cached_at;
                         existing_nonce.used = false; // Mark as available
                         cached_count += 1;
                         tracing::info!("   ✅ Refreshed nonce account: {}", nonce_pubkey);
                     }
                     Err(e) => {
-                        tracing::warn!("   ⚠️  Failed to refresh nonce account {}: {}", nonce_pubkey, e);
+                        tracing::warn!(
+                            "   ⚠️  Failed to refresh nonce account {}: {}",
+                            nonce_pubkey,
+                            e
+                        );
                     }
                 }
                 continue;
@@ -1690,21 +1503,31 @@ impl TransactionService {
                     tracing::info!("   ✅ Cached nonce account: {}", nonce_pubkey);
                 }
                 Err(e) => {
-                    tracing::warn!("   ⚠️  Failed to cache nonce account {}: {}", nonce_pubkey, e);
+                    tracing::warn!(
+                        "   ⚠️  Failed to cache nonce account {}: {}",
+                        nonce_pubkey,
+                        e
+                    );
                 }
             }
         }
 
         // Step 4: Save bundle if file path provided
         if let Some(bundle_path) = bundle_file {
-            let bundle_json = serde_json::to_string_pretty(&bundle)
-                .map_err(|e| TransactionError::Serialization(format!("Failed to serialize bundle: {}", e)))?;
-            std::fs::write(bundle_path, bundle_json)
-                .map_err(|e| TransactionError::Serialization(format!("Failed to write bundle file: {}", e)))?;
+            let bundle_json = serde_json::to_string_pretty(&bundle).map_err(|e| {
+                TransactionError::Serialization(format!("Failed to serialize bundle: {}", e))
+            })?;
+            std::fs::write(bundle_path, bundle_json).map_err(|e| {
+                TransactionError::Serialization(format!("Failed to write bundle file: {}", e))
+            })?;
             tracing::info!("💾 Bundle saved to: {}", bundle_path);
         }
 
-        tracing::info!("✅ Discovered and cached {} nonce account(s) for authority: {}", cached_count, authority);
+        tracing::info!(
+            "✅ Discovered and cached {} nonce account(s) for authority: {}",
+            cached_count,
+            authority
+        );
 
         Ok(cached_count)
     }
@@ -1717,6 +1540,7 @@ impl TransactionService {
     ///   - Refreshes used nonces (fetches new blockhash from advanced nonces)
     ///   - Creates additional nonces ONLY if total < count
     ///   - Returns bundle with exactly 'count' nonces ready to use
+    ///
     /// If bundle_file doesn't exist:
     ///   - Creates new bundle with 'count' nonce accounts
     ///
@@ -2175,23 +1999,25 @@ impl TransactionService {
                     e
                 ))
             })?;
-        
-        tracing::info!("💰 Rent exemption for nonce account: {} lamports ({:.6} SOL)", 
-            rent_exemption, rent_exemption as f64 / 1_000_000_000.0);
-        tracing::debug!("   Total rent needed for {} accounts: {} lamports ({:.6} SOL)", 
-            count, 
+
+        tracing::info!(
+            "💰 Rent exemption for nonce account: {} lamports ({:.6} SOL)",
+            rent_exemption,
+            rent_exemption as f64 / 1_000_000_000.0
+        );
+        tracing::debug!(
+            "   Total rent needed for {} accounts: {} lamports ({:.6} SOL)",
+            count,
             rent_exemption * count as u64,
             (rent_exemption * count as u64) as f64 / 1_000_000_000.0
         );
 
         // Get recent blockhash
         tracing::debug!("🔗 Fetching recent blockhash...");
-        let recent_blockhash = client
-            .get_latest_blockhash()
-            .map_err(|e| {
-                tracing::error!("❌ Failed to get blockhash: {}", e);
-                TransactionError::RpcClient(format!("Failed to get blockhash: {}", e))
-            })?;
+        let recent_blockhash = client.get_latest_blockhash().map_err(|e| {
+            tracing::error!("❌ Failed to get blockhash: {}", e);
+            TransactionError::RpcClient(format!("Failed to get blockhash: {}", e))
+        })?;
 
         tracing::debug!("✅ Blockhash: {}", recent_blockhash);
 
@@ -2199,17 +2025,26 @@ impl TransactionService {
         let mut result = Vec::new();
 
         // Batch nonce account creations: up to 5 per transaction
-        let num_transactions = (count + MAX_NONCE_ACCOUNTS_PER_TX - 1) / MAX_NONCE_ACCOUNTS_PER_TX;
-        tracing::info!("Creating {} batched transactions (max {} nonce accounts per transaction)", 
-            num_transactions, MAX_NONCE_ACCOUNTS_PER_TX);
+        let num_transactions = count.div_ceil(MAX_NONCE_ACCOUNTS_PER_TX);
+        tracing::info!(
+            "Creating {} batched transactions (max {} nonce accounts per transaction)",
+            num_transactions,
+            MAX_NONCE_ACCOUNTS_PER_TX
+        );
 
         for tx_index in 0..num_transactions {
             let start_idx = tx_index * MAX_NONCE_ACCOUNTS_PER_TX;
             let end_idx = std::cmp::min(start_idx + MAX_NONCE_ACCOUNTS_PER_TX, count);
             let accounts_in_this_tx = end_idx - start_idx;
 
-            tracing::info!("Transaction {}/{}: Creating {} nonce accounts (indices {}-{})", 
-                tx_index + 1, num_transactions, accounts_in_this_tx, start_idx, end_idx - 1);
+            tracing::info!(
+                "Transaction {}/{}: Creating {} nonce accounts (indices {}-{})",
+                tx_index + 1,
+                num_transactions,
+                accounts_in_this_tx,
+                start_idx,
+                end_idx - 1
+            );
 
             let mut instructions = Vec::new();
             let mut nonce_keypairs = Vec::new();
@@ -2218,23 +2053,25 @@ impl TransactionService {
             // Generate keypairs and create instructions for this batch
             tracing::debug!("🔑 Generating {} nonce keypair(s)...", accounts_in_this_tx);
             for i in start_idx..end_idx {
-            // Generate ephemeral nonce keypair
-            let nonce_keypair = Keypair::new();
-            let nonce_pubkey = nonce_keypair.pubkey();
+                // Generate ephemeral nonce keypair
+                let nonce_keypair = Keypair::new();
+                let nonce_pubkey = nonce_keypair.pubkey();
 
                 tracing::info!("  🔑 Nonce account {}/{}: {}", i + 1, count, nonce_pubkey);
                 tracing::debug!("     Keypair generated (ephemeral, will be signed by MWA)");
 
                 // Create nonce account instructions (returns a vector of instructions)
-            let create_nonce_instructions = system_instruction::create_nonce_account(
-                &payer_pubkey,  // funding account
-                &nonce_pubkey,  // nonce account
-                &payer_pubkey,  // authority (set to payer)
-                rent_exemption, // lamports
-            );
+                let create_nonce_instructions = system_instruction::create_nonce_account(
+                    &payer_pubkey,  // funding account
+                    &nonce_pubkey,  // nonce account
+                    &payer_pubkey,  // authority (set to payer)
+                    rent_exemption, // lamports
+                );
 
-                tracing::debug!("     Created {} instruction(s) for this nonce account", 
-                    create_nonce_instructions.len());
+                tracing::debug!(
+                    "     Created {} instruction(s) for this nonce account",
+                    create_nonce_instructions.len()
+                );
 
                 // Add all instructions from create_nonce_account to our batch
                 instructions.extend(create_nonce_instructions);
@@ -2243,29 +2080,44 @@ impl TransactionService {
                 nonce_keypairs.push(nonce_keypair);
                 nonce_pubkeys.push(nonce_pubkey);
             }
-            
-            tracing::debug!("✅ Generated {} keypair(s) for transaction {}", 
-                nonce_keypairs.len(), tx_index + 1);
 
-            tracing::info!("  📝 Total instructions in this transaction: {}", instructions.len());
+            tracing::debug!(
+                "✅ Generated {} keypair(s) for transaction {}",
+                nonce_keypairs.len(),
+                tx_index + 1
+            );
+
+            tracing::info!(
+                "  📝 Total instructions in this transaction: {}",
+                instructions.len()
+            );
             tracing::debug!("     Payer: {}", payer_pubkey);
             tracing::debug!("     Blockhash: {}", recent_blockhash);
 
-            // Create transaction with all batched instructions (completely unsigned)
-            let mut tx = Transaction::new_with_payer(
-                &instructions,
-                Some(&payer_pubkey),
-            );
+            // Create transaction with all batched instructions
+            let mut tx = Transaction::new_with_payer(&instructions, Some(&payer_pubkey));
             tx.message.recent_blockhash = recent_blockhash;
 
-            // DO NOT sign yet - keep it completely unsigned
-            // MWA will add payer signature first, then we'll add nonce signatures
-            tracing::info!("  📦 Creating unsigned batched transaction (no signatures yet)");
-            tracing::debug!("     Transaction has {} account(s) in message", tx.message.account_keys.len());
-            tracing::debug!("     Transaction has {} signature slot(s) (all empty)", tx.signatures.len());
+            // Sign with nonce keypairs now — private keys never leave Rust
+            let nonce_keypair_refs: Vec<&Keypair> = nonce_keypairs.iter().collect();
+            tx.try_partial_sign(&nonce_keypair_refs, recent_blockhash)
+                .map_err(|e| {
+                    TransactionError::SolanaInstruction(format!(
+                        "Failed to sign with nonce keypairs: {}",
+                        e
+                    ))
+                })?;
 
-            // Serialize unsigned transaction
-            tracing::debug!("  💾 Serializing unsigned transaction...");
+            tracing::info!(
+                "  📦 Nonce-pre-signed transaction ready (needs payer signature via MWA)"
+            );
+            tracing::debug!(
+                "     Transaction has {} account(s) in message",
+                tx.message.account_keys.len()
+            );
+
+            // Serialize transaction (already has nonce signatures, awaiting payer)
+            tracing::debug!("  💾 Serializing transaction...");
             let tx_bytes = bincode1::serialize(&tx).map_err(|e| {
                 tracing::error!("❌ Failed to serialize transaction: {}", e);
                 TransactionError::Serialization(format!("Failed to serialize transaction: {}", e))
@@ -2273,38 +2125,32 @@ impl TransactionService {
 
             tracing::debug!("     Serialized transaction size: {} bytes", tx_bytes.len());
 
-            // Serialize all nonce keypairs (will be used to add signatures after MWA signs)
-            tracing::debug!("  🔐 Serializing {} nonce keypair(s)...", nonce_keypairs.len());
-            let nonce_keypair_base64_vec: Vec<String> = nonce_keypairs
-                .iter()
-                .map(|kp| base64::encode(&kp.to_bytes()))
-                .collect();
-
-            let nonce_pubkey_vec: Vec<String> = nonce_pubkeys
-                .iter()
-                .map(|pk| pk.to_string())
-                .collect();
-            
-            tracing::debug!("     Serialized {} keypair(s) and {} pubkey(s)", 
-                nonce_keypair_base64_vec.len(), nonce_pubkey_vec.len());
+            let nonce_pubkey_vec: Vec<String> =
+                nonce_pubkeys.iter().map(|pk| pk.to_string()).collect();
 
             let unsigned_tx_base64 = base64::encode(&tx_bytes);
-            tracing::debug!("     Base64 encoded transaction size: {} bytes", unsigned_tx_base64.len());
 
             result.push(UnsignedNonceTransaction {
                 unsigned_transaction_base64: unsigned_tx_base64,
-                nonce_keypair_base64: nonce_keypair_base64_vec,
                 nonce_pubkey: nonce_pubkey_vec,
             });
-            
-            tracing::info!("  ✅ Transaction {} ready: {} nonce account(s) batched", 
-                tx_index + 1, accounts_in_this_tx);
+
+            tracing::info!(
+                "  ✅ Transaction {} ready: {} nonce account(s) batched",
+                tx_index + 1,
+                accounts_in_this_tx
+            );
         }
 
-        tracing::info!("✅ Created {} batched unsigned nonce transactions (total {} nonce accounts)", 
-            result.len(), count);
-        tracing::debug!("   Average nonce accounts per transaction: {:.2}", 
-            count as f64 / result.len() as f64);
+        tracing::info!(
+            "✅ Created {} batched unsigned nonce transactions (total {} nonce accounts)",
+            result.len(),
+            count
+        );
+        tracing::debug!(
+            "   Average nonce accounts per transaction: {:.2}",
+            count as f64 / result.len() as f64
+        );
 
         Ok(result)
     }
@@ -2338,14 +2184,21 @@ impl TransactionService {
         tracing::info!("   Signatures: {}", tx.signatures.len());
         tracing::info!("   Instructions: {}", tx.message.instructions.len());
         tracing::info!("   Blockhash: {}", tx.message.recent_blockhash);
-        tracing::debug!("   Nonce verification: {} (false = nonce account creation or other non-nonce tx)", verify_nonce);
-        
+        tracing::debug!(
+            "   Nonce verification: {} (false = nonce account creation or other non-nonce tx)",
+            verify_nonce
+        );
+
         // Log first instruction type for debugging
         if let Some(first_ix) = tx.message.instructions.first() {
-            tracing::debug!("   First instruction program: {:?}", 
-                tx.message.account_keys.get(first_ix.program_id_index as usize)
+            tracing::debug!(
+                "   First instruction program: {:?}",
+                tx.message
+                    .account_keys
+                    .get(first_ix.program_id_index as usize)
                     .map(|pk| pk.to_string())
-                    .unwrap_or_else(|| "unknown".to_string()));
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
         }
 
         // Verify signatures locally before submitting to RPC
@@ -2461,14 +2314,14 @@ impl TransactionService {
     }
 
     /// Refresh the blockhash in an unsigned transaction
-    /// 
+    ///
     /// This is useful when a transaction was created but not yet signed,
     /// and the blockhash has become stale. This method fetches a fresh blockhash
     /// and updates the transaction without invalidating any signatures (since it's unsigned).
-    /// 
+    ///
     /// Use this right before sending an unsigned transaction to MWA for signing
     /// to ensure the blockhash is fresh.
-    /// 
+    ///
     /// Returns: Base64-encoded unsigned transaction with fresh blockhash
     pub async fn refresh_blockhash_in_unsigned_transaction(
         &self,
@@ -2487,7 +2340,10 @@ impl TransactionService {
         })?;
 
         // Verify transaction is unsigned (all signatures should be default/zero)
-        let has_signatures = tx.signatures.iter().any(|sig| *sig != solana_sdk::signature::Signature::default());
+        let has_signatures = tx
+            .signatures
+            .iter()
+            .any(|sig| *sig != solana_sdk::signature::Signature::default());
         if has_signatures {
             return Err(TransactionError::RpcClient(
                 "Transaction already has signatures. Cannot refresh blockhash in signed transaction.".to_string()
@@ -2504,12 +2360,10 @@ impl TransactionService {
         })?;
 
         tracing::debug!("🔗 Fetching fresh blockhash...");
-        let fresh_blockhash = client
-            .get_latest_blockhash()
-            .map_err(|e| {
-                tracing::error!("❌ Failed to get fresh blockhash: {}", e);
-                TransactionError::RpcClient(format!("Failed to get fresh blockhash: {}", e))
-            })?;
+        let fresh_blockhash = client.get_latest_blockhash().map_err(|e| {
+            tracing::error!("❌ Failed to get fresh blockhash: {}", e);
+            TransactionError::RpcClient(format!("Failed to get fresh blockhash: {}", e))
+        })?;
 
         // Update blockhash
         tx.message.recent_blockhash = fresh_blockhash;
@@ -2518,13 +2372,19 @@ impl TransactionService {
 
         // Re-serialize
         let updated_tx_bytes = bincode1::serialize(&tx).map_err(|e| {
-            TransactionError::Serialization(format!("Failed to serialize updated transaction: {}", e))
+            TransactionError::Serialization(format!(
+                "Failed to serialize updated transaction: {}",
+                e
+            ))
         })?;
 
         // Re-encode to base64
         let updated_tx_base64 = base64::encode(&updated_tx_bytes);
-        tracing::info!("✅ Transaction updated: {} bytes (base64: {} chars)", 
-            updated_tx_bytes.len(), updated_tx_base64.len());
+        tracing::info!(
+            "✅ Transaction updated: {} bytes (base64: {} chars)",
+            updated_tx_bytes.len(),
+            updated_tx_base64.len()
+        );
 
         Ok(updated_tx_base64)
     }
@@ -2610,7 +2470,7 @@ impl TransactionService {
         use sha2::{Digest, Sha256};
 
         let mut fragments = Vec::new();
-        let total_fragments = (compressed_tx.len() + BLE_MTU_SIZE - 1) / BLE_MTU_SIZE;
+        let total_fragments = compressed_tx.len().div_ceil(BLE_MTU_SIZE);
         let tx_id = self.generate_tx_id();
 
         // Calculate SHA-256 checksum of the complete transaction
@@ -2811,7 +2671,7 @@ impl TransactionService {
         };
 
         // Serialize and broadcast over BLE
-        let serialized = serde_json::to_vec(&confirmation_packet)
+        let _serialized = serde_json::to_vec(&confirmation_packet)
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
 
         // This would integrate with BLE transport
@@ -2912,6 +2772,7 @@ impl TransactionService {
     /// Create and sign a new SPL token transfer transaction with durable nonce
     /// Creates a presigned SPL token transaction using a nonce account for longer lifetime
     /// Automatically derives Associated Token Accounts from wallet pubkeys and mint address
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -3112,7 +2973,3 @@ impl From<crate::util::lz::Lz4Error> for TransactionError {
 
 // Re-export for convenience
 pub use solana_sdk::hash::Hash;
-
-pub mod pollinet_message;
-pub use pollinet_message::{HopRecord, PolliNetMessage};
-

@@ -352,24 +352,17 @@ fun MwaTransactionDemo(
                                             unsignedTxBase64 = nonceTx.unsignedTransactionBase64
                                         )
                                         
-                                        android.util.Log.d("MwaTransactionDemo", "Payer signature added by wallet")
-                                        statusMessage = "Adding nonce signature ${index + 1}/${transactionsToSign.size}..."
-                                        
-                                        // Step 2: Add nonce signature locally (second signature)
-                                        val payerSignedBase64 = android.util.Base64.encodeToString(
+                                        android.util.Log.d("MwaTransactionDemo", "Payer signature added by wallet (nonce signatures already embedded)")
+                                        statusMessage = "Submitting transaction ${index + 1}/${transactionsToSign.size} to Solana..."
+
+                                        // Transaction is already fully signed: nonce keypairs pre-signed in Rust,
+                                        // payer signature just added by MWA — submit directly.
+                                        val fullySignedBase64 = android.util.Base64.encodeToString(
                                             payerSignedTxBytes,
                                             android.util.Base64.NO_WRAP
                                         )
-                                        
-                                        val fullySignedBase64 = sdk.addNonceSignature(
-                                            payerSignedTransactionBase64 = payerSignedBase64,
-                                            nonceKeypairBase64 = nonceTx.nonceKeypairBase64
-                                        ).getOrThrow()
-                                        
-                                        android.util.Log.d("MwaTransactionDemo", "Nonce signature added (fully signed)")
-                                        statusMessage = "Submitting transaction ${index + 1}/${transactionsToSign.size} to Solana..."
-                                        
-                                        // Step 3: Submit fully-signed transaction to Solana
+
+                                        // Step 2: Submit fully-signed transaction to Solana
                                         val txSignature = sdk.submitOfflineTransaction(
                                             transactionBase64 = fullySignedBase64,
                                             verifyNonce = false  // Don't verify nonce for creation txs

@@ -20,13 +20,10 @@ use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 mod nonce_bundle_helper;
 use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
 
-use base64;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::Keypair;
-use solana_sdk::signer::Signer;
+use solana_sdk::signature::Signer;
 use tracing::info;
 
 #[tokio::main]
@@ -80,7 +77,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Transaction will NOT be signed or compressed");
 
     let unsigned_tx = sdk
-        .create_unsigned_transaction(&sender, &recipient, &fee_payer, amount, Some(&nonce_account), None)
+        .create_unsigned_transaction(
+            &sender,
+            &recipient,
+            &fee_payer,
+            amount,
+            Some(&nonce_account),
+            None,
+        )
         .await?;
 
     // Mark nonce as used after creating transaction
@@ -110,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Sender will sign the transaction...");
 
     // Decode and deserialize to get message data
-    use solana_sdk::signature::Signer;
+    #[allow(deprecated)]
     let tx_bytes = base64::decode(&unsigned_tx)?;
     let tx_for_signing: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)?;
     let message_data = tx_for_signing.message_data();
@@ -131,6 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Check if transaction is fully signed
+    #[allow(deprecated)]
     let final_tx_bytes = base64::decode(&partially_signed_tx)?;
     let final_tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&final_tx_bytes)?;
     let valid_sigs = final_tx
@@ -162,9 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
 
-        let signature = sdk
-            .submit_transaction(partially_signed_tx.as_str())
-            .await?;
+        let signature = sdk.submit_transaction(partially_signed_tx.as_str()).await?;
         info!("✅ Transaction submitted successfully!");
         info!("   Transaction signature: {}", signature);
         info!(

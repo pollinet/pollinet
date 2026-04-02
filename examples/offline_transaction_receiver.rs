@@ -15,7 +15,6 @@
 mod wallet_utils;
 use wallet_utils::get_rpc_url;
 
-use base64;
 use pollinet::PolliNetSDK;
 use std::collections::HashMap;
 use std::sync::Arc;

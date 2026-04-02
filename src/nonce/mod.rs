@@ -2,10 +2,12 @@
 //!
 //! Handles Solana nonce accounts to extend transaction lifespan beyond recent blockhash constraints
 
+#![allow(deprecated)]
+
 use solana_account_decoder::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
-use solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
+use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
@@ -108,8 +110,8 @@ impl NonceManager {
         &self,
         payer: &Pubkey,
         nonce_account: &Pubkey,
-        authority: &Pubkey,
-        recent_blockhash: &Hash,
+        _authority: &Pubkey,
+        _recent_blockhash: &Hash,
     ) -> Result<Instruction, NonceError> {
         // Mock instruction for now
         // In production, this would create a proper nonce account instruction
@@ -217,8 +219,8 @@ pub async fn find_nonce_accounts_by_authority(
 
     // Create a filter to match accounts where authority equals our pubkey
     let filters = vec![
-        // Filter 1: Account must be exactly 128 bytes (nonce account size)
-        RpcFilterType::DataSize(128),
+        // Filter 1: Account must be exactly 80 bytes (Solana nonce account size)
+        RpcFilterType::DataSize(80),
         // Filter 2: Match authority pubkey at offset 4
         RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
             4, // Offset: skip first 4 bytes (version)

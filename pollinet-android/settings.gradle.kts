@@ -20,5 +20,13 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "pollinet-android"
+
+// Pull in the SDK as a composite build so implementation("xyz.pollinet:pollinet-sdk")
+// is transparently satisfied from local source during development.
+includeBuild("../pollinet-sdk") {
+    dependencySubstitution {
+        substitute(module("xyz.pollinet:pollinet-sdk")).using(project(":pollinet-sdk"))
+    }
+}
+
 include(":app")
-include(":pollinet-sdk")

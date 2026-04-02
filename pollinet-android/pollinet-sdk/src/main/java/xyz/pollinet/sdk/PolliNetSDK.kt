@@ -289,14 +289,10 @@ class PolliNetSDK private constructor(
         try {
             val request = PrepareOfflineBundleRequest(
                 count = count,
-                senderKeypairBase64 = android.util.Base64.encodeToString(
-                    senderKeypair,
-                    android.util.Base64.NO_WRAP
-                ),
                 bundleFile = bundleFile
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.prepareOfflineBundle(handle, requestJson)
+            val resultJson = PolliNetFFI.prepareOfflineBundle(handle, requestJson, senderKeypair)
             
             // Parse the bundle JSON string from the result
             val bundleJsonResult = parseResult<String>(resultJson)
@@ -321,26 +317,17 @@ class PolliNetSDK private constructor(
      */
     suspend fun createOfflineTransaction(
         senderKeypair: ByteArray,
-        nonceAuthorityKeypair: ByteArray,
         recipient: String,
         amount: Long
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val request = CreateOfflineTransactionRequest(
-                senderKeypairBase64 = android.util.Base64.encodeToString(
-                    senderKeypair,
-                    android.util.Base64.NO_WRAP
-                ),
-                nonceAuthorityKeypairBase64 = android.util.Base64.encodeToString(
-                    nonceAuthorityKeypair,
-                    android.util.Base64.NO_WRAP
-                ),
                 recipient = recipient,
                 amount = amount
                 // Nonce is automatically picked from stored bundle
             )
             val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.createOfflineTransaction(handle, requestJson)
+            val resultJson = PolliNetFFI.createOfflineTransaction(handle, requestJson, senderKeypair)
             parseResult<String>(resultJson)
         } catch (e: Exception) {
             Result.failure(e)
@@ -640,10 +627,9 @@ class PolliNetSDK private constructor(
      *
      * ⚠️ IMPORTANT: This method does NOT cache nonce accounts because the accounts
      * don't exist on-chain yet! You must:
-     * 1. Sign the transactions with MWA (payer signature)
-     * 2. Add nonce signature using [addNonceSignature]
-     * 3. Submit transactions using [submitOfflineTransaction] to create accounts on-chain
-     * 4. THEN call [cacheNonceAccounts] to cache the newly created accounts
+     * 1. Sign the transactions with MWA (payer signature) — nonce signatures are already embedded
+     * 2. Submit transactions using [submitOfflineTransaction] to create accounts on-chain
+     * 3. THEN call [cacheNonceAccounts] to cache the newly created accounts
      *
      * Workflow:
      * 1. Calls [createUnsignedNonceTransactions] to generate unsigned nonce account TXs.
@@ -782,33 +768,6 @@ class PolliNetSDK private constructor(
             val resultJson = PolliNetFFI.refreshOfflineBundle(handle)
             val response = parseResult<RefreshOfflineBundleResponse>(resultJson)
             response.map { it.refreshedCount }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Add nonce signature to a payer-signed transaction
-     * 
-     * After MWA signs the transaction with the payer key (first signature),
-     * this function adds the nonce keypair signature (second signature).
-     * 
-     * @param payerSignedTransactionBase64 Transaction with payer signature from MWA
-     * @param nonceKeypairBase64 Nonce keypair to sign with
-     * @return Fully-signed transaction ready for submission
-     */
-    suspend fun addNonceSignature(
-        payerSignedTransactionBase64: String,
-        nonceKeypairBase64: List<String>  // Multiple keypairs for batched transactions
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = AddNonceSignatureRequest(
-                payerSignedTransactionBase64 = payerSignedTransactionBase64,
-                nonceKeypairBase64 = nonceKeypairBase64
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.addNonceSignature(handle, requestJson)
-            parseResult<String>(resultJson)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1443,7 +1402,6 @@ data class FragmentReassemblyInfoList(
 data class PrepareOfflineBundleRequest(
     val version: Int = 1,
     val count: Int,
-    val senderKeypairBase64: String,
     val bundleFile: String? = null
 )
 
@@ -1473,8 +1431,6 @@ data class OfflineTransactionBundle(
 @Serializable
 data class CreateOfflineTransactionRequest(
     val version: Int = 1,
-    val senderKeypairBase64: String,
-    val nonceAuthorityKeypairBase64: String,
     val recipient: String,
     val amount: Long
     // NOTE: Nonce is automatically picked from stored bundle - no need to send it
@@ -1540,8 +1496,7 @@ data class CreateUnsignedNonceTransactionsRequest(
 @Serializable
 data class UnsignedNonceTransaction(
     val unsignedTransactionBase64: String,
-    val nonceKeypairBase64: List<String>,  // Multiple keypairs for batched transactions
-    val noncePubkey: List<String>  // Multiple pubkeys for batched transactions
+    val noncePubkey: List<String>  // Multiple pubkeys for batched transactions; nonce signatures already embedded
 )
 
 @Serializable
@@ -1570,13 +1525,6 @@ data class CastUnsignedVoteRequest(
     @SerialName("fee_payer") val feePayer: String,
     @SerialName("nonceAccount") val nonceAccount: String? = null,
     @SerialName("nonceData") val nonceData: CachedNonceData? = null
-)
-
-@Serializable
-data class AddNonceSignatureRequest(
-    val version: Int = 1,
-    val payerSignedTransactionBase64: String,
-    val nonceKeypairBase64: List<String>  // Multiple keypairs for batched transactions
 )
 
 // =============================================================================

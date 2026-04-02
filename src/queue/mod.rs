@@ -8,21 +8,21 @@
 //!
 //! Architecture: Event-driven (not polling) for 85%+ battery savings
 
-pub mod outbound;
 pub mod confirmation;
+pub mod outbound;
 pub mod retry;
 pub mod storage;
 
 // Re-export main types
+pub use confirmation::{Confirmation, ConfirmationQueue, ConfirmationStatus};
 pub use outbound::{OutboundQueue, OutboundTransaction, Priority};
-pub use confirmation::{ConfirmationQueue, Confirmation, ConfirmationStatus};
-pub use retry::{RetryQueue, RetryItem, BackoffStrategy};
+pub use retry::{BackoffStrategy, RetryItem, RetryQueue};
 pub use storage::{QueueStorage, StorageError};
 
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
 
 /// Queue manager coordinating all queues with auto-save
 pub struct QueueManager {
@@ -52,12 +52,16 @@ impl QueueManager {
             save_interval: Duration::from_secs(5), // Debounce: save at most every 5 seconds
         }
     }
-    
+
     /// Create queue manager with custom configuration
     pub fn with_config(config: QueueConfig) -> Self {
         Self {
-            outbound: Arc::new(RwLock::new(OutboundQueue::with_capacity(config.max_outbound_size))),
-            confirmations: Arc::new(RwLock::new(ConfirmationQueue::with_capacity(config.max_confirmation_size))),
+            outbound: Arc::new(RwLock::new(OutboundQueue::with_capacity(
+                config.max_outbound_size,
+            ))),
+            confirmations: Arc::new(RwLock::new(ConfirmationQueue::with_capacity(
+                config.max_confirmation_size,
+            ))),
             retries: Arc::new(RwLock::new(RetryQueue::with_config(
                 config.max_retries,
                 config.retry_backoff_strategy,
@@ -67,14 +71,14 @@ impl QueueManager {
             save_interval: Duration::from_secs(config.auto_save_interval_secs.unwrap_or(5)),
         }
     }
-    
+
     /// Create queue manager with persistence enabled
     pub fn with_storage(storage_dir: impl AsRef<std::path::Path>) -> Result<Self, StorageError> {
         let storage = storage::QueueStorage::new(storage_dir)?;
-        
+
         // Load existing queues from disk (received queue is handled separately by transport)
         let (outbound, retry, confirmation, _received) = storage.load_all()?;
-        
+
         Ok(Self {
             outbound: Arc::new(RwLock::new(outbound)),
             confirmations: Arc::new(RwLock::new(confirmation)),
@@ -84,60 +88,60 @@ impl QueueManager {
             save_interval: Duration::from_secs(5),
         })
     }
-    
+
     /// Save all queues to disk (with debouncing)
     pub async fn save_if_needed(&self) -> Result<(), StorageError> {
         let storage = match &self.storage {
             Some(s) => s,
             None => return Ok(()), // No storage configured
         };
-        
+
         // Check if enough time has passed since last save
         let mut last_save = self.last_save.write().await;
         if last_save.elapsed() < self.save_interval {
             return Ok(()); // Skip save (debounce)
         }
-        
+
         // Save all queues (received queue is handled separately by transport)
         let outbound = self.outbound.read().await;
         let retry = self.retries.read().await;
         let confirmation = self.confirmations.read().await;
-        
+
         // Empty received queue slice since it's managed by transport
         storage.save_all(&outbound, &retry, &confirmation, &[])?;
-        
+
         *last_save = Instant::now();
-        
+
         Ok(())
     }
-    
+
     /// Force save all queues (bypass debouncing)
     pub async fn force_save(&self) -> Result<(), StorageError> {
         let storage = match &self.storage {
             Some(s) => s,
             None => return Ok(()),
         };
-        
+
         let outbound = self.outbound.read().await;
         let retry = self.retries.read().await;
         let confirmation = self.confirmations.read().await;
-        
+
         // Empty received queue slice since it's managed by transport
         storage.save_all(&outbound, &retry, &confirmation, &[])?;
-        
+
         let mut last_save = self.last_save.write().await;
         *last_save = Instant::now();
-        
+
         tracing::info!("Force saved all queues");
         Ok(())
     }
-    
+
     /// Get metrics for all queues
     pub async fn get_metrics(&self) -> QueueMetrics {
         let outbound = self.outbound.read().await;
         let confirmations = self.confirmations.read().await;
         let retries = self.retries.read().await;
-        
+
         QueueMetrics {
             outbound_size: outbound.len(),
             outbound_high_priority: outbound.len_priority(Priority::High),
@@ -148,23 +152,26 @@ impl QueueManager {
             retry_avg_attempts: retries.average_attempts(),
         }
     }
-    
+
     /// Get queue health status
     pub async fn get_health(&self) -> HealthStatus {
         let metrics = self.get_metrics().await;
-        
+
         let warnings = vec![
             (metrics.outbound_size > 100, "Outbound queue > 100 items"),
             (metrics.retry_size > 50, "Retry queue > 50 items"),
-            (metrics.outbound_size > 500, "CRITICAL: Outbound queue > 500 items"),
+            (
+                metrics.outbound_size > 500,
+                "CRITICAL: Outbound queue > 500 items",
+            ),
         ];
-        
+
         let active_warnings: Vec<_> = warnings
             .into_iter()
             .filter(|(condition, _)| *condition)
             .map(|(_, msg)| msg.to_string())
             .collect();
-        
+
         if active_warnings.is_empty() {
             HealthStatus::Healthy
         } else if metrics.outbound_size > 500 || metrics.retry_size > 200 {
@@ -173,7 +180,7 @@ impl QueueManager {
             HealthStatus::Warning(active_warnings)
         }
     }
-    
+
     /// Clear all queues (outbound, retry, confirmation)
     /// Note: Received queue is managed by transport layer, not QueueManager
     /// Note: This does NOT clear nonce data
@@ -182,17 +189,17 @@ impl QueueManager {
             let mut outbound = self.outbound.write().await;
             outbound.clear();
         }
-        
+
         {
             let mut retries = self.retries.write().await;
             retries.clear();
         }
-        
+
         {
             let mut confirmations = self.confirmations.write().await;
             confirmations.clear();
         }
-        
+
         tracing::info!("✅ Cleared all queues (outbound, retry, confirmation)");
     }
 }
@@ -253,23 +260,22 @@ pub enum HealthStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_queue_manager_creation() {
         let manager = QueueManager::new();
         let metrics = manager.get_metrics().await;
-        
+
         assert_eq!(metrics.outbound_size, 0);
         assert_eq!(metrics.confirmation_size, 0);
         assert_eq!(metrics.retry_size, 0);
     }
-    
+
     #[tokio::test]
     async fn test_queue_health_healthy() {
         let manager = QueueManager::new();
         let health = manager.get_health().await;
-        
+
         matches!(health, HealthStatus::Healthy);
     }
 }
-

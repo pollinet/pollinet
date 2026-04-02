@@ -24,6 +24,6 @@ pub mod common {
 
     /// Calculate optimal fragment size for BLE transmission
     pub fn calculate_fragment_size(data_size: usize, mtu_size: usize) -> usize {
-        (data_size + mtu_size - 1) / mtu_size
+        data_size.div_ceil(mtu_size)
     }
 }

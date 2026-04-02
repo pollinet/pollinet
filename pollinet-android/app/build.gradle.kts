@@ -41,8 +41,8 @@ android {
 }
 
 dependencies {
-    // PolliNet SDK
-    implementation(project(":pollinet-sdk"))
+    // PolliNet SDK (sourced from ../pollinet-sdk via composite build in settings.gradle.kts)
+    implementation("xyz.pollinet:pollinet-sdk")
 
     // Solana Mobile Wallet Adapter (MWA)
     implementation(libs.solana.mobile.wallet.adapter.clientlib)

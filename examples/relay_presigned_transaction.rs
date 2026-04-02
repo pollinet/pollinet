@@ -21,14 +21,12 @@ use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 mod nonce_bundle_helper;
 use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
 
-use base64;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
+#[allow(deprecated)]
 use solana_sdk::system_instruction;
 use solana_sdk::transaction::Transaction;
 use std::str::FromStr;
@@ -118,6 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Serialize and encode to base64
     let tx_bytes = bincode1::serialize(&custom_tx)?;
+    #[allow(deprecated)]
     let base64_tx = base64::encode(&tx_bytes);
 
     info!("✅ Presigned transaction ready for relay");

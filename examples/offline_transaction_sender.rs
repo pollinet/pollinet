@@ -18,7 +18,6 @@ use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
@@ -121,6 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut wait_attempts = 0;
     let max_wait_attempts = 60; // Wait up to 60 seconds
     let mut peer_connected = false;
+    #[allow(unused_assignments)]
     let mut connected_peer_id = String::new();
 
     while wait_attempts < max_wait_attempts && !peer_connected {
@@ -161,7 +161,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => {
                     warn!("⚠️  Could not discover peer details: {}", e);
-                    connected_peer_id = "receiver".to_string();
                 }
             }
 

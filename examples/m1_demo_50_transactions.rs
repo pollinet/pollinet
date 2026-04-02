@@ -13,8 +13,8 @@ mod nonce_bundle_helper;
 use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use, BUNDLE_FILE};
 
 use base64::{engine::general_purpose, Engine as _};
-use pollinet::PolliNetSDK;
 use pollinet::util::lz::Lz4Compressor;
+use pollinet::PolliNetSDK;
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -197,19 +197,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("⏳ Simulating 5-minute offline period before reconnecting...");
     info!("   This demonstrates that transactions remain valid during extended offline periods");
     info!("");
-    
+
     let total_seconds = 5 * 60; // 5 minutes
     for remaining in (1..=total_seconds).rev() {
         let minutes = remaining / 60;
         let seconds = remaining % 60;
-        
+
         if remaining % 10 == 0 || remaining <= 10 {
-            info!("   ⏱️  Offline period: {:02}:{:02} remaining", minutes, seconds);
+            info!(
+                "   ⏱️  Offline period: {:02}:{:02} remaining",
+                minutes, seconds
+            );
         }
-        
+
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    
+
     info!("");
     info!("🌐 Reconnecting to internet...");
 
@@ -261,11 +264,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Decompress the transaction
         info!("   • Decompressing transaction...");
-        let compressor = Lz4Compressor::new()
-            .map_err(|e| format!("Failed to create compressor: {}", e))?;
-        
+        let compressor =
+            Lz4Compressor::new().map_err(|e| format!("Failed to create compressor: {}", e))?;
+
         let decompressed_tx = if reassembled_tx.len() >= 8 && reassembled_tx.starts_with(b"LZ4") {
-            let decompressed = compressor.decompress_with_size(&reassembled_tx)
+            let decompressed = compressor
+                .decompress_with_size(&reassembled_tx)
                 .map_err(|e| format!("Failed to decompress transaction: {}", e))?;
             info!(
                 "   • Decompression successful: {} bytes -> {} bytes",

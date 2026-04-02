@@ -103,8 +103,6 @@ pub struct PrepareOfflineBundleRequest {
     #[serde(default = "default_version")]
     pub version: u32,
     pub count: usize,
-    #[serde(rename = "senderKeypairBase64")]
-    pub sender_keypair_base64: String, // base64 encoded bytes
     #[serde(rename = "bundleFile")]
     pub bundle_file: Option<String>,
 }
@@ -113,14 +111,10 @@ pub struct PrepareOfflineBundleRequest {
 pub struct CreateOfflineTransactionRequest {
     #[serde(default = "default_version")]
     pub version: u32,
-    #[serde(rename = "senderKeypairBase64")]
-    pub sender_keypair_base64: String,
-    #[serde(rename = "nonceAuthorityKeypairBase64")]
-    pub nonce_authority_keypair_base64: String,
     pub recipient: String,
     pub amount: u64,
     // NOTE: Nonce is picked automatically from stored bundle
-    // No need to send cached_nonce - we manage it internally
+    // Sender keypair is passed as a separate JByteArray parameter, not in JSON
 }
 
 // MWA-compatible: Create UNSIGNED transaction (no keypairs, only pubkeys)
@@ -373,12 +367,11 @@ pub struct CreateUnsignedNonceTransactionsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnsignedNonceTransaction {
+    /// Transaction already partially-signed by the nonce accounts; only payer signature needed
     #[serde(rename = "unsignedTransactionBase64")]
     pub unsigned_transaction_base64: String,
-    #[serde(rename = "nonceKeypairBase64")]
-    pub nonce_keypair_base64: Vec<String>,  // Multiple keypairs for batched transactions
     #[serde(rename = "noncePubkey")]
-    pub nonce_pubkey: Vec<String>,  // Multiple pubkeys for batched transactions
+    pub nonce_pubkey: Vec<String>, // Multiple pubkeys for batched transactions
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,16 +380,6 @@ pub struct CacheNonceAccountsRequest {
     pub version: u32,
     #[serde(rename = "nonceAccounts")]
     pub nonce_accounts: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AddNonceSignatureRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "payerSignedTransactionBase64")]
-    pub payer_signed_transaction_base64: String,
-    #[serde(rename = "nonceKeypairBase64")]
-    pub nonce_keypair_base64: Vec<String>,  // Multiple keypairs for batched transactions
 }
 
 // ============================================================================
@@ -559,4 +542,3 @@ pub struct QueueSizeResponse {
     #[serde(rename = "queueSize")]
     pub queue_size: usize,
 }
-

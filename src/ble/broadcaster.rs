@@ -3,7 +3,7 @@
 //! Handles broadcasting signed Solana transactions across the BLE mesh network.
 //! Fragments are sent to all connected peers with flood prevention and tracking.
 
-use crate::ble::mesh::{MeshPacket, MeshRouter, PacketType, TransactionFragment};
+use crate::ble::mesh::{MeshPacket, PacketType, TransactionFragment};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,9 +14,11 @@ use uuid::Uuid;
 const BROADCAST_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 
 /// Maximum retries for fragment transmission
+#[allow(dead_code)]
 const MAX_RETRIES: u32 = 3;
 
 /// Retry interval for failed fragments
+#[allow(dead_code)]
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Broadcast status for a transaction
@@ -34,8 +36,9 @@ pub enum BroadcastStatus {
 
 /// Information about fragment propagation to a specific peer
 #[derive(Debug, Clone)]
-struct PeerFragmentStatus {
+pub(crate) struct PeerFragmentStatus {
     /// Peer ID
+    #[allow(dead_code)]
     peer_id: String,
     /// Fragments successfully sent to this peer
     sent_fragments: HashSet<u16>,
@@ -69,6 +72,7 @@ impl PeerFragmentStatus {
     }
 
     /// Check if a fragment needs retry
+    #[allow(dead_code)]
     fn needs_retry(&self, fragment_index: u16) -> bool {
         if !self.pending_fragments.contains(&fragment_index) {
             return false;
@@ -87,6 +91,7 @@ impl PeerFragmentStatus {
     }
 
     /// Record a retry attempt
+    #[allow(dead_code)]
     fn record_retry(&mut self, fragment_index: u16) {
         *self.retry_counts.entry(fragment_index).or_insert(0) += 1;
         self.last_retry.insert(fragment_index, Instant::now());
@@ -103,7 +108,7 @@ impl PeerFragmentStatus {
         if total == 0 {
             return 100.0;
         }
-        (self.sent_fragments.len() as f32 / total as f32) * 100.0
+        (self.sent_fragments.len() as f32 * 100.0) / total as f32
     }
 }
 
@@ -115,7 +120,7 @@ pub struct BroadcastInfo {
     /// Transaction fragments
     pub fragments: Vec<TransactionFragment>,
     /// Per-peer transmission status
-    pub peer_status: HashMap<String, PeerFragmentStatus>,
+    pub(crate) peer_status: HashMap<String, PeerFragmentStatus>,
     /// Overall broadcast status
     pub status: BroadcastStatus,
     /// Broadcast start time
@@ -175,6 +180,7 @@ impl BroadcastInfo {
     }
 
     /// Update status based on current state
+    #[allow(dead_code)]
     fn update_status(&mut self) {
         if self.is_timed_out() {
             self.status = BroadcastStatus::TimedOut;

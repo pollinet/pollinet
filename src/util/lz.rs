@@ -2,7 +2,7 @@
 //!
 //! Provides fast lossless compression for transaction payloads
 
-use std::{i32, time::Instant};
+use std::time::Instant;
 use thiserror::Error;
 
 /// LZ4 compressor for transaction payloads

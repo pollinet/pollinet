@@ -23,13 +23,11 @@ mod wallet_utils;
 use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 
 mod nonce_bundle_helper;
-use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use, BUNDLE_FILE};
+use nonce_bundle_helper::{load_bundle, BUNDLE_FILE};
 
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use tracing::info;
 
@@ -58,13 +56,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("║  PHASE 1: ONLINE - Prepare for Offline Use           ║");
     info!("╚═══════════════════════════════════════════════════════╝");
 
-    let sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
+    let _sdk = PolliNetSDK::new_with_rpc(&rpc_url).await?;
 
     // Load bundle from .offline_bundle.json
     info!("\n=== Loading Nonce Bundle ===");
     info!("Loading nonce accounts from {}", BUNDLE_FILE);
 
-    let mut bundle = load_bundle()?;
+    let bundle = load_bundle()?;
     info!(
         "✅ Loaded {} nonce accounts for offline use",
         bundle.available_nonces()
@@ -99,12 +97,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create multiple transactions offline
     info!("\n=== Creating Transactions OFFLINE ===");
-    let recipients = vec![
+    let recipients = [
         "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX",
         "GgathUhdrCWRHowoRKACjgWhYHfxCEdBi5ViqYN6HVxk",
         "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK",
     ];
-    let amounts = vec![100_000, 200_000, 300_000]; // Different amounts
+    let amounts = [100_000, 200_000, 300_000]; // Different amounts
 
     let mut offline_txs = Vec::new();
 
