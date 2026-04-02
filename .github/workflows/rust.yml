@@ -20,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: pollinet
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -33,8 +35,8 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+            pollinet/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('pollinet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: cargo fmt --check
@@ -50,6 +52,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: pollinet
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
