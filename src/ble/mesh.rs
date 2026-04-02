@@ -19,17 +19,16 @@ pub const DEFAULT_TTL: u8 = 10;
 pub const MAX_FRAGMENTS: u16 = 100;
 
 /// Maximum payload size per packet (bytes)
-/// Target: 150 bytes max after serialization to fit comfortably in BLE MTU
-/// With bincode overhead (~20 bytes), we want raw data + headers < 130 bytes
-pub const MAX_PAYLOAD_SIZE: usize = 100;
+/// Target: BLE MTU ~517 bytes; with 48 bytes of header overhead this gives 469 bytes of data.
+/// Using 516 to yield exactly 468 bytes of usable fragment data.
+pub const MAX_PAYLOAD_SIZE: usize = 516;
 
 /// Mesh packet header size (bytes)
 pub const HEADER_SIZE: usize = 42;
 
 /// Maximum usable fragment data size (bytes)
 /// This is the actual transaction data that fits in a fragment
-/// 100 - 42 - 6 = 52 bytes of transaction data per fragment
-/// This ensures total serialized size stays well under 150 bytes
+/// 516 - 42 - 6 = 468 bytes of transaction data per fragment
 pub const MAX_FRAGMENT_DATA: usize = MAX_PAYLOAD_SIZE - HEADER_SIZE - 6;
 
 /// Maximum incomplete transactions in buffer
@@ -234,6 +233,7 @@ impl TransactionFragment {
 /// Incomplete transaction being reassembled
 #[derive(Debug, Clone)]
 struct IncompleteTransaction {
+    #[allow(dead_code)]
     transaction_id: [u8; 32],
     total_fragments: u16,
     received_fragments: HashSet<u16>,
@@ -292,6 +292,7 @@ impl IncompleteTransaction {
 #[derive(Debug, Clone)]
 struct SeenMessage {
     seen_at: Instant,
+    #[allow(dead_code)]
     hop_count: u8,
 }
 

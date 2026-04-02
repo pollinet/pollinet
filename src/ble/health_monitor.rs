@@ -99,7 +99,7 @@ pub enum PeerState {
 }
 
 /// Network topology
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct NetworkTopology {
     /// Direct connections from this node
     pub direct_connections: Vec<String>,
@@ -112,17 +112,6 @@ pub struct NetworkTopology {
 
     /// Hop count to each peer
     pub hop_counts: HashMap<String, u8>,
-}
-
-impl Default for NetworkTopology {
-    fn default() -> Self {
-        Self {
-            direct_connections: Vec::new(),
-            all_peers: Vec::new(),
-            connections: HashMap::new(),
-            hop_counts: HashMap::new(),
-        }
-    }
 }
 
 /// Overall network health metrics
@@ -200,6 +189,7 @@ impl MeshHealthMonitor {
     }
 
     /// Create with default configuration
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Self {
         Self::new(HealthConfig::default())
     }
@@ -559,6 +549,10 @@ impl MeshHealthMonitor {
     }
 }
 
+fn default_instant() -> Instant {
+    Instant::now()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,8 +581,4 @@ mod tests {
         assert_eq!(snapshot.metrics.connected_peers, 2);
         assert!(snapshot.metrics.health_score > 70);
     }
-}
-
-fn default_instant() -> Instant {
-    Instant::now()
 }

@@ -382,7 +382,6 @@ pub struct CacheNonceAccountsRequest {
     pub nonce_accounts: Vec<String>,
 }
 
-
 // ============================================================================
 // Queue Management Types (Phase 2)
 // ============================================================================

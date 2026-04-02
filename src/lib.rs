@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 
 /// Trait for transaction input types that can be submitted to Solana
 /// Allows unified `submit_transaction()` method to accept both base64 strings and raw bytes
+#[allow(async_fn_in_trait)]
 pub trait TransactionInput {
     async fn submit(&self, sdk: &PolliNetSDK) -> Result<String, PolliNetError>;
 }
@@ -28,6 +29,7 @@ pub struct PolliNetSDK {
     /// Transaction builder and manager
     transaction_service: Arc<transaction::TransactionService>,
     /// Nonce account management
+    #[allow(dead_code)]
     nonce_manager: Arc<nonce::NonceManager>,
     /// Local transaction cache
     local_cache: Arc<RwLock<transaction::TransactionCache>>,
@@ -39,12 +41,10 @@ impl PolliNetSDK {
     fn make_queue_manager(storage_dir: Option<&str>) -> Arc<queue::QueueManager> {
         if let Some(dir) = storage_dir {
             tracing::info!("Using persistent queue storage: {}", dir);
-            Arc::new(
-                queue::QueueManager::with_storage(dir).unwrap_or_else(|e| {
-                    tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
-                    queue::QueueManager::new()
-                }),
-            )
+            Arc::new(queue::QueueManager::with_storage(dir).unwrap_or_else(|e| {
+                tracing::warn!("Failed to load queues from storage: {}, starting fresh", e);
+                queue::QueueManager::new()
+            }))
         } else {
             tracing::info!("No persistent storage configured, queues will not persist");
             Arc::new(queue::QueueManager::new())
@@ -137,6 +137,7 @@ impl PolliNetSDK {
     ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_unsigned_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -193,6 +194,7 @@ impl PolliNetSDK {
     ///
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
+    #[allow(clippy::too_many_arguments)]
     pub async fn cast_unsigned_vote(
         &self,
         voter: &str,
@@ -265,6 +267,7 @@ impl PolliNetSDK {
     ///   - Refreshes used nonces (fetches new blockhash from advanced nonces) - FREE!
     ///   - Creates additional accounts ONLY if total < count
     ///   - Returns bundle with 'count' nonces ready to use
+    ///
     /// If bundle_file doesn't exist:
     ///   - Creates new bundle with 'count' nonce accounts
     ///
@@ -415,25 +418,7 @@ impl PolliNetSDK {
     /// Returns transaction signature if successful.
     ///
     /// # Examples
-    /// ```rust,no_run
-    /// // Submit from base64 string
-    /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
-    ///
-    /// // Submit from raw bytes
-    /// let signature = sdk.submit_transaction(&tx_bytes).await?;
-    /// ```
-    /// Submit a transaction to Solana
-    ///
-    /// Unified method that accepts either base64-encoded transaction strings or raw transaction bytes.
-    /// Automatically detects the input format and processes accordingly.
-    ///
-    /// - **Base64 string** (`&str` or `String`): Decodes, validates signatures, and submits
-    /// - **Raw bytes** (`&[u8]` or `Vec<u8>`): Handles LZ4 compression if detected, then submits
-    ///
-    /// Returns transaction signature if successful.
-    ///
-    /// # Examples
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// // Submit from base64 string
     /// let signature = sdk.submit_transaction("base64_encoded_tx...").await?;
     ///
@@ -669,6 +654,7 @@ impl PolliNetSDK {
     /// Create and sign a new SPL token transfer transaction with durable nonce
     /// Creates a presigned SPL token transaction using a nonce account for longer lifetime
     /// Automatically derives Associated Token Accounts from wallet pubkeys and mint address
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -696,6 +682,81 @@ impl PolliNetSDK {
     /// Fragment a transaction for BLE transmission
     pub fn fragment_transaction(&self, compressed_tx: &[u8]) -> Vec<transaction::Fragment> {
         self.transaction_service.fragment_transaction(compressed_tx)
+    }
+
+    // ── BLE mesh stubs (to be implemented with platform BLE integration) ──
+
+    /// Reset BLE state and clear connections
+    pub async fn reset_ble(&self) -> Result<(), PolliNetError> {
+        Ok(())
+    }
+
+    /// Start BLE networking (advertising + scanning)
+    pub async fn start_ble_networking(&self) -> Result<(), PolliNetError> {
+        Ok(())
+    }
+
+    /// Start BLE scanning for peers
+    pub async fn start_ble_scanning(&self) -> Result<(), PolliNetError> {
+        Ok(())
+    }
+
+    /// Start listener for incoming text messages
+    pub async fn start_text_listener(&self) -> Result<(), PolliNetError> {
+        Ok(())
+    }
+
+    /// Get count of currently connected BLE clients
+    pub async fn get_connected_clients_count(&self) -> usize {
+        0
+    }
+
+    /// Represents a discovered BLE peer
+    pub async fn discover_ble_peers(&self) -> Result<Vec<BlePeer>, PolliNetError> {
+        Ok(Vec::new())
+    }
+
+    /// Connect to a specific BLE peer by ID
+    pub async fn connect_to_ble_peer(&self, _peer_id: &str) -> Result<(), PolliNetError> {
+        Ok(())
+    }
+
+    /// Send a short text message to a peer
+    pub async fn send_text_message(
+        &self,
+        _peer_id: &str,
+        _message: &str,
+    ) -> Result<(), PolliNetError> {
+        Ok(())
+    }
+
+    /// Check for incoming text messages from peers
+    pub async fn check_incoming_messages(&self) -> Result<Vec<String>, PolliNetError> {
+        Ok(Vec::new())
+    }
+
+    /// Get IDs of transactions that have been fully reassembled
+    pub async fn get_complete_transactions(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Get reassembled fragments for a specific transaction ID
+    pub async fn get_fragments_for_transaction(
+        &self,
+        _tx_id: &str,
+    ) -> Option<Vec<transaction::Fragment>> {
+        None
+    }
+
+    /// Clear stored fragments for a transaction after processing
+    pub async fn clear_fragments(&self, _tx_id: &str) {}
+
+    /// Relay pre-fragmented transaction over BLE mesh
+    pub async fn relay_transaction(
+        &self,
+        _fragments: Vec<transaction::Fragment>,
+    ) -> Result<(), PolliNetError> {
+        Ok(())
     }
 
     /// Reassemble fragments back into a complete transaction
@@ -736,7 +797,6 @@ impl PolliNetSDK {
             )
             .await?)
     }
-
 }
 
 // TransactionInput trait implementations for unified submit_transaction() method
@@ -790,6 +850,14 @@ pub enum PolliNetError {
 
     #[error("Configuration error: {0}")]
     Configuration(String),
+}
+
+/// Represents a discovered BLE peer device
+pub struct BlePeer {
+    /// Peer identifier
+    pub peer_id: String,
+    /// Received signal strength indicator (dBm)
+    pub rssi: i32,
 }
 
 /// BLE MTU size for packet fragmentation

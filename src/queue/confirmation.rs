@@ -88,7 +88,7 @@ impl Confirmation {
 
     /// Get transaction ID as hex string
     pub fn tx_id_hex(&self) -> String {
-        hex::encode(&self.original_tx_id)
+        hex::encode(self.original_tx_id)
     }
 }
 

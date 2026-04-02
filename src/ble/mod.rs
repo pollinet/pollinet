@@ -15,7 +15,7 @@ pub use fragmenter::{fragment_transaction, reconstruct_transaction, Fragmentatio
 // Mesh protocol types
 pub use mesh::{
     MeshError, MeshHeader, MeshPacket, MeshRouter, MeshStats, PacketType, TransactionFragment,
-    DEFAULT_TTL, MAX_FRAGMENT_DATA, MAX_FRAGMENTS, MAX_HOPS, MAX_PAYLOAD_SIZE,
+    DEFAULT_TTL, MAX_FRAGMENTS, MAX_FRAGMENT_DATA, MAX_HOPS, MAX_PAYLOAD_SIZE,
 };
 
 // Broadcaster types

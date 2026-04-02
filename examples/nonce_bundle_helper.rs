@@ -23,9 +23,9 @@ pub fn load_bundle() -> Result<OfflineTransactionBundle, Box<dyn std::error::Err
     info!("   Total nonces: {}", bundle.total_nonces());
 
     if bundle.is_empty() {
-        return Err(format!(
-            "No available nonces in bundle. Please run 'cargo run --example nonce_refresh_utility' to refresh."
-        ).into());
+        return Err(
+            "No available nonces in bundle. Please run 'cargo run --example nonce_refresh_utility' to refresh.".into()
+        );
     }
 
     Ok(bundle)
@@ -33,6 +33,7 @@ pub fn load_bundle() -> Result<OfflineTransactionBundle, Box<dyn std::error::Err
 
 /// Get the next available nonce and return both the nonce and a mutable bundle reference
 /// Returns (nonce_account_string, cached_nonce_data, bundle_index)
+#[allow(dead_code)]
 pub fn get_next_nonce(
     bundle: &mut OfflineTransactionBundle,
 ) -> Result<(String, CachedNonceData, usize), Box<dyn std::error::Error>> {
@@ -49,6 +50,7 @@ pub fn get_next_nonce(
 }
 
 /// Save bundle to file and mark nonce as used
+#[allow(dead_code)]
 pub fn save_bundle_after_use(
     bundle: &mut OfflineTransactionBundle,
     index: usize,

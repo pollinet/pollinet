@@ -9,11 +9,15 @@ use crate::ble::mesh::TransactionFragment;
 use crate::ble::MeshHealthMonitor;
 use crate::storage::SecureStorage;
 use crate::transaction::TransactionService;
-use crate::transaction::{Fragment as TxFragment, FragmentType};
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Type alias for the completed transactions queue
+type CompletedTxQueue = Arc<Mutex<VecDeque<(String, Vec<u8>)>>>;
+/// Type alias for the received transaction queue (tx_id, tx_bytes, timestamp)
+type ReceivedTxQueue = Arc<Mutex<VecDeque<(String, Vec<u8>, u64)>>>;
 
 // Unified logging macros for transport layer:
 // - On Android: mirror all messages to log::debug! (for android_logger / logcat),
@@ -76,6 +80,7 @@ macro_rules! t_error {
 }
 
 /// Maximum MTU size for BLE
+#[allow(dead_code)]
 const MAX_MTU: usize = 512;
 
 /// Maximum number of distinct transactions buffered for reassembly at once
@@ -93,11 +98,11 @@ pub struct HostBleTransport {
     inbound_buffers: Arc<Mutex<HashMap<String, Vec<TransactionFragment>>>>,
 
     /// Completed transactions ready for processing
-    completed_transactions: Arc<Mutex<VecDeque<(String, Vec<u8>)>>>,
+    completed_transactions: CompletedTxQueue,
 
     /// Queue of received transactions ready for auto-submission
     /// (tx_id, tx_bytes, received_at_timestamp)
-    received_tx_queue: Arc<Mutex<VecDeque<(String, Vec<u8>, u64)>>>,
+    received_tx_queue: ReceivedTxQueue,
 
     /// Set of transaction hashes that have been submitted (for deduplication)
     submitted_tx_hashes: Arc<Mutex<HashMap<Vec<u8>, u64>>>,
@@ -321,7 +326,7 @@ impl HostBleTransport {
         t_debug!("✅ Fragment deserialized successfully");
 
         // Use transaction_id as tx_id (convert to 64-character hex string to match sender format)
-        let tx_id = hex::encode(&fragment.transaction_id);
+        let tx_id = hex::encode(fragment.transaction_id);
 
         t_info!(
             "📥 Received mesh fragment {}/{} for tx {} ({} bytes)",
@@ -346,7 +351,7 @@ impl HostBleTransport {
         }
 
         // Store TransactionFragment directly (no conversion needed)
-        let buffer = buffers.entry(tx_id.clone()).or_insert_with(Vec::new);
+        let buffer = buffers.entry(tx_id.clone()).or_default();
 
         if buffer.len() >= MAX_FRAGMENTS_PER_TRANSACTION {
             let error_msg = format!(
@@ -613,7 +618,7 @@ impl HostBleTransport {
             } else {
                 "FragmentContinue".to_string()
             },
-            checksum: STANDARD.encode(&mesh_fragment.transaction_id),
+            checksum: STANDARD.encode(mesh_fragment.transaction_id),
         }
     }
 
@@ -1034,6 +1039,7 @@ impl HostBleTransport {
 
     // Helper functions
 
+    #[allow(dead_code)]
     fn convert_fragment_to_ffi(&self, fragment: &TransactionFragment) -> Fragment {
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
@@ -1056,7 +1062,7 @@ impl HostBleTransport {
             total: fragment.total_fragments as u32,
             data: BASE64.encode(&fragment.data),
             fragment_type: fragment_type.to_string(),
-            checksum: BASE64.encode(&fragment.transaction_id),
+            checksum: BASE64.encode(fragment.transaction_id),
         }
     }
 

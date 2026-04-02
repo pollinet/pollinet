@@ -9,20 +9,15 @@ use std::collections::{HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Transaction priority levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Priority {
     /// High priority - user-initiated transactions (sent first)
     High = 2,
     /// Normal priority - regular transactions (default)
+    #[default]
     Normal = 1,
     /// Low priority - relay transactions (sent last)
     Low = 0,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Priority::Normal
-    }
 }
 
 /// Outbound transaction awaiting BLE transmission
@@ -121,11 +116,10 @@ impl OutboundQueue {
 
     /// Push transaction to queue (returns error if duplicate or queue full)
     pub fn push(&mut self, tx: OutboundTransaction) -> Result<(), QueueError> {
-        // Duplicate check commented out - allow re-queuing of transactions
-        // // Check for duplicates
-        // if self.deduplication_set.contains(&tx.tx_id) {
-        //     return Err(QueueError::Duplicate(tx.tx_id));
-        // }
+        // Check for duplicates
+        if self.deduplication_set.contains(&tx.tx_id) {
+            return Err(QueueError::Duplicate(tx.tx_id));
+        }
 
         // Check queue size
         if self.len() >= self.max_size {
@@ -221,6 +215,14 @@ impl OutboundQueue {
             .front()
             .or_else(|| self.normal_priority.front())
             .or_else(|| self.low_priority.front())
+    }
+
+    /// Iterate all transactions across all priority queues (high → normal → low)
+    pub(crate) fn transactions(&self) -> impl Iterator<Item = &OutboundTransaction> {
+        self.high_priority
+            .iter()
+            .chain(self.normal_priority.iter())
+            .chain(self.low_priority.iter())
     }
 
     /// Clear all queues

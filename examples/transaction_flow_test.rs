@@ -211,7 +211,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Queue the confirmation using SDK's queue manager
                 use pollinet::queue::{Confirmation, ConfirmationStatus};
-                use std::str::FromStr;
                 let tx_id_bytes = hex::decode(&tx_id).unwrap_or_else(|_| vec![]);
                 let tx_id_array: [u8; 32] = if tx_id_bytes.len() == 32 {
                     tx_id_bytes.try_into().unwrap()

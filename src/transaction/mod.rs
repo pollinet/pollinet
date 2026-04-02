@@ -2,6 +2,8 @@
 //!
 //! Handles creation, signing, compression, fragmentation, and submission of Solana transactions
 
+#![allow(deprecated)]
+
 use crate::{BLE_MTU_SIZE, COMPRESSION_THRESHOLD};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -72,6 +74,12 @@ pub struct OfflineTransactionBundle {
     pub max_transactions: usize,
     /// Unix timestamp when this bundle was created
     pub created_at: u64,
+}
+
+impl Default for OfflineTransactionBundle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OfflineTransactionBundle {
@@ -244,6 +252,12 @@ pub struct TransactionCache {
     reassembly_buffers: HashMap<String, FragmentSet>,
 }
 
+impl Default for TransactionCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransactionCache {
     pub fn new() -> Self {
         Self {
@@ -256,7 +270,7 @@ impl TransactionCache {
         &mut self,
         fragment: crate::ble::mesh::TransactionFragment,
     ) -> Result<(), String> {
-        let tx_id_hex = hex::encode(&fragment.transaction_id);
+        let tx_id_hex = hex::encode(fragment.transaction_id);
         let fragment_set = self
             .reassembly_buffers
             .entry(tx_id_hex.clone())
@@ -560,6 +574,7 @@ impl TransactionService {
     /// Create an unsigned SPL token transfer transaction with durable nonce
     /// Returns base64 encoded uncompressed, unsigned SPL token transaction
     /// Automatically derives ATAs from wallet pubkeys and mint address
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_unsigned_spl_transaction(
         &self,
         sender_wallet: &str,
@@ -869,6 +884,7 @@ impl TransactionService {
     /// If `nonce_data` is provided, it will be used directly (no RPC call).
     /// Otherwise, if `nonce_account` is provided, it will fetch the nonce data from blockchain.
     /// If neither is provided, it will return an error.
+    #[allow(clippy::too_many_arguments)]
     pub async fn cast_unsigned_vote(
         &self,
         voter: &str,
@@ -1031,7 +1047,7 @@ impl TransactionService {
         })?;
 
         // Get nonce data: use provided cached data, or fetch from blockchain, or get from storage
-        let (nonce_account_pubkey, nonce_blockhash, nonce_authority_pubkey) =
+        let (nonce_account_pubkey, nonce_blockhash, _nonce_authority_pubkey) =
             if let Some(cached_nonce) = nonce_data {
                 // Use provided cached nonce data
                 tracing::info!("Using provided cached nonce data");
@@ -1524,6 +1540,7 @@ impl TransactionService {
     ///   - Refreshes used nonces (fetches new blockhash from advanced nonces)
     ///   - Creates additional nonces ONLY if total < count
     ///   - Returns bundle with exactly 'count' nonces ready to use
+    ///
     /// If bundle_file doesn't exist:
     ///   - Creates new bundle with 'count' nonce accounts
     ///
@@ -2008,7 +2025,7 @@ impl TransactionService {
         let mut result = Vec::new();
 
         // Batch nonce account creations: up to 5 per transaction
-        let num_transactions = (count + MAX_NONCE_ACCOUNTS_PER_TX - 1) / MAX_NONCE_ACCOUNTS_PER_TX;
+        let num_transactions = count.div_ceil(MAX_NONCE_ACCOUNTS_PER_TX);
         tracing::info!(
             "Creating {} batched transactions (max {} nonce accounts per transaction)",
             num_transactions,
@@ -2085,7 +2102,7 @@ impl TransactionService {
             let nonce_keypair_refs: Vec<&Keypair> = nonce_keypairs.iter().collect();
             tx.try_partial_sign(&nonce_keypair_refs, recent_blockhash)
                 .map_err(|e| {
-                    TransactionError::Signing(format!(
+                    TransactionError::SolanaInstruction(format!(
                         "Failed to sign with nonce keypairs: {}",
                         e
                     ))
@@ -2453,7 +2470,7 @@ impl TransactionService {
         use sha2::{Digest, Sha256};
 
         let mut fragments = Vec::new();
-        let total_fragments = (compressed_tx.len() + BLE_MTU_SIZE - 1) / BLE_MTU_SIZE;
+        let total_fragments = compressed_tx.len().div_ceil(BLE_MTU_SIZE);
         let tx_id = self.generate_tx_id();
 
         // Calculate SHA-256 checksum of the complete transaction
@@ -2654,7 +2671,7 @@ impl TransactionService {
         };
 
         // Serialize and broadcast over BLE
-        let serialized = serde_json::to_vec(&confirmation_packet)
+        let _serialized = serde_json::to_vec(&confirmation_packet)
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
 
         // This would integrate with BLE transport
@@ -2755,6 +2772,7 @@ impl TransactionService {
     /// Create and sign a new SPL token transfer transaction with durable nonce
     /// Creates a presigned SPL token transaction using a nonce account for longer lifetime
     /// Automatically derives Associated Token Accounts from wallet pubkeys and mint address
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_spl_transaction(
         &self,
         sender_wallet: &str,

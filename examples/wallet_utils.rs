@@ -5,7 +5,8 @@
 //!
 //! Supports loading configuration from .env file (RPC URL, wallet private key).
 
-use bs58;
+#![allow(dead_code)]
+
 use dotenv::dotenv;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;

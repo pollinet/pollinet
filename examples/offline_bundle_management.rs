@@ -25,8 +25,6 @@ use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use, BU
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use tracing::{info, warn};
 
@@ -141,12 +139,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create transactions using get_next_available_nonce()
     info!("\n=== Creating Offline Transactions ===");
-    let recipients = vec![
+    let recipients = [
         "RtsKQm3gAGL1Tayhs7ojWE9qytWqVh4G7eJTaNJs7vX",
         "GgathUhdrCWRHowoRKACjgWhYHfxCEdBi5ViqYN6HVxk",
         "ADNKz5JadNZ3bCh9BxSE7UcmP5uG4uV4rJR9TWsZCSBK",
     ];
-    let amounts = vec![100_000, 200_000, 300_000];
+    let amounts = [100_000, 200_000, 300_000];
 
     let mut offline_txs = Vec::new();
 

@@ -25,7 +25,6 @@
 mod wallet_utils;
 use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 
-use base64;
 use pollinet::nonce;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
@@ -122,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Verify transaction structure
     info!("\n=== Verifying Transaction Structure ===");
+    #[allow(deprecated)]
     let tx_bytes = base64::decode(&unsigned_tx)?;
     let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)?;
 
@@ -202,6 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Verify transaction is fully signed
+    #[allow(deprecated)]
     let final_tx_bytes = base64::decode(&signed_tx)?;
     let final_tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&final_tx_bytes)?;
     let final_valid_sigs = final_tx

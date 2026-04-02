@@ -17,7 +17,29 @@ use sha2::{Digest, Sha256};
 /// # Returns
 /// Vector of TransactionFragment ready for mesh transmission
 pub fn fragment_transaction(transaction_bytes: &[u8]) -> Vec<TransactionFragment> {
-    fragment_transaction_with_max_payload(transaction_bytes, MAX_FRAGMENT_DATA)
+    // Chunk directly at MAX_FRAGMENT_DATA (this is the data size, not an MTU value)
+    let max_data = MAX_FRAGMENT_DATA;
+
+    let mut hasher = Sha256::new();
+    hasher.update(transaction_bytes);
+    let hash_result = hasher.finalize();
+    let mut transaction_id = [0u8; 32];
+    transaction_id.copy_from_slice(&hash_result);
+
+    let total_fragments = transaction_bytes.len().div_ceil(max_data);
+
+    let mut fragments = Vec::new();
+    for (index, chunk) in transaction_bytes.chunks(max_data).enumerate() {
+        fragments.push(TransactionFragment {
+            transaction_id,
+            fragment_index: index as u16,
+            total_fragments: total_fragments as u16,
+            data: chunk.to_vec(),
+        });
+    }
+
+    tracing::info!("✅ Created {} fragments", fragments.len());
+    fragments
 }
 
 /// Fragment a signed Solana transaction for BLE transmission with MTU-aware payload size
@@ -48,7 +70,7 @@ pub fn fragment_transaction_with_max_payload(
     let mut transaction_id = [0u8; 32];
     transaction_id.copy_from_slice(&hash_result);
 
-    tracing::debug!("Transaction ID: {}", hex::encode(&transaction_id));
+    tracing::debug!("Transaction ID: {}", hex::encode(transaction_id));
 
     // Calculate max data size per fragment based on actual BLE constraints
     // The max_payload comes from Android's (MTU - 10)
@@ -63,11 +85,11 @@ pub fn fragment_transaction_with_max_payload(
     let max_data = max_payload.saturating_sub(bincode_overhead);
 
     // Ensure minimum fragment size (but allow much larger with good MTU)
-    let max_data = max_data.max(20).min(512); // 20 bytes min, 512 bytes max
+    let max_data = max_data.clamp(20, 512); // 20 bytes min, 512 bytes max
 
     // Calculate number of fragments needed using the same max_data that we'll use for chunking
     // CRITICAL FIX: Use max_data instead of MAX_FRAGMENT_DATA to match actual chunking
-    let total_fragments = (transaction_bytes.len() + max_data - 1) / max_data;
+    let total_fragments = transaction_bytes.len().div_ceil(max_data);
 
     tracing::info!(
         "MTU-aware fragmentation: {} bytes → {} fragments",
@@ -159,7 +181,7 @@ pub fn reconstruct_transaction(fragments: &[TransactionFragment]) -> Result<Vec<
     let received_indices: HashSet<u16> =
         sorted_fragments.iter().map(|f| f.fragment_index).collect();
 
-    let expected_indices: HashSet<u16> = (0..total_fragments as u16).collect();
+    let expected_indices: HashSet<u16> = (0..total_fragments).collect();
 
     // Check for missing indices
     let missing_indices: Vec<u16> = expected_indices
@@ -226,7 +248,7 @@ pub struct FragmentationStats {
 impl FragmentationStats {
     pub fn calculate(transaction_bytes: &[u8]) -> Self {
         let original_size = transaction_bytes.len();
-        let fragment_count = (original_size + MAX_FRAGMENT_DATA - 1) / MAX_FRAGMENT_DATA;
+        let fragment_count = original_size.div_ceil(MAX_FRAGMENT_DATA);
 
         // Each fragment has overhead: mesh header (42) + fragment header (38)
         let per_fragment_overhead = 42 + 38;

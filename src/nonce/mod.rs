@@ -2,6 +2,8 @@
 //!
 //! Handles Solana nonce accounts to extend transaction lifespan beyond recent blockhash constraints
 
+#![allow(deprecated)]
+
 use solana_account_decoder::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
@@ -108,8 +110,8 @@ impl NonceManager {
         &self,
         payer: &Pubkey,
         nonce_account: &Pubkey,
-        authority: &Pubkey,
-        recent_blockhash: &Hash,
+        _authority: &Pubkey,
+        _recent_blockhash: &Hash,
     ) -> Result<Instruction, NonceError> {
         // Mock instruction for now
         // In production, this would create a proper nonce account instruction

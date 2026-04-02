@@ -156,9 +156,10 @@ impl RetryQueue {
             });
         }
 
-        // Calculate next retry time if not first attempt
+        // Schedule next retry time if not first attempt (without incrementing attempt_count)
         if item.attempt_count > 0 {
-            item.prepare_next_retry(&self.backoff_strategy);
+            let delay = self.backoff_strategy.calculate_delay(item.attempt_count);
+            item.next_retry_time = Instant::now() + delay;
         }
 
         // Handle collision: if exact Instant already exists, add 1ns
@@ -227,8 +228,8 @@ impl RetryQueue {
 
     /// Check if transaction should give up retrying
     pub fn should_give_up(&self, item: &RetryItem) -> bool {
-        // Give up if exceeded max retries OR max age
-        item.attempt_count >= self.max_retries || item.age() > self.max_age
+        // Give up if exceeded max retries; age is checked separately in cleanup_expired
+        item.attempt_count >= self.max_retries
     }
 
     /// Clear all retry items

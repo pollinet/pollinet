@@ -18,12 +18,9 @@ use wallet_utils::{create_and_fund_wallet, get_rpc_url};
 mod nonce_bundle_helper;
 use nonce_bundle_helper::{get_next_nonce, load_bundle, save_bundle_after_use};
 
-use chrono;
 use pollinet::PolliNetSDK;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use tracing::info;
 
@@ -107,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Voter is signing the vote transaction...");
 
     // Decode to get message for signing
+    #[allow(deprecated)]
     let unsigned_bytes = base64::decode(&unsigned_tx_base64)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
     let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&unsigned_bytes)

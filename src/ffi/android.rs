@@ -4,6 +4,8 @@
 //! All functions follow the JNI naming convention and handle marshalling
 //! between Java types and Rust types.
 
+#![allow(deprecated)]
+
 #[cfg(feature = "android")]
 use jni::objects::{JByteArray, JClass, JString};
 #[cfg(feature = "android")]
@@ -23,7 +25,6 @@ use super::types::*;
 
 #[cfg(feature = "android")]
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signer::Signer;
 
 #[cfg(feature = "android")]
 use log::{error, info};
@@ -478,7 +479,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
         tracing::info!("   Proposal: {}", request.proposal_id);
         tracing::info!("   Vote account: {}", request.vote_account);
         tracing::info!("   Choice: {}", request.choice);
-        if let Some(ref nonce_data) = request.nonce_data {
+        if let Some(ref _nonce_data) = request.nonce_data {
             tracing::info!("   Using cached nonce data (no RPC call)");
         } else if let Some(ref nonce_account) = request.nonce_account {
             tracing::info!("   Fetching nonce data from blockchain: {}", nonce_account);
@@ -708,7 +709,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
     _class: JClass,
     handle: jlong,
     tx_bytes: JByteArray,
-    max_payload: jlong,
+    _max_payload: jlong,
 ) -> jstring {
     let result = (|| {
         let transport = get_transport(handle)?;
@@ -799,7 +800,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareOfflineBundle(
         let keypair_bytes: Vec<u8> = env
             .convert_byte_array(&sender_keypair_bytes)
             .map_err(|e| format!("Failed to read sender keypair bytes: {}", e))?;
-        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
+        let sender_keypair = solana_sdk::signature::Keypair::try_from(keypair_bytes.as_slice())
             .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
 
         tracing::info!(
@@ -934,10 +935,10 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createOfflineTransaction(
         let keypair_bytes: Vec<u8> = env
             .convert_byte_array(&sender_keypair_bytes)
             .map_err(|e| format!("Failed to read sender keypair bytes: {}", e))?;
-        let sender_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
+        let sender_keypair = solana_sdk::signature::Keypair::try_from(keypair_bytes.as_slice())
             .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
         // Authority is always the sender (enforced at nonce account creation)
-        let authority_keypair = solana_sdk::signature::Keypair::from_bytes(&keypair_bytes)
+        let authority_keypair = solana_sdk::signature::Keypair::try_from(keypair_bytes.as_slice())
             .map_err(|e| format!("Invalid authority keypair bytes: {}", e))?;
 
         tracing::info!("📴 Creating OFFLINE transaction (no internet required)");
@@ -1767,7 +1768,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragmentTransaction(
         let fragment_data: Vec<FragmentData> = fragments
             .iter()
             .map(|f| FragmentData {
-                transaction_id: hex::encode(&f.transaction_id),
+                transaction_id: hex::encode(f.transaction_id),
                 fragment_index: f.fragment_index,
                 total_fragments: f.total_fragments,
                 data_base64: base64::encode(&f.data),
@@ -1956,7 +1957,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareBroadcast(
         for fragment in &fragments {
             let packet_bytes = broadcaster.prepare_fragment_packet(fragment)?;
             fragment_packets.push(FragmentPacket {
-                transaction_id: hex::encode(&fragment.transaction_id),
+                transaction_id: hex::encode(fragment.transaction_id),
                 fragment_index: fragment.fragment_index,
                 total_fragments: fragment.total_fragments,
                 packet_bytes: base64::encode(&packet_bytes),
@@ -1977,7 +1978,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareBroadcast(
         }
 
         let preparation = BroadcastPreparation {
-            transaction_id: hex::encode(&transaction_id),
+            transaction_id: hex::encode(transaction_id),
             fragment_packets,
         };
 
@@ -2927,7 +2928,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popConfirmation(
 
         if let Some(conf) = confirmation {
             // Convert Rust Confirmation to FFI format
-            let tx_id_hex = hex::encode(&conf.original_tx_id);
+            let tx_id_hex = hex::encode(conf.original_tx_id);
             let status_ffi = match &conf.status {
                 crate::queue::confirmation::ConfirmationStatus::Success { signature } => {
                     crate::ffi::types::ConfirmationStatusFFI::Success {

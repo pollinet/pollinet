@@ -269,6 +269,11 @@ mod tests {
 
     #[test]
     fn test_save_and_load_bundle() {
+        // POLLINET_ENCRYPTION_KEY must be a 32-byte hex string (64 hex chars)
+        std::env::set_var(
+            "POLLINET_ENCRYPTION_KEY",
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        );
         let temp_dir = TempDir::new().unwrap();
         let storage = SecureStorage::new(temp_dir.path()).unwrap();
 

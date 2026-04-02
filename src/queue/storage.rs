@@ -3,6 +3,8 @@
 //! Handles saving and loading queues to/from disk with atomic writes
 //! and crash recovery. Ensures queues survive app restarts.
 
+#![allow(deprecated)]
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -12,6 +14,14 @@ use thiserror::Error;
 use super::confirmation::{Confirmation, ConfirmationQueue};
 use super::outbound::{OutboundQueue, OutboundTransaction, Priority};
 use super::retry::{RetryItem, RetryQueue};
+
+/// Type alias for the tuple returned by `load_all`
+type AllQueues = (
+    OutboundQueue,
+    RetryQueue,
+    ConfirmationQueue,
+    Vec<(String, Vec<u8>, u64)>,
+);
 
 /// Queue storage manager
 pub struct QueueStorage {
@@ -274,17 +284,7 @@ impl QueueStorage {
     }
 
     /// Load all queues
-    pub fn load_all(
-        &self,
-    ) -> Result<
-        (
-            OutboundQueue,
-            RetryQueue,
-            ConfirmationQueue,
-            Vec<(String, Vec<u8>, u64)>,
-        ),
-        StorageError,
-    > {
+    pub fn load_all(&self) -> Result<AllQueues, StorageError> {
         let outbound = self.load_outbound_queue()?;
         let retry = self.load_retry_queue()?;
         let confirmation = self.load_confirmation_queue()?;
@@ -320,22 +320,34 @@ impl OutboundQueuePersist {
     fn from_queue(queue: &OutboundQueue) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        // We need to access private fields, so we'll use the peek/pop pattern
-        // This is a limitation - in production we'd make fields pub(crate)
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
+        let mut high_priority = Vec::new();
+        let mut normal_priority = Vec::new();
+        let mut low_priority = Vec::new();
+
+        for tx in queue.transactions() {
+            let persist = OutboundTransactionPersist::from_transaction(tx);
+            match tx.priority {
+                Priority::High => high_priority.push(persist),
+                Priority::Normal => normal_priority.push(persist),
+                Priority::Low => low_priority.push(persist),
+            }
+        }
+
         Self {
             version: 1,
-            high_priority: Vec::new(), // Will be populated via queue iteration
-            normal_priority: Vec::new(),
-            low_priority: Vec::new(),
+            high_priority,
+            normal_priority,
+            low_priority,
             saved_at: now,
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_queue(self) -> OutboundQueue {
         let mut queue = OutboundQueue::new();
 
@@ -387,6 +399,7 @@ impl OutboundTransactionPersist {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_transaction(self) -> Result<OutboundTransaction, String> {
         let original_bytes = base64::decode(&self.original_bytes)
             .map_err(|e| format!("Failed to decode transaction bytes: {}", e))?;
@@ -416,7 +429,7 @@ struct RetryQueuePersist {
 }
 
 impl RetryQueuePersist {
-    fn from_queue(queue: &RetryQueue) -> Self {
+    fn from_queue(_queue: &RetryQueue) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = SystemTime::now()
@@ -432,6 +445,7 @@ impl RetryQueuePersist {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_queue(self) -> RetryQueue {
         let mut queue =
             RetryQueue::with_config(self.max_retries, super::retry::BackoffStrategy::default());
@@ -457,6 +471,7 @@ struct RetryItemPersist {
 }
 
 impl RetryItemPersist {
+    #[allow(dead_code)]
     fn from_retry_item(item: &RetryItem) -> Self {
         Self {
             tx_bytes: base64::encode(&item.tx_bytes),
@@ -467,6 +482,7 @@ impl RetryItemPersist {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_retry_item(self) -> Result<RetryItem, String> {
         use std::time::Instant;
 
@@ -496,7 +512,7 @@ struct ConfirmationQueuePersist {
 }
 
 impl ConfirmationQueuePersist {
-    fn from_queue(queue: &ConfirmationQueue) -> Self {
+    fn from_queue(_queue: &ConfirmationQueue) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = SystemTime::now()
@@ -511,6 +527,7 @@ impl ConfirmationQueuePersist {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_queue(self) -> ConfirmationQueue {
         let mut queue = ConfirmationQueue::new();
 
@@ -555,6 +572,7 @@ impl ReceivedQueuePersist {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_queue(self) -> Vec<(String, Vec<u8>, u64)> {
         self.transactions
             .into_iter()
@@ -601,7 +619,7 @@ mod tests {
     #[test]
     fn test_storage_creation() {
         let dir = tempdir().unwrap();
-        let storage = QueueStorage::new(dir.path()).unwrap();
+        let _storage = QueueStorage::new(dir.path()).unwrap();
         assert!(dir.path().exists());
     }
 
