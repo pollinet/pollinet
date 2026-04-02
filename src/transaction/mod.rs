@@ -1277,9 +1277,7 @@ impl TransactionService {
                 client_url,
                 CommitmentConfig::confirmed(),
             );
-            blocking_client
-                .get_account(&nonce_pubkey)
-                .map_err(Box::new)
+            blocking_client.get_account(&nonce_pubkey).map_err(Box::new)
         })
         .await
         .map_err(|e| TransactionError::RpcClient(format!("Task join error: {}", e)))?
