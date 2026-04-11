@@ -227,22 +227,20 @@ publishing {
     }
 }
 
-// Signing configuration (required for Maven Central)
-signing {
-    val signingKeyId = project.findProperty("signing.keyId") as String? 
-        ?: project.findProperty("signingKeyId") as String?
-    val signingKey = project.findProperty("signingKey") as String?
-    val signingPassword = project.findProperty("signing.password") as String?
-        ?: project.findProperty("signingPassword") as String?
-    
-    // Try in-memory keys first (for CI/CD with exported key)
-    if (signingKeyId != null && signingKey != null && signingPassword != null) {
+// Signing configuration — only applied when keys are explicitly provided.
+// JitPack does not have a GPG keyring, so signing is skipped there.
+// Maven Central publishing requires signing; pass keys via gradle.properties or env vars.
+val signingKeyId  = project.findProperty("signing.keyId")   as String?
+    ?: project.findProperty("signingKeyId")                  as String?
+val signingKey      = project.findProperty("signingKey")      as String?
+val signingPassword = project.findProperty("signing.password") as String?
+    ?: project.findProperty("signingPassword")               as String?
+
+if (signingKeyId != null && signingKey != null && signingPassword != null) {
+    signing {
         useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
-        sign(publishing.publications["release"])
-    } else {
-        // Use GPG command (for local development with GPG keyring)
-        // This will use the default GPG keyring and gpg-agent
-        useGpgCmd()
         sign(publishing.publications["release"])
     }
 }
+// No else — if keys are absent (JitPack, forks, fresh checkouts) the AAR is
+// published unsigned. Signing is only required for Sonatype/Maven Central.
