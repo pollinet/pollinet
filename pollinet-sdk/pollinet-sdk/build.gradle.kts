@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -86,21 +88,57 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 }
 
+// Resolve ANDROID_NDK_HOME at configuration time:
+// 1. Use the env var if already set (CI / Android Studio)
+// 2. Otherwise derive it from sdk.dir in local.properties (any ancestor project)
+val resolvedNdkHome: String? = run {
+    val envNdk = System.getenv("ANDROID_NDK_HOME")
+    if (!envNdk.isNullOrBlank()) return@run envNdk
+
+    val candidateLocalProps = listOf(
+        file("../../local.properties"),      // pollinet repo root
+        file("../local.properties"),         // pollinet-sdk root
+        rootProject.file("local.properties") // consumer project root (e.g. Pollistem)
+    )
+    var sdkDir: String? = null
+    for (f in candidateLocalProps) {
+        if (f.exists()) {
+            val props = Properties()
+            f.inputStream().use { props.load(it) }
+            sdkDir = props.getProperty("sdk.dir")
+            if (sdkDir != null) break
+        }
+    }
+    if (sdkDir == null) return@run null
+
+    val ndkParent = File("$sdkDir/ndk")
+    if (!ndkParent.isDirectory) return@run null
+    // Pick the newest installed NDK version
+    ndkParent.listFiles()
+        ?.filter { it.isDirectory }
+        ?.maxByOrNull { it.name }
+        ?.absolutePath
+}
+
 // Task to build Rust library using cargo-ndk
 tasks.register<Exec>("buildRustLib") {
     description = "Build Rust library for Android using cargo-ndk"
     group = "build"
-    
+
     workingDir = file("../../")
-    
+
     // Use absolute path to cargo
     val cargoHome = System.getenv("CARGO_HOME") ?: "${System.getProperty("user.home")}/.cargo"
     val cargoPath = "$cargoHome/bin/cargo"
-    
+
+    if (resolvedNdkHome != null) {
+        environment("ANDROID_NDK_HOME", resolvedNdkHome)
+    }
+
     commandLine(
         cargoPath, "ndk",
         "-t", "arm64-v8a",
-        "-t", "armeabi-v7a", 
+        "-t", "armeabi-v7a",
         "-t", "x86_64",
         "-o", "pollinet-sdk/pollinet-sdk/src/main/jniLibs",
         "build",

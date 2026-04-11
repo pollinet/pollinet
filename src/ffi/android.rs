@@ -138,7 +138,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
         // Set secure storage if directory provided
         if let Some(storage_dir) = &config.storage_directory {
             info!("Step 5b: Setting up secure storage at: {}", storage_dir);
-            transport.set_secure_storage(storage_dir).map_err(|e| {
+            transport.set_secure_storage(storage_dir, config.encryption_key.clone()).map_err(|e| {
                 error!("❌ Failed to set secure storage: {}", e);
                 e
             })?;
@@ -709,7 +709,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
     _class: JClass,
     handle: jlong,
     tx_bytes: JByteArray,
-    _max_payload: jlong,
+    max_payload: jlong,
 ) -> jstring {
     let result = (|| {
         let transport = get_transport(handle)?;
@@ -717,7 +717,8 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
             .convert_byte_array(&tx_bytes)
             .map_err(|e| format!("Failed to read tx bytes: {}", e))?;
 
-        let fragments = transport.queue_transaction(tx_data, None)?;
+        let max_payload_opt = if max_payload > 0 { Some(max_payload as usize) } else { None };
+        let fragments = transport.queue_transaction(tx_data, max_payload_opt)?;
 
         let fragment_list = FragmentList { fragments };
         let response: FfiResult<FragmentList> = FfiResult::success(fragment_list);

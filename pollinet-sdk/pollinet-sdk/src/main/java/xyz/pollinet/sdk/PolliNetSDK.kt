@@ -1239,6 +1239,58 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
+    // Peer / mesh health monitoring
+    // =========================================================================
+
+    /**
+     * Get a full snapshot of all known peers and aggregate network health metrics.
+     * Peers are populated as [recordPeerHeartbeat] / [recordPeerRssi] are called.
+     */
+    suspend fun getHealthSnapshot(): Result<HealthSnapshot> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class HealthSnapshotWrapper(val snapshot: HealthSnapshot)
+            parseResult<HealthSnapshotWrapper>(PolliNetFFI.getHealthSnapshot(handle)).map { it.snapshot }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Record a heartbeat for a BLE peer (marks it as Connected in the health monitor).
+     * Call on every successful GATT connection.
+     */
+    suspend fun recordPeerHeartbeat(peerId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<SuccessResponse>(PolliNetFFI.recordPeerHeartbeat(handle, peerId)).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Record an RSSI reading for a peer.  Call from [ScanCallback.onScanResult] and
+     * [BluetoothGattCallback.onReadRemoteRssi].
+     */
+    suspend fun recordPeerRssi(peerId: String, rssi: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<SuccessResponse>(PolliNetFFI.recordPeerRssi(handle, peerId, rssi)).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Record a round-trip latency measurement for a peer (in milliseconds).
+     */
+    suspend fun recordPeerLatency(peerId: String, latencyMs: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<SuccessResponse>(PolliNetFFI.recordPeerLatency(handle, peerId, latencyMs)).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -1300,7 +1352,9 @@ data class SdkConfig(
     val rpcUrl: String? = null,
     val enableLogging: Boolean = true,
     val logLevel: String? = "info",
-    val storageDirectory: String? = null
+    val storageDirectory: String? = null,
+    /** AES-256-GCM encryption key for nonce bundle storage. Required when [storageDirectory] is set. */
+    val encryptionKey: String? = null
 )
 
 @Serializable
@@ -1712,4 +1766,66 @@ internal data class QueueConfirmationRequest(
     @SerialName("txId") val txId: String,
     val signature: String
 )
+
+// =============================================================================
+// Peer / mesh health monitoring data types
+// =============================================================================
+
+/** Current connection state of a BLE mesh peer (mirrors Rust PeerState). */
+@Serializable
+enum class PeerState { Connected, Stale, Dead }
+
+/** Per-peer health metrics returned by [PolliNetSDK.getHealthSnapshot]. */
+@Serializable
+data class PeerHealth(
+    @SerialName("peer_id") val peerId: String,
+    val state: PeerState,
+    @SerialName("seconds_since_last_seen") val secondsSinceLastSeen: Long,
+    @SerialName("latency_samples") val latencySamples: List<Int> = emptyList(),
+    @SerialName("avg_latency_ms") val avgLatencyMs: Int = 0,
+    val rssi: Int? = null,
+    @SerialName("quality_score") val qualityScore: Int = 0,
+    @SerialName("packets_sent") val packetsSent: Long = 0,
+    @SerialName("packets_received") val packetsReceived: Long = 0,
+    @SerialName("tx_failures") val txFailures: Long = 0,
+    @SerialName("packet_loss_rate") val packetLossRate: Float = 0f
+)
+
+/** Network topology from the health monitor. */
+@Serializable
+data class NetworkTopology(
+    @SerialName("direct_connections") val directConnections: List<String> = emptyList(),
+    @SerialName("all_peers") val allPeers: List<String> = emptyList(),
+    val connections: Map<String, List<String>> = emptyMap(),
+    @SerialName("hop_counts") val hopCounts: Map<String, Int> = emptyMap()
+)
+
+/** Aggregate health metrics for the whole mesh. */
+@Serializable
+data class HealthMetrics(
+    @SerialName("total_peers") val totalPeers: Int = 0,
+    @SerialName("connected_peers") val connectedPeers: Int = 0,
+    @SerialName("stale_peers") val stalePeers: Int = 0,
+    @SerialName("dead_peers") val deadPeers: Int = 0,
+    @SerialName("avg_latency_ms") val avgLatencyMs: Int = 0,
+    @SerialName("max_latency_ms") val maxLatencyMs: Int = 0,
+    @SerialName("min_latency_ms") val minLatencyMs: Int = 0,
+    @SerialName("avg_packet_loss") val avgPacketLoss: Float = 0f,
+    @SerialName("health_score") val healthScore: Int = 100,
+    @SerialName("max_hops") val maxHops: Int = 0,
+    val timestamp: String = ""
+)
+
+/** Full snapshot returned by [PolliNetSDK.getHealthSnapshot]. */
+@Serializable
+data class HealthSnapshot(
+    val peers: List<PeerHealth> = emptyList(),
+    val topology: NetworkTopology = NetworkTopology(),
+    val metrics: HealthMetrics = HealthMetrics()
+) {
+    /** Peers currently in the Connected state. */
+    val connectedPeers: List<PeerHealth> get() = peers.filter { it.state == PeerState.Connected }
+    /** All peer addresses (connected + stale). */
+    val knownPeerIds: List<String> get() = peers.map { it.peerId }
+}
 

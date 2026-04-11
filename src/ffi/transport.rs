@@ -10,7 +10,7 @@ use crate::ble::MeshHealthMonitor;
 use crate::storage::SecureStorage;
 use crate::transaction::TransactionService;
 use parking_lot::Mutex;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -89,6 +89,12 @@ const MAX_PENDING_TRANSACTIONS: usize = 64;
 /// Maximum number of fragments buffered per transaction
 const MAX_FRAGMENTS_PER_TRANSACTION: usize = 256;
 
+/// Maximum number of transactions in the received-TX queue (awaiting RPC submission)
+const MAX_RECEIVED_QUEUE_SIZE: usize = 1000;
+
+/// Maximum number of outbound BLE frames queued for sending
+const MAX_OUTBOUND_FRAMES: usize = 5000;
+
 /// Host-driven BLE transport bridge
 pub struct HostBleTransport {
     /// Queue of outbound frames ready to send
@@ -103,6 +109,9 @@ pub struct HostBleTransport {
     /// Queue of received transactions ready for auto-submission
     /// (tx_id, tx_bytes, received_at_timestamp)
     received_tx_queue: ReceivedTxQueue,
+
+    /// SHA-256 hashes of transactions currently in received_tx_queue (O(1) dedup)
+    received_tx_hash_set: Arc<Mutex<HashSet<Vec<u8>>>>,
 
     /// Set of transaction hashes that have been submitted (for deduplication)
     submitted_tx_hashes: Arc<Mutex<HashMap<Vec<u8>, u64>>>,
@@ -165,6 +174,7 @@ impl HostBleTransport {
             inbound_buffers: Arc::new(Mutex::new(HashMap::new())),
             completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
             received_tx_queue: Arc::new(Mutex::new(VecDeque::new())),
+            received_tx_hash_set: Arc::new(Mutex::new(HashSet::new())),
             submitted_tx_hashes: Arc::new(Mutex::new(HashMap::new())),
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
             transaction_service: Arc::new(transaction_service),
@@ -202,6 +212,7 @@ impl HostBleTransport {
             inbound_buffers: Arc::new(Mutex::new(HashMap::new())),
             completed_transactions: Arc::new(Mutex::new(VecDeque::new())),
             received_tx_queue: Arc::new(Mutex::new(VecDeque::new())),
+            received_tx_hash_set: Arc::new(Mutex::new(HashSet::new())),
             submitted_tx_hashes: Arc::new(Mutex::new(HashMap::new())),
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
             transaction_service: Arc::new(transaction_service),
@@ -215,10 +226,12 @@ impl HostBleTransport {
         Ok(transport)
     }
 
-    /// Set secure storage directory for nonce bundle persistence
+    /// Set secure storage directory for nonce bundle persistence.
+    /// `encryption_key` is forwarded to `SecureStorage`; falls back to the
+    /// `POLLINET_ENCRYPTION_KEY` env var when `None`.
     /// Also loads the received queue from disk if storage is available
-    pub fn set_secure_storage(&mut self, storage_dir: &str) -> Result<(), String> {
-        let storage = SecureStorage::new(storage_dir)
+    pub fn set_secure_storage(&mut self, storage_dir: &str, encryption_key: Option<String>) -> Result<(), String> {
+        let storage = SecureStorage::new(storage_dir, encryption_key)
             .map_err(|e| format!("Failed to create secure storage: {}", e))?;
         self.secure_storage = Some(Arc::new(storage));
         t_info!("🔒 Secure storage enabled for nonce bundles");
@@ -263,12 +276,19 @@ impl HostBleTransport {
             .map_err(|e| format!("Failed to load received queue: {}", e))?;
 
         if !queue_vec.is_empty() {
+            use sha2::{Digest, Sha256};
             let mut queue = self.received_tx_queue.lock();
+            let mut hash_set = self.received_tx_hash_set.lock();
             queue.clear();
+            hash_set.clear();
             for item in queue_vec {
+                let mut h = Sha256::new();
+                h.update(&item.1);
+                hash_set.insert(h.finalize().to_vec());
                 queue.push_back(item);
             }
             let queue_size = queue.len();
+            drop(hash_set);
             drop(queue);
 
             t_info!("📥 Loaded received queue: {} transactions", queue_size);
@@ -524,12 +544,26 @@ impl HostBleTransport {
                 Err(e) => {
                     let error_msg = format!("Failed to reassemble transaction {}: {}", tx_id, e);
                     t_error!("{}", error_msg);
+                    t_warn!(
+                        "⚠️ Reassembly failure for tx {} ({} fragments collected): {}",
+                        tx_id,
+                        mesh_fragments.len(),
+                        e
+                    );
 
                     // Update metrics
                     let mut metrics = self.metrics.lock();
                     metrics.reassembly_failures += 1;
                     metrics.last_error = error_msg.clone();
                     metrics.updated_at = Self::current_timestamp();
+                    let total_failures = metrics.reassembly_failures;
+                    drop(metrics);
+
+                    t_warn!(
+                        "📊 Reassembly failures total: {} | Last error: {}",
+                        total_failures,
+                        e
+                    );
 
                     // Remove failed fragments
                     self.inbound_buffers.lock().remove(&tx_id);
@@ -677,6 +711,13 @@ impl HostBleTransport {
                 fragment.total_fragments
             );
 
+            if queue.len() >= MAX_OUTBOUND_FRAMES {
+                queue.pop_front();
+                t_warn!(
+                    "⚠️ Outbound queue overflow: dropped oldest frame to make room (max {})",
+                    MAX_OUTBOUND_FRAMES
+                );
+            }
             queue.push_back(binary_bytes);
         }
 
@@ -724,6 +765,13 @@ impl HostBleTransport {
         for fragment in fragments {
             let binary_bytes = bincode1::serialize(fragment)
                 .map_err(|e| format!("Failed to serialize fragment: {}", e))?;
+            if queue.len() >= MAX_OUTBOUND_FRAMES {
+                queue.pop_front();
+                t_warn!(
+                    "⚠️ Outbound queue overflow: dropped oldest frame to make room (max {})",
+                    MAX_OUTBOUND_FRAMES
+                );
+            }
             queue.push_back(binary_bytes);
         }
 
@@ -781,6 +829,7 @@ impl HostBleTransport {
     /// Note: This does NOT clear nonce data
     pub fn clear_received_queue(&self) {
         self.received_tx_queue.lock().clear();
+        self.received_tx_hash_set.lock().clear();
         t_info!("✅ Cleared received transaction queue");
     }
 
@@ -836,7 +885,7 @@ impl HostBleTransport {
             tx_hash.len()
         );
 
-        // Check if transaction was already submitted
+        // Check if transaction was already submitted (O(1) HashMap lookup)
         let submitted = self.submitted_tx_hashes.lock();
         if submitted.contains_key(&tx_hash) {
             drop(submitted);
@@ -848,23 +897,17 @@ impl HostBleTransport {
         }
         drop(submitted);
 
-        // Check if transaction is already in the received queue
-        let queue = self.received_tx_queue.lock();
-        for (_, queued_tx_bytes, _) in queue.iter() {
-            let mut queued_hasher = Sha256::new();
-            queued_hasher.update(queued_tx_bytes);
-            let queued_hash = queued_hasher.finalize().to_vec();
-
-            if queued_hash == tx_hash {
-                drop(queue);
-                t_warn!(
-                    "⚠️ Transaction {} already in received queue (duplicate detected)",
-                    tx_hash_hex.chars().take(16).collect::<String>()
-                );
-                return false;
-            }
+        // Check if transaction is already in the received queue (O(1) HashSet lookup)
+        let hash_set = self.received_tx_hash_set.lock();
+        if hash_set.contains(&tx_hash) {
+            drop(hash_set);
+            t_warn!(
+                "⚠️ Transaction {} already in received queue (duplicate detected)",
+                tx_hash_hex.chars().take(16).collect::<String>()
+            );
+            return false;
         }
-        drop(queue);
+        drop(hash_set);
 
         // Proceed with adding to queue
         let now = Self::current_timestamp();
@@ -877,16 +920,31 @@ impl HostBleTransport {
         let tx_id = uuid::Uuid::new_v4().to_string();
         t_debug!("🆔 Generated transaction ID: {}", tx_id);
 
-        // Add to received queue
+        // Add to received queue — enforce size cap, dropping oldest on overflow
         let mut queue = self.received_tx_queue.lock();
+        let mut hash_set = self.received_tx_hash_set.lock();
         let queue_size_before = queue.len();
         t_debug!(
             "📋 Received queue size before adding: {}",
             queue_size_before
         );
 
+        if queue.len() >= MAX_RECEIVED_QUEUE_SIZE {
+            if let Some(oldest) = queue.pop_front() {
+                let mut h = Sha256::new();
+                h.update(&oldest.1);
+                hash_set.remove(&h.finalize().to_vec());
+            }
+            t_warn!(
+                "⚠️ Received TX queue overflow: dropped oldest entry to make room (max {})",
+                MAX_RECEIVED_QUEUE_SIZE
+            );
+        }
+
+        hash_set.insert(tx_hash);
         queue.push_back((tx_id.clone(), tx_bytes.clone(), now));
         let queue_size = queue.len();
+        drop(hash_set);
         drop(queue);
 
         t_info!(
@@ -915,9 +973,15 @@ impl HostBleTransport {
         t_debug!("📋 Received queue size before pop: {}", queue_size_before);
 
         let result = queue.pop_front();
+        drop(queue);
 
         if let Some((tx_id, tx_bytes, timestamp)) = &result {
-            let queue_size_after = queue.len();
+            // Remove from hash set so the same TX can be re-queued if needed
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(tx_bytes);
+            self.received_tx_hash_set.lock().remove(&h.finalize().to_vec());
+
             t_info!(
                 "✅ Retrieved transaction {} from received queue ({} bytes, timestamp: {})",
                 tx_id,
@@ -927,13 +991,12 @@ impl HostBleTransport {
             t_info!(
                 "📊 Received queue: {} → {} transactions remaining",
                 queue_size_before,
-                queue_size_after
+                queue_size_before.saturating_sub(1)
             );
         } else {
             t_debug!("📭 Received queue is empty, returning None");
         }
 
-        drop(queue);
         result
     }
 

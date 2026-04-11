@@ -342,6 +342,11 @@ pub struct SdkConfig {
     pub log_level: Option<String>,
     #[serde(rename = "storageDirectory", default)]
     pub storage_directory: Option<String>,
+    /// AES-256-GCM encryption key for nonce bundle storage (any string; hashed with SHA-256 internally).
+    /// Required when `storageDirectory` is set. Falls back to the `POLLINET_ENCRYPTION_KEY`
+    /// environment variable when absent (useful for CLI/server usage).
+    #[serde(rename = "encryptionKey", default)]
+    pub encryption_key: Option<String>,
 }
 
 pub(crate) fn default_version() -> u32 {

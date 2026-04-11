@@ -21,12 +21,24 @@ const MAGIC_HEADER_SIZE: usize = 4;
 /// Secure storage manager for nonce bundles
 pub struct SecureStorage {
     storage_dir: PathBuf,
+    encryption_key: String,
 }
 
 impl SecureStorage {
-    /// Create a new secure storage instance
-    pub fn new(storage_dir: impl AsRef<Path>) -> Result<Self, StorageError> {
+    /// Create a new secure storage instance.
+    /// `encryption_key` is the raw key string (hashed with SHA-256 internally to produce 32 bytes).
+    /// Falls back to the `POLLINET_ENCRYPTION_KEY` environment variable when `encryption_key` is `None`.
+    pub fn new(storage_dir: impl AsRef<Path>, encryption_key: Option<String>) -> Result<Self, StorageError> {
         let storage_dir = storage_dir.as_ref().to_path_buf();
+
+        let key = encryption_key
+            .or_else(|| env::var("POLLINET_ENCRYPTION_KEY").ok())
+            .ok_or_else(|| {
+                StorageError::Encryption(
+                    "POLLINET_ENCRYPTION_KEY must be set — no insecure fallback allowed"
+                        .to_string(),
+                )
+            })?;
 
         // Create directory if it doesn't exist
         if !storage_dir.exists() {
@@ -40,7 +52,7 @@ impl SecureStorage {
             storage_dir.display()
         );
 
-        Ok(Self { storage_dir })
+        Ok(Self { storage_dir, encryption_key: key })
     }
 
     /// Get the path to the nonce bundle file
@@ -48,26 +60,19 @@ impl SecureStorage {
         self.storage_dir.join(BUNDLE_FILENAME)
     }
 
-    /// Derive encryption key from environment variable.
-    /// Returns an error if POLLINET_ENCRYPTION_KEY is not set — no insecure fallback.
-    fn get_encryption_key() -> Result<Key<Aes256Gcm>, StorageError> {
-        let key_str = env::var("POLLINET_ENCRYPTION_KEY").map_err(|_| {
-            StorageError::Encryption(
-                "POLLINET_ENCRYPTION_KEY must be set — no insecure fallback allowed".to_string(),
-            )
-        })?;
-
+    /// Derive AES-256-GCM key from the stored encryption key string via SHA-256.
+    fn get_encryption_key(&self) -> Result<Key<Aes256Gcm>, StorageError> {
         // Derive 256-bit key from the string using SHA-256
         // This ensures we always have exactly 32 bytes for AES-256-GCM
         let mut hasher = Sha256::new();
-        hasher.update(key_str.as_bytes());
+        hasher.update(self.encryption_key.as_bytes());
         let key_bytes = hasher.finalize();
         Ok(*Key::<Aes256Gcm>::from_slice(&key_bytes))
     }
 
     /// Encrypt data using AES-256-GCM
     fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>, StorageError> {
-        let key = Self::get_encryption_key()?;
+        let key = self.get_encryption_key()?;
         let cipher = Aes256Gcm::new(&key);
 
         // Generate random nonce
@@ -103,7 +108,7 @@ impl SecureStorage {
             ));
         }
 
-        let key = Self::get_encryption_key()?;
+        let key = self.get_encryption_key()?;
         let cipher = Aes256Gcm::new(&key);
 
         // Extract nonce and ciphertext
@@ -260,22 +265,19 @@ mod tests {
     use crate::transaction::CachedNonceData;
     use tempfile::TempDir;
 
+    const TEST_KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+
     #[test]
     fn test_storage_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let storage = SecureStorage::new(temp_dir.path()).unwrap();
+        let storage = SecureStorage::new(temp_dir.path(), Some(TEST_KEY.to_string())).unwrap();
         assert!(!storage.bundle_exists());
     }
 
     #[test]
     fn test_save_and_load_bundle() {
-        // POLLINET_ENCRYPTION_KEY must be a 32-byte hex string (64 hex chars)
-        std::env::set_var(
-            "POLLINET_ENCRYPTION_KEY",
-            "0000000000000000000000000000000000000000000000000000000000000001",
-        );
         let temp_dir = TempDir::new().unwrap();
-        let storage = SecureStorage::new(temp_dir.path()).unwrap();
+        let storage = SecureStorage::new(temp_dir.path(), Some(TEST_KEY.to_string())).unwrap();
 
         // Create a test bundle
         let bundle = OfflineTransactionBundle {

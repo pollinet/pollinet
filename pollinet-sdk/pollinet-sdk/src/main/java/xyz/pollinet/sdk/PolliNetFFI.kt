@@ -482,5 +482,37 @@ object PolliNetFFI {
      * @return JSON FfiResult<SuccessResponse>
      */
     external fun relayConfirmation(handle: Long, confirmationJson: String): String
+
+    // =========================================================================
+    // Peer / mesh health monitoring
+    // =========================================================================
+
+    /**
+     * Return a full snapshot of all known peers and network health metrics.
+     * @return JSON FfiResult<HealthSnapshotResponse>
+     */
+    external fun getHealthSnapshot(handle: Long): String
+
+    /**
+     * Record a heartbeat for a peer (marks it as alive / connected).
+     * Call this whenever a BLE connection is established or a fragment is received.
+     * @param peerId peer MAC address or unique identifier
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun recordPeerHeartbeat(handle: Long, peerId: String): String
+
+    /**
+     * Record a latency measurement for a peer (round-trip time in ms).
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun recordPeerLatency(handle: Long, peerId: String, latencyMs: Int): String
+
+    /**
+     * Record the RSSI (signal strength) reading for a peer.
+     * Call this from onScanResult and after each GATT RSSI read.
+     * @param rssi value in dBm (negative integer)
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun recordPeerRssi(handle: Long, peerId: String, rssi: Int): String
 }
 

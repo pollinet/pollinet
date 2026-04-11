@@ -2661,23 +2661,29 @@ impl TransactionService {
         Ok(signature.to_string())
     }
 
-    /// Broadcast confirmation after successful submission
+    /// Broadcast confirmation after successful submission.
+    ///
+    /// NOTE: In the Android integration the confirmation relay pipeline is driven
+    /// entirely by the Kotlin layer (BleService.kt).  On successful RPC submission
+    /// BleService calls `PolliNetFFI.queueConfirmation()` (JNI) which pushes into
+    /// the Rust `ConfirmationQueue`, and then `processConfirmationQueue()` fragments
+    /// and transmits it over BLE.  This method serialises the packet for completeness
+    /// but does not transmit — callers that need BLE relay should use
+    /// `queueConfirmation` / `popConfirmation` FFI instead.
     pub async fn broadcast_confirmation(&self, signature: &str) -> Result<(), TransactionError> {
-        // Create confirmation packet
         let confirmation_packet = ConfirmationPacket {
             tx_id: self.generate_tx_id(),
             signature: signature.to_string(),
-            new_nonce: 0, // Placeholder - would query from nonce account in production
+            new_nonce: 0,
         };
 
-        // Serialize and broadcast over BLE
         let _serialized = serde_json::to_vec(&confirmation_packet)
             .map_err(|e| TransactionError::Serialization(e.to_string()))?;
 
-        // This would integrate with BLE transport
-        // For now, just log the confirmation
-        // todo: integrate with BLE transport
-        tracing::info!("Broadcasting confirmation: {:?}", confirmation_packet);
+        tracing::info!(
+            "Confirmation prepared for relay (use queueConfirmation FFI to broadcast): {:?}",
+            confirmation_packet
+        );
 
         Ok(())
     }

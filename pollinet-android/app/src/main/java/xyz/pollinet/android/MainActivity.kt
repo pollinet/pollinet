@@ -34,6 +34,7 @@ import xyz.pollinet.android.ui.DiagnosticsScreen
 import xyz.pollinet.android.ui.SigningScreen
 import xyz.pollinet.android.ui.TransactionBuilderScreen
 import xyz.pollinet.android.ui.theme.PollinetandroidTheme
+import xyz.pollinet.android.BuildConfig
 import xyz.pollinet.sdk.BleService
 import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.SdkConfig
@@ -65,7 +66,8 @@ class MainActivity : ComponentActivity() {
                         rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
                         enableLogging = true,
                         logLevel = "info",
-                        storageDirectory = filesDir.absolutePath
+                        storageDirectory = filesDir.absolutePath,
+                        encryptionKey = BuildConfig.POLLINET_ENCRYPTION_KEY
                     )
                 )?.onSuccess {
                     Log.d(TAG, "BLE Service SDK initialized successfully")
@@ -214,16 +216,17 @@ fun PolliNetApp(mwaActivityResultSender: ActivityResultSender) {
                     // Try multiple RPC endpoints for reliability
                     // Option 1: Alchemy (requires valid API key)
                     // rpcUrl = "https://solana-devnet.g.alchemy.com/v2/",
-                    
+
                     // Option 2: Helius endpoint with API key
                     rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
-                    
+
                     // Option 3: Solana public devnet (can be slow)
                     // rpcUrl = "https://api.devnet.solana.com",
-                    
+
                     enableLogging = true,
                     logLevel = "info",
-                    storageDirectory = context.filesDir.absolutePath
+                    storageDirectory = context.filesDir.absolutePath,
+                    encryptionKey = BuildConfig.POLLINET_ENCRYPTION_KEY
                 )
             ).onSuccess {
                 sdk = it

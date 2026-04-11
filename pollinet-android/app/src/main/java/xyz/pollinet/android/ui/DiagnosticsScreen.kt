@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import kotlinx.coroutines.launch
+import xyz.pollinet.android.BuildConfig
 import xyz.pollinet.android.mwa.PolliNetMwaClient
 import xyz.pollinet.android.mwa.MwaException
 import xyz.pollinet.sdk.BleService
@@ -90,7 +91,8 @@ fun DiagnosticsScreen(
                             rpcUrl = "https://devnet.helius-rpc.com/?api-key=ce433fae-db6e-4cec-8eb4-38ffd30658c0",
                             enableLogging = true,
                             logLevel = "info",
-                            storageDirectory = context.filesDir.absolutePath
+                            storageDirectory = context.filesDir.absolutePath,
+                            encryptionKey = BuildConfig.POLLINET_ENCRYPTION_KEY
                         )
                     )?.onSuccess {
                         addLog("✅ BLE Service SDK initialized successfully")
@@ -696,9 +698,10 @@ private fun FFITestButtons(
                             rpcUrl = "https://api.devnet.solana.com",
                             enableLogging = true,
                             logLevel = "debug",
-                            storageDirectory = context.filesDir.absolutePath
+                            storageDirectory = context.filesDir.absolutePath,
+                            encryptionKey = BuildConfig.POLLINET_ENCRYPTION_KEY
                         )
-                        
+
                         val result = PolliNetSDK.initialize(config)
                         result.onSuccess { sdk ->
                             onLog("✓ SDK initialized successfully")
@@ -738,7 +741,8 @@ private fun FFITestButtons(
                         onLog("Testing transaction builder...")
                         val config = SdkConfig(
                             rpcUrl = "https://api.devnet.solana.com",
-                            storageDirectory = context.filesDir.absolutePath
+                            storageDirectory = context.filesDir.absolutePath,
+                            encryptionKey = BuildConfig.POLLINET_ENCRYPTION_KEY
                         )
                         val result = PolliNetSDK.initialize(config)
                         

@@ -121,6 +121,29 @@ class BleService : Service() {
     private val operationInProgress = AtomicBoolean(false)
     
     /**
+     * Record a discovered or updated peer in the in-memory map and in the Rust health monitor.
+     * Safe to call from any thread (uses serviceScope for the FFI suspend calls).
+     */
+    private fun recordPeer(address: String, rssi: Int, connected: Boolean) {
+        val now = System.currentTimeMillis()
+        _peers.value = _peers.value.toMutableMap().apply {
+            val existing = get(address)
+            put(address, DiscoveredPeer(
+                address      = address,
+                rssi         = rssi,
+                discoveredAt = existing?.discoveredAt ?: now,
+                isConnected  = connected,
+                lastSeenAt   = now
+            ))
+        }
+        val sdkHandle = sdk ?: return
+        serviceScope.launch {
+            if (connected) sdkHandle.recordPeerHeartbeat(address)
+            sdkHandle.recordPeerRssi(address, rssi)
+        }
+    }
+
+    /**
      * Safely add fragment to operation queue with overflow protection
      * Prevents OutOfMemoryError by enforcing MAX_OPERATION_QUEUE_SIZE limit
      * When queue is full, drops the oldest fragment (FIFO overflow handling)
@@ -362,7 +385,24 @@ class BleService : Service() {
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
-    
+
+    /**
+     * All BLE peers discovered or connected during this session.
+     * Key = MAC address. Updated on scan results and connection events.
+     * Backed by the Rust health monitor — call [getHealthSnapshot] for full metrics.
+     */
+    private val _peers = MutableStateFlow<Map<String, DiscoveredPeer>>(emptyMap())
+    val peers: StateFlow<Map<String, DiscoveredPeer>> = _peers
+
+    /** Snapshot of a discovered/connected BLE peer. */
+    data class DiscoveredPeer(
+        val address: String,
+        val rssi: Int,
+        val discoveredAt: Long,
+        val isConnected: Boolean,
+        val lastSeenAt: Long = discoveredAt
+    )
+
     enum class ConnectionState {
         DISCONNECTED,
         SCANNING,
@@ -2779,9 +2819,14 @@ class BleService : Service() {
             val peerAddress = result.device.address
             
             appendLog("📡 Discovered PolliNet device $peerAddress (RSSI: ${result.rssi} dBm)")
-            
+
+            // Record in peer map + Rust health monitor (regardless of connection arbitration)
+            val alreadyConnected = connectedDevice?.address == peerAddress ||
+                    clientGatt?.device?.address == peerAddress
+            recordPeer(peerAddress, result.rssi, connected = alreadyConnected)
+
             // Check if already connected to THIS device
-            if (connectedDevice?.address == peerAddress || clientGatt?.device?.address == peerAddress) {
+            if (alreadyConnected) {
                 appendLog("ℹ️ Already connected to this device, ignoring")
                 return
             }
@@ -2933,12 +2978,15 @@ class BleService : Service() {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = gatt.device
                     clientGatt = gatt
-                    
+
+                    // Record in peer map + Rust health monitor
+                    recordPeer(gatt.device.address, rssi = _peers.value[gatt.device.address]?.rssi ?: 0, connected = true)
+
                     // Clear pending connection on success
                     if (pendingConnectionDevice?.address == gatt.device.address) {
                         pendingConnectionDevice = null
                     }
-                    
+
                     appendLog("✅ Connected to ${gatt.device.address}")
                     
                     // Stop scanning/advertising now that we're connected
@@ -2965,12 +3013,18 @@ class BleService : Service() {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     appendLog("🔌 Disconnected from ${gatt.device.address}")
-                    
+
+                    // Mark peer as no longer connected in local map
+                    val addr = gatt.device.address
+                    _peers.value = _peers.value.toMutableMap().apply {
+                        get(addr)?.let { put(addr, it.copy(isConnected = false, lastSeenAt = System.currentTimeMillis())) }
+                    }
+
                     // Clear pending connection on disconnect
                     if (pendingConnectionDevice?.address == gatt.device.address) {
                         pendingConnectionDevice = null
                     }
-                    
+
                     // Clean up
                     connectedDevice = null
                     clientGatt = null
@@ -3385,16 +3439,19 @@ class BleService : Service() {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
                     connectedDevice = device
-                    
+
+                    // Record in peer map + Rust health monitor (server-side connection)
+                    recordPeer(device.address, rssi = _peers.value[device.address]?.rssi ?: 0, connected = true)
+
                     // Clear pending connection on success
                     if (pendingConnectionDevice?.address == device.address) {
                         pendingConnectionDevice = null
                     }
-                    
+
                     // Stop scanning/advertising now that we're connected
                     stopScanning()
                     stopAdvertising()
-                    
+
                     appendLog("🤝 🤝 🤝 (SERVER) CONNECTED ${device.address} 🤝 🤝 🤝")
                     appendLog("   Server mode: Can send notifications immediately")
                     appendLog("   ✅ GATT server: ${gattServer != null}")
@@ -3431,12 +3488,17 @@ class BleService : Service() {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     connectedDevice = null
                     sendingJob?.cancel()
-                    
+
+                    // Mark peer as no longer connected in local map
+                    _peers.value = _peers.value.toMutableMap().apply {
+                        get(device.address)?.let { put(device.address, it.copy(isConnected = false, lastSeenAt = System.currentTimeMillis())) }
+                    }
+
                     // Clear pending connection on disconnect
                     if (pendingConnectionDevice?.address == device.address) {
                         pendingConnectionDevice = null
                     }
-                    
+
                     appendLog("🔌 (Server) disconnected ${device.address}")
                     
                     // Clear re-fragmentation tracking

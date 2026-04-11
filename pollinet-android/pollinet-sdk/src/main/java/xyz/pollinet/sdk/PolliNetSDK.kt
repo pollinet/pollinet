@@ -1315,7 +1315,9 @@ data class SdkConfig(
     val rpcUrl: String? = null,
     val enableLogging: Boolean = true,
     val logLevel: String? = "info",
-    val storageDirectory: String? = null
+    val storageDirectory: String? = null,
+    /** AES-256-GCM encryption key for nonce bundle storage. Required when [storageDirectory] is set. */
+    val encryptionKey: String? = null
 )
 
 @Serializable
