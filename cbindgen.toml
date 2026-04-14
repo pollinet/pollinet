@@ -1,0 +1,18 @@
+language = "C"
+include_version = true
+cpp_compat = true
+documentation_style = "doxy"
+tab_width = 4
+
+[defines]
+# Only export the iOS FFI symbols (not Android JNI symbols)
+"feature = ios" = "POLLINET_IOS"
+
+[export]
+# Only export functions whose names start with pollinet_ (the iOS FFI prefix)
+include = ["pollinet_.*"]
+exclude = ["Java_.*"]
+
+[fn]
+rename_args = "None"
+

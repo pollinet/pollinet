@@ -1,0 +1,3 @@
+# XCFramework binaries are built locally via scripts/build-xcframework.sh
+# and published as GitHub Release assets — not committed to the repo.
+PolliNetRust.xcframework/

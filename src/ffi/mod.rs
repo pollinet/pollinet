@@ -1,13 +1,12 @@
-//! FFI module for Android integration
+//! FFI module — Android JNI and iOS C interfaces
 //!
-//! This module provides a C-compatible interface for Kotlin/Java to interact with
-//! the PolliNet Rust core. It handles:
-//! - Host-driven BLE transport (push_inbound, next_outbound, tick)
-//! - Transaction building and fragmentation
-//! - Signature operations
-//! - Metrics and diagnostics
+//! - `android`: JNI bindings for Kotlin/Java
+//! - `ios`:     plain `extern "C"` bindings for Swift via a generated C header
+//! - `transport`: host-driven BLE transport shared by both platforms
+//! - `types`:   JSON-serialisable request/response types shared by both platforms
 
 pub mod android;
+pub mod ios;
 pub mod runtime;
 pub mod transport;
 pub mod types;
