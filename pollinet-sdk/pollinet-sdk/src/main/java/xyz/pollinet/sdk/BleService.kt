@@ -144,20 +144,26 @@ class BleService : Service() {
     }
 
     /**
-     * Safely add fragment to operation queue with overflow protection
-     * Prevents OutOfMemoryError by enforcing MAX_OPERATION_QUEUE_SIZE limit
-     * When queue is full, drops the oldest fragment (FIFO overflow handling)
-     * 
-     * Edge Case Fix #3: Queue Size Limits
+     * Safely add fragment to operation queue with overflow protection.
+     * When the queue is full we cancel the active sending loop and clear the queue
+     * so the in-progress transaction can be retried cleanly — silent mid-stream
+     * drops would corrupt fragment reassembly on the receiver side.
      */
     private fun safelyQueueFragment(data: ByteArray, context: String = "") {
-        if (operationQueue.size >= MAX_OPERATION_QUEUE_SIZE) {
-            val dropped = operationQueue.poll()
-            appendLog("⚠️ Operation queue full (${MAX_OPERATION_QUEUE_SIZE}), dropped oldest fragment (${dropped?.size ?: 0}B)")
-            appendLog("   Context: $context")
-            appendLog("   This may indicate connection issues or overwhelmed BLE stack")
+        // Synchronize the check-cancel-clear-offer sequence so no concurrent caller
+        // can slip a fragment in between our overflow check and the queue.clear().
+        synchronized(operationQueue) {
+            if (operationQueue.size >= MAX_OPERATION_QUEUE_SIZE) {
+                appendLog("🚨 Operation queue full ($MAX_OPERATION_QUEUE_SIZE) — cancelling send loop and clearing queue to avoid mid-stream corruption")
+                appendLog("   Context: $context")
+                appendLog("   This indicates the BLE stack is too slow or the connection is degraded")
+                sendingJob?.cancel()
+                operationQueue.clear()
+                // Reset in-progress flag so the loop can restart cleanly
+                operationInProgress.set(false)
+            }
+            operationQueue.offer(data)
         }
-        operationQueue.offer(data)
         appendLog("📦 Queued fragment (${data.size}B), queue size: ${operationQueue.size}/$MAX_OPERATION_QUEUE_SIZE")
     }
     
@@ -174,6 +180,7 @@ class BleService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingDescriptorWrite: BluetoothGattDescriptor? = null
     private var pendingGatt: BluetoothGatt? = null
+    private var pendingDescriptorRetry: Runnable? = null // token for cancellation
     
     // Autonomous transaction relay system
     private var autoSubmitJob: Job? = null
@@ -218,6 +225,17 @@ class BleService : Service() {
     // Alternating mesh mode for dancing mesh
     private var alternatingMeshJob: Job? = null
     private val ALTERNATING_INTERVAL_MS = 8_000L // 8 seconds per mode
+
+    // Fix: Idle-disconnect window — once our outbound queue empties, keep the connection open
+    // for this long so the remote peer has a chance to push data back to us.
+    @Volatile private var lastInboundDataMs = 0L
+    @Volatile private var queueEmptySinceMs = 0L   // timestamp when our queue first went empty
+    private val IDLE_DISCONNECT_WINDOW_MS = 4_000L // 4 s of silence on both sides → disconnect
+
+    // Fix: Peer cooldown — after disconnecting from a device, suppress reconnection for this
+    // long so the alternating loop has a chance to find a different peer.
+    private val recentlyConnectedPeers = LinkedHashMap<String, Long>() // address → disconnect timestamp
+    private val PEER_COOLDOWN_MS = 45_000L // 45 seconds
     
     // Edge Case Fix #1: Bluetooth state tracking
     // Saves operation state when BT disabled, restores when BT re-enabled
@@ -983,44 +1001,6 @@ class BleService : Service() {
         
         appendLog("✅ Unified event-driven worker started")
         logBatteryMetrics()
-    }
-    
-    /**
-     * Process outbound queue (event-driven)
-     */
-    private suspend fun processOutboundQueue() {
-        val sdkInstance = sdk ?: return
-        
-        // Check connection state
-        if (_connectionState.value != ConnectionState.CONNECTED) {
-            appendLog("⚠️ Not connected - outbound processing skipped")
-            return
-        }
-        
-        var processedCount = 0
-        val batchSize = 10 // Process up to 10 transactions per wake-up
-        
-        repeat(batchSize) {
-            val outboundTx = sdkInstance.popOutboundTransaction().getOrNull() ?: return@repeat
-            
-            appendLog("📤 Processing outbound tx: ${outboundTx.txId.take(8)}... (priority: ${outboundTx.priority})")
-            
-            // TODO: Actual BLE transmission logic
-            // For now, we just log that we would send it
-            appendLog("   Would transmit ${outboundTx.fragmentCount} fragments over BLE")
-            processedCount++
-        }
-        
-        if (processedCount > 0) {
-            appendLog("✅ Processed $processedCount outbound transactions")
-            
-            // Check if more work remains
-            val remaining = sdkInstance.getOutboundQueueSize().getOrNull() ?: 0
-            if (remaining > 0) {
-                appendLog("📊 $remaining transactions remaining, re-triggering event")
-                workChannel.trySend(WorkEvent.OutboundReady)
-            }
-        }
     }
     
     /**
@@ -1796,6 +1776,7 @@ class BleService : Service() {
      * Phase 4: Triggers event when transaction complete (no polling!)
      */
     private suspend fun handleReceivedData(data: ByteArray) {
+        lastInboundDataMs = System.currentTimeMillis()
         try {
             appendLog("📥 ===== PROCESSING RECEIVED DATA =====")
             appendLog("📥 Data size: ${data.size} bytes")
@@ -1963,6 +1944,7 @@ class BleService : Service() {
         closeGattConnection()
         gattServer?.close()
         sdk?.shutdown()
+        SdkHolder.clear() // Release WeakReference so workers see null and skip gracefully
         super.onDestroy()
     }
     
@@ -2001,8 +1983,9 @@ class BleService : Service() {
             return Result.success(Unit)
         }
         
-        return PolliNetSDK.initialize(config).map { 
+        return PolliNetSDK.initialize(config).map {
             sdk = it
+            SdkHolder.set(it)
             appendLog("✅ SDK initialized successfully")
             
             // Phase 4: Start unified event-driven worker (replaces multiple polling loops)
@@ -2440,35 +2423,54 @@ class BleService : Service() {
             val data = sdkInstance.nextOutbound(maxLen = safeMaxLen)
             
             if (data == null) {
-                // No more data to send - wait before clearing to ensure delivery
+                // Outbound queue is empty.  Before disconnecting, give the remote peer a window
+                // to push data back to us (the "server-send window").  We only disconnect once
+                // BOTH sides have been silent for IDLE_DISCONNECT_WINDOW_MS.
+
+                // Record the moment the queue first went empty this session.
+                if (queueEmptySinceMs == 0L) {
+                    queueEmptySinceMs = System.currentTimeMillis()
+                    appendLog("📭 Queue empty — opening ${IDLE_DISCONNECT_WINDOW_MS / 1000}s idle window for peer to push data")
+                }
+
+                // The effective idle start is the LATER of: when our queue emptied, and when
+                // we last received any data — so a burst of inbound data resets the clock.
+                val idleStart = maxOf(queueEmptySinceMs, lastInboundDataMs)
+                val elapsed = System.currentTimeMillis() - idleStart
+                if (elapsed < IDLE_DISCONNECT_WINDOW_MS) {
+                    // Still inside the window — yield and let the loop poll again after its 800ms sleep
+                    return
+                }
+
+                // Window expired — proceed to finalise and disconnect
                 if (pendingTransactionBytes != null) {
-                    appendLog("📭 Queue empty - waiting for notification delivery confirmation...")
-                    appendLog("   Keeping pending transaction for potential retry if needed")
-                    // Don't clear immediately - wait for connection stability
-                    // Will be cleared on disconnect or after confirmed delivery
-                    delay(2000) // Wait 2s to ensure all notifications delivered
-                    
-                    // Check if still connected and no errors
+                    appendLog("📭 Idle window expired (${elapsed}ms) — confirming delivery and disconnecting")
+                    delay(500) // Small buffer to flush final fragments
+
                     if (_connectionState.value == ConnectionState.CONNECTED) {
                         appendLog("✅ All fragments delivered successfully, clearing pending transaction")
                         pendingTransactionBytes = null
                         fragmentsQueuedWithMtu = 0
-                        
-                        // Dancing mesh: After completing transfer, disconnect and move to next peer
+                        queueEmptySinceMs = 0L
+
+                        // Dancing mesh: disconnect and move to next peer
                         appendLog("🔄 Dancing mesh: Transfer complete - disconnecting to find next peer...")
                         mainHandler.postDelayed({
                             if (_connectionState.value == ConnectionState.CONNECTED) {
                                 appendLog("🔌 Dancing mesh: Disconnecting from current peer...")
                                 closeGattConnection()
-                                // Scanning will resume automatically in onConnectionStateChange DISCONNECTED handler
                             }
-                        }, 500) // Small delay to ensure final fragments are delivered
+                        }, 200)
                     } else {
                         appendLog("⚠️ Connection lost, keeping transaction for potential retry")
+                        queueEmptySinceMs = 0L
                     }
                 }
                 return
             }
+
+            // We have data to send — reset the idle-window tracker
+            queueEmptySinceMs = 0L
 
             appendLog("➡️ Sending fragment (${data.size}B)")
             
@@ -2518,6 +2520,15 @@ class BleService : Service() {
                 if (result != BluetoothGatt.GATT_SUCCESS) {
                     appendLog("   ⚠️ Write result indicates failure: $result")
                     operationInProgress.set(false)
+                } else {
+                    // Watchdog: if onCharacteristicWrite callback never fires (BLE stack stall),
+                    // release the flag after 5s so the send loop doesn't deadlock permanently.
+                    mainHandler.postDelayed({
+                        if (operationInProgress.get()) {
+                            appendLog("⚠️ Write callback timeout (5s) — force-releasing operationInProgress")
+                            operationInProgress.set(false)
+                        }
+                    }, 5_000L)
                 }
             } else {
                 remoteRx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
@@ -2528,6 +2539,14 @@ class BleService : Service() {
                 appendLog(if (success) "✅ Wrote ${data.size}B to ${gatt.device.address}" else "❌ Write failed to ${gatt.device.address}")
                 if (!success) {
                     operationInProgress.set(false)
+                } else {
+                    // Same watchdog for legacy path
+                    mainHandler.postDelayed({
+                        if (operationInProgress.get()) {
+                            appendLog("⚠️ Write callback timeout (5s) — force-releasing operationInProgress")
+                            operationInProgress.set(false)
+                        }
+                    }, 5_000L)
                 }
             }
             return
@@ -2830,7 +2849,16 @@ class BleService : Service() {
                 appendLog("ℹ️ Already connected to this device, ignoring")
                 return
             }
-            
+
+            // Peer cooldown — skip devices we recently disconnected from so the mesh can
+            // rotate to a different neighbour instead of re-locking to the same peer.
+            val cooldownExpiry = recentlyConnectedPeers[peerAddress]
+            if (cooldownExpiry != null && System.currentTimeMillis() < cooldownExpiry) {
+                val remainingSecs = (cooldownExpiry - System.currentTimeMillis()) / 1000
+                appendLog("⏳ Peer $peerAddress in cooldown for ${remainingSecs}s — skipping")
+                return
+            }
+
             // Check if already connected to ANY device (keep it simple - one connection at a time)
             if (connectedDevice != null || clientGatt != null) {
                 appendLog("ℹ️ Already connected to another device, ignoring discovery")
@@ -3045,20 +3073,33 @@ class BleService : Service() {
                     
                     // Reset descriptor write flag
                     descriptorWriteComplete = false
-                    
-                    // Dancing mesh: Automatically restart alternating mode to find next peer
+
+                    // Reset idle-window tracking for the next connection
+                    queueEmptySinceMs = 0L
+                    lastInboundDataMs = 0L
+
+                    // Cooldown: suppress reconnection to this peer for PEER_COOLDOWN_MS so the
+                    // mesh has a chance to discover a different neighbour next scan cycle.
+                    recentlyConnectedPeers[addr] = System.currentTimeMillis() + PEER_COOLDOWN_MS
+                    // Evict entries whose cooldown has already expired (time-based, not FIFO)
+                    val now = System.currentTimeMillis()
+                    recentlyConnectedPeers.entries.removeIf { it.value <= now }
+
+                    // Dancing mesh: Automatically restart alternating mode to find next peer.
+                    // Random 2–5 s backoff prevents all nodes from re-scanning simultaneously.
                     appendLog("🔄 Dancing mesh: Restarting alternating mode to find next peer...")
+                    val backoffMs = (2000L..5000L).random()
                     mainHandler.postDelayed({
-                        if (_connectionState.value == ConnectionState.DISCONNECTED && 
+                        if (_connectionState.value == ConnectionState.DISCONNECTED &&
                             connectedDevice == null && clientGatt == null) {
                             startAlternatingMeshMode()
                             appendLog("✅ Dancing mesh: Alternating mode restarted - will find next peer")
                         }
-                    }, 1000) // Small delay to ensure cleanup is complete
+                    }, backoffMs)
                 }
             }
         }
-        
+
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             val oldMtu = currentMtu
             currentMtu = mtu
@@ -3219,6 +3260,15 @@ class BleService : Service() {
             } else {
                 appendLog("⏳ Waiting for onDescriptorWrite callback...")
                 appendLog("   Data transfer will begin after descriptor write confirms")
+                // Timeout: if the callback never fires (BLE stack stall or peer disappears),
+                // force-mark descriptor write complete after 30s so the send loop can still start.
+                mainHandler.postDelayed({
+                    if (!descriptorWriteComplete && _connectionState.value == ConnectionState.CONNECTED) {
+                        appendLog("⚠️ Descriptor write callback timeout (30s) — forcing send loop start")
+                        descriptorWriteComplete = true
+                        ensureSendingLoopStarted()
+                    }
+                }, 30_000L)
             }
         }
 
@@ -3241,7 +3291,7 @@ class BleService : Service() {
                 
                 // Log received data in detail for receiver
                 appendLog("⬅️ Processing notification data...")
-                
+                lastInboundDataMs = System.currentTimeMillis()
                 handleReceivedData(value)
             }
         }
@@ -3369,21 +3419,24 @@ class BleService : Service() {
                         
                         // Exponential backoff: wait longer between retries
                         val retryDelay = 1000L * descriptorWriteRetries // 1s, 2s, 3s
-                        mainHandler.postDelayed(retry@ {
+                        // Cancel any previously scheduled retry before posting a new one
+                        pendingDescriptorRetry?.let { mainHandler.removeCallbacks(it) }
+                        val retryRunnable = Runnable retry@{
+                            pendingDescriptorRetry = null
                             // Check connection state again before retrying
                             if (_connectionState.value != ConnectionState.CONNECTED) {
                                 appendLog("⚠️ Connection lost during retry delay, aborting")
                                 descriptorWriteRetries = 0
                                 return@retry
                             }
-                            
+
                             // Verify GATT is still valid
                             if (gatt != clientGatt) {
                                 appendLog("⚠️ GATT connection changed during retry delay, aborting")
                                 descriptorWriteRetries = 0
                                 return@retry
                             }
-                            
+
                             try {
                                 // Re-enable notifications and write descriptor
                                 gatt.setCharacteristicNotification(remoteTxCharacteristic, true)
@@ -3401,11 +3454,13 @@ class BleService : Service() {
                                 appendLog("❌ Retry failed: ${e.message}")
                                 descriptorWriteRetries = 0
                             }
-                        }, retryDelay)
+                        }
+                        pendingDescriptorRetry = retryRunnable
+                        mainHandler.postDelayed(retryRunnable, retryDelay)
                     } else {
                         appendLog("❌ Max descriptor write retries reached. Giving up.")
                         descriptorWriteRetries = 0
-                        // Only try to recover if still connected
+                        sendingJob?.cancel() // Stop loop before GATT closes to avoid write-on-closed-gatt
                         if (_connectionState.value == ConnectionState.CONNECTED) {
                             handleStatus133(gatt)
                         }
@@ -3507,16 +3562,28 @@ class BleService : Service() {
                     
                     // Reset descriptor write flag
                     descriptorWriteComplete = false
-                    
-                    // Dancing mesh: Automatically restart alternating mode to find next peer
+
+                    // Reset idle-window tracking for the next connection
+                    queueEmptySinceMs = 0L
+                    lastInboundDataMs = 0L
+
+                    // Cooldown: suppress reconnection to this peer for PEER_COOLDOWN_MS.
+                    recentlyConnectedPeers[device.address] = System.currentTimeMillis() + PEER_COOLDOWN_MS
+                    // Evict entries whose cooldown has already expired (time-based, not FIFO)
+                    val now = System.currentTimeMillis()
+                    recentlyConnectedPeers.entries.removeIf { it.value <= now }
+
+                    // Dancing mesh: Automatically restart alternating mode to find next peer.
+                    // Random 2–5 s backoff so nodes don't all re-scan at the same instant.
                     appendLog("🔄 Dancing mesh: Restarting alternating mode to find next peer...")
+                    val backoffMs = (2000L..5000L).random()
                     mainHandler.postDelayed({
-                        if (_connectionState.value == ConnectionState.DISCONNECTED && 
+                        if (_connectionState.value == ConnectionState.DISCONNECTED &&
                             connectedDevice == null && clientGatt == null) {
                             startAlternatingMeshMode()
                             appendLog("✅ Dancing mesh: Alternating mode restarted - will find next peer")
                         }
-                    }, 1000) // Small delay to ensure cleanup is complete
+                    }, backoffMs)
                 }
             }
         }
@@ -3561,6 +3628,7 @@ class BleService : Service() {
                 }
                 
                 // Forward to Rust FFI (async processing)
+                lastInboundDataMs = System.currentTimeMillis() // reset idle-disconnect clock
                 serviceScope.launch {
                     if (sdk == null) {
                         appendLog("❌ SDK not initialized; write dropped")
@@ -3571,7 +3639,7 @@ class BleService : Service() {
                     appendLog("⬅️ RX from ${device.address}: ${previewFragment(value)}")
                     appendLog("   📦 Raw data (${value.size} bytes): ${value.joinToString(" ") { "%02X".format(it) }}")
                     appendLog("   📋 Base64: ${android.util.Base64.encodeToString(value, android.util.Base64.NO_WRAP)}")
-                    
+
                     handleReceivedData(value)
                 }
             } else {
