@@ -75,6 +75,11 @@ class BleService : Service() {
         // Reasonable limit: ~10 fragments at 512 bytes each = 5120 bytes (~5KB)
         // Solana transaction max is 1232 bytes, so 5KB provides comfortable headroom
         private const val MAX_TRANSACTION_SIZE = 5120 // bytes (~5KB)
+
+        // Maximum number of times this device will relay the same transaction over BLE.
+        // Prevents dead/orphaned transactions from circulating indefinitely when all
+        // devices in the mesh lack internet.  Mirrors the confirmation relay cap below.
+        private const val MAX_TX_RELAY_HOPS = 5
     }
 
     private val binder = LocalBinder()
@@ -236,6 +241,11 @@ class BleService : Service() {
     // long so the alternating loop has a chance to find a different peer.
     private val recentlyConnectedPeers = LinkedHashMap<String, Long>() // address → disconnect timestamp
     private val PEER_COOLDOWN_MS = 45_000L // 45 seconds
+
+    // TTL: track how many times THIS device has relayed each transaction so we can drop
+    // transactions that have already been forwarded MAX_TX_RELAY_HOPS times.
+    // Key = txId (hex string), Value = relay count.
+    private val txRelayHops = HashMap<String, Int>()
     
     // Edge Case Fix #1: Bluetooth state tracking
     // Saves operation state when BT disabled, restores when BT re-enabled
@@ -1379,9 +1389,8 @@ class BleService : Service() {
             // Relay confirmation back through the mesh if hop count hasn't exceeded max
             // In a full mesh, we'd check if this confirmation is for us (we're the origin)
             // For now, we always relay if hop count allows (mesh will eventually reach origin)
-            val maxHops = 5 // Default max hops
-            if (confirmation.relayCount < maxHops) {
-                appendLog("🔄 Relaying confirmation (hops: ${confirmation.relayCount}/$maxHops)")
+            if (confirmation.relayCount < MAX_TX_RELAY_HOPS) {
+                appendLog("🔄 Relaying confirmation (hops: ${confirmation.relayCount}/$MAX_TX_RELAY_HOPS)")
                 sdk?.relayConfirmation(confirmation)?.onSuccess {
                     appendLog("✅ Confirmation re-queued for relay")
                     workChannel.trySend(WorkEvent.ConfirmationReady)
@@ -1389,8 +1398,7 @@ class BleService : Service() {
                     appendLog("⚠️ Failed to relay confirmation: ${e.message}")
                 }
             } else {
-                appendLog("⚠️ Confirmation exceeded max hops ($maxHops) - dropping")
-                appendLog("   This confirmation has been relayed through the mesh and reached TTL")
+                appendLog("⚠️ Confirmation reached relay TTL (${confirmation.relayCount}/$MAX_TX_RELAY_HOPS) — dropping")
             }
             
             appendLog("✅ Confirmation processed")
@@ -1637,7 +1645,10 @@ class BleService : Service() {
                                 submitResult.onSuccess { signature ->
                                     appendLog("✅ Auto-submitted transaction: ${receivedTx.txId}")
                                     appendLog("   Signature: $signature")
-                                    
+
+                                    // Clean up relay-hop tracking — no longer needed
+                                    txRelayHops.remove(receivedTx.txId)
+
                                     // Mark as submitted for deduplication
                                     sdkInstance.markTransactionSubmitted(txBytes)
                                 }.onFailure { e ->
@@ -1651,25 +1662,34 @@ class BleService : Service() {
                                 sdkInstance.pushReceivedTransaction(txBytes)
                             }
                         } else {
-                            // No internet, relay to mesh
-                            appendLog("📡 No internet, relaying transaction ${receivedTx.txId} to mesh")
-                            
-                            // Queue for BLE transmission to other peers (re-fragment)
-                            try {
-                                val fragmentResult = sdkInstance.fragmentTransaction(txBytes)
-                                fragmentResult.onSuccess { fragmentDataList ->
-                                    appendLog("📤 Queued ${fragmentDataList.size} fragments for mesh relay")
-                                    // The fragments are already in the outbound queue
-                                    ensureSendingLoopStarted()
-                                }.onFailure { e ->
-                                    appendLog("⚠️ Failed to queue for relay: ${e.message}")
-                                    // Requeue for later
+                            // No internet — relay to next BLE peer, subject to hop limit.
+                            val hops = txRelayHops.getOrDefault(receivedTx.txId, 0)
+                            if (hops >= MAX_TX_RELAY_HOPS) {
+                                appendLog("⚠️ TX ${receivedTx.txId.take(8)} hit relay TTL ($hops/$MAX_TX_RELAY_HOPS) — dropping to prevent infinite circulation")
+                                txRelayHops.remove(receivedTx.txId) // free memory
+                            } else {
+                                txRelayHops[receivedTx.txId] = hops + 1
+                                appendLog("📡 No internet, relaying transaction ${receivedTx.txId.take(8)} (hop ${hops + 1}/$MAX_TX_RELAY_HOPS)")
+
+                                // Evict oldest entry if map grows too large (safety valve)
+                                if (txRelayHops.size > 200) {
+                                    txRelayHops.remove(txRelayHops.keys.first())
+                                }
+
+                                // Queue for BLE transmission to other peers (re-fragment)
+                                try {
+                                    val fragmentResult = sdkInstance.fragmentTransaction(txBytes)
+                                    fragmentResult.onSuccess { fragmentDataList ->
+                                        appendLog("📤 Queued ${fragmentDataList.size} fragments for mesh relay")
+                                        ensureSendingLoopStarted()
+                                    }.onFailure { e ->
+                                        appendLog("⚠️ Failed to queue for relay: ${e.message}")
+                                        sdkInstance.pushReceivedTransaction(txBytes)
+                                    }
+                                } catch (e: Exception) {
+                                    appendLog("⚠️ Exception while queueing relay: ${e.message}")
                                     sdkInstance.pushReceivedTransaction(txBytes)
                                 }
-                            } catch (e: Exception) {
-                                appendLog("⚠️ Exception while queueing relay: ${e.message}")
-                                // Requeue for later
-                                sdkInstance.pushReceivedTransaction(txBytes)
                             }
                         }
                     }
