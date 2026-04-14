@@ -1265,9 +1265,10 @@ class BleService : Service() {
             }
             
             appendLog("🔄 Retrying tx: ${retryItem.txId.take(8)}... (attempt ${retryItem.attemptCount}, nextRetryInSecs=${retryItem.nextRetryInSecs})")
-            
+
+            val txBytes = android.util.Base64.decode(retryItem.txBytes, android.util.Base64.NO_WRAP)
+
             try {
-                val txBytes = android.util.Base64.decode(retryItem.txBytes, android.util.Base64.NO_WRAP)
                 val submitResult = sdkInstance.submitOfflineTransaction(
                     transactionBase64 = retryItem.txBytes,
                     verifyNonce = false
