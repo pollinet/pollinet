@@ -133,6 +133,11 @@ pub struct HostBleTransport {
 
     /// Queue storage directory (replaces POLLINET_QUEUE_STORAGE env var)
     queue_storage_dir: Mutex<Option<String>>,
+
+    /// Base58-encoded Solana wallet address for this node session.
+    /// Used to attribute uptime, relay and submission rewards to the correct wallet.
+    /// None until the host app calls `set_wallet_address` or provides it in `SdkConfig`.
+    pub wallet_address: Mutex<Option<String>>,
 }
 
 impl HostBleTransport {
@@ -182,6 +187,7 @@ impl HostBleTransport {
             health_monitor: Arc::new(MeshHealthMonitor::default()),
             sdk: Arc::new(sdk),
             queue_storage_dir: Mutex::new(None),
+            wallet_address: Mutex::new(None),
         };
 
         t_info!("✅ HostBleTransport::new() initialized");
@@ -220,6 +226,7 @@ impl HostBleTransport {
             health_monitor: Arc::new(MeshHealthMonitor::default()),
             sdk: Arc::new(sdk),
             queue_storage_dir: Mutex::new(None),
+            wallet_address: Mutex::new(None),
         };
 
         t_info!("✅ HostBleTransport::new_with_rpc() initialized");
@@ -307,6 +314,18 @@ impl HostBleTransport {
     /// Get queue storage directory
     pub fn get_queue_storage_dir(&self) -> Option<String> {
         self.queue_storage_dir.lock().clone()
+    }
+
+    /// Store the wallet address for this node session.
+    /// Called by the FFI init path when `SdkConfig.walletAddress` is provided,
+    /// or at any point later if the user connects their wallet after startup.
+    pub fn set_wallet_address(&self, address: Option<String>) {
+        *self.wallet_address.lock() = address;
+    }
+
+    /// Return the wallet address associated with this node session, if any.
+    pub fn get_wallet_address(&self) -> Option<String> {
+        self.wallet_address.lock().clone()
     }
 
     /// Get secure storage if available

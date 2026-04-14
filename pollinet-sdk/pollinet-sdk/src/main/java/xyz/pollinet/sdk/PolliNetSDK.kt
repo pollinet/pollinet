@@ -1291,6 +1291,38 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
+    // Wallet address — reward attribution
+    // =========================================================================
+
+    /**
+     * Update the wallet address at runtime.
+     * Pass null or an empty string to clear a previously-set address.
+     */
+    suspend fun setWalletAddress(address: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.setWalletAddress(handle, address ?: "")
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get the wallet address currently stored on the Rust transport.
+     * Returns null if no address has been set.
+     */
+    suspend fun getWalletAddress(): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getWalletAddress(handle)
+            parseResult<WalletAddressResponse>(resultJson).map { r ->
+                r.address.takeIf { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -1354,7 +1386,14 @@ data class SdkConfig(
     val logLevel: String? = "info",
     val storageDirectory: String? = null,
     /** AES-256-GCM encryption key for nonce bundle storage. Required when [storageDirectory] is set. */
-    val encryptionKey: String? = null
+    val encryptionKey: String? = null,
+    /**
+     * Base58-encoded Solana wallet address that owns this node session.
+     * When provided it is stored on the Rust transport and used to attribute
+     * uptime, relay and submission rewards to the correct wallet.
+     */
+    @SerialName("walletAddress")
+    val walletAddress: String? = null
 )
 
 @Serializable
@@ -1627,6 +1666,11 @@ data class QueueSizeResponse(
 @Serializable
 data class SuccessResponse(
     val success: Boolean
+)
+
+@Serializable
+data class WalletAddressResponse(
+    val address: String
 )
 
 @Serializable

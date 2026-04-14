@@ -514,5 +514,22 @@ object PolliNetFFI {
      * @return JSON FfiResult<SuccessResponse>
      */
     external fun recordPeerRssi(handle: Long, peerId: String, rssi: Int): String
+
+    // =========================================================================
+    // Wallet address — reward attribution
+    // =========================================================================
+
+    /**
+     * Set the wallet address for this node session.
+     * Pass an empty string to clear a previously-set address.
+     * @return JSON FfiResult<SuccessResponse>
+     */
+    external fun setWalletAddress(handle: Long, address: String): String
+
+    /**
+     * Get the wallet address currently set for this node session.
+     * @return JSON FfiResult<WalletAddressResponse> — address field is empty if none set
+     */
+    external fun getWalletAddress(handle: Long): String
 }
 

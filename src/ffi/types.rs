@@ -347,6 +347,13 @@ pub struct SdkConfig {
     /// environment variable when absent (useful for CLI/server usage).
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,
+    /// Base58-encoded Solana wallet address that owns this node session.
+    /// When provided it is stored on the transport and will be used to attribute
+    /// uptime, relay and submission rewards to the correct wallet.
+    /// Omitting this field (or passing null) is valid — the node still participates
+    /// in the mesh but rewards cannot be allocated until a wallet is associated.
+    #[serde(rename = "walletAddress", default)]
+    pub wallet_address: Option<String>,
 }
 
 pub(crate) fn default_version() -> u32 {

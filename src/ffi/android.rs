@@ -152,6 +152,14 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
             info!("ℹ️  No storage directory provided - bundle persistence disabled");
         }
 
+        // Store wallet address if provided in config
+        if let Some(ref addr) = config.wallet_address {
+            transport.set_wallet_address(Some(addr.clone()));
+            info!("✅ Wallet address set: {}", addr);
+        } else {
+            info!("ℹ️  No wallet address provided — rewards will not be attributed until one is set");
+        }
+
         info!("Step 6: Storing transport...");
 
         let transport_arc = Arc::new(transport);
@@ -3136,6 +3144,70 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearAllQueues(
 
         let response: FfiResult<SuccessResponse> =
             FfiResult::success(SuccessResponse { success: true });
+
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Wallet address — reward attribution
+// =============================================================================
+
+/// Set the wallet address for this node session.
+/// Pass an empty string to clear a previously-set address.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_setWalletAddress(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    address: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        let addr: String = env
+            .get_string(&address)
+            .map_err(|e| format!("Failed to read address string: {}", e))?
+            .into();
+
+        let addr_opt = if addr.is_empty() { None } else { Some(addr.clone()) };
+        transport.set_wallet_address(addr_opt);
+
+        info!("✅ Wallet address updated: {}", if addr.is_empty() { "<cleared>" } else { &addr });
+
+        let response: FfiResult<SuccessResponse> =
+            FfiResult::success(SuccessResponse { success: true });
+
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Get the wallet address currently set for this node session.
+/// Returns an empty address field if none has been set.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getWalletAddress(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        let addr = transport.get_wallet_address().unwrap_or_default();
+
+        #[derive(serde::Serialize)]
+        struct WalletAddressResponse {
+            address: String,
+        }
+
+        let response: FfiResult<WalletAddressResponse> =
+            FfiResult::success(WalletAddressResponse { address: addr });
 
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
