@@ -1089,9 +1089,9 @@ class PolliNetSDK private constructor(
     suspend fun getRetryQueueSize(): Result<Int> = getQueueSize(PolliNetFFI::getRetryQueueSize)
     
     /**
-     * Queue confirmation for relay back to origin
-     * @param txId Transaction ID (hex string)
-     * @param signature Blockchain signature
+     * Queue a SUCCESS confirmation for relay back to origin.
+     * @param txId Transaction ID (hex string, SHA-256 of tx bytes)
+     * @param signature On-chain transaction signature
      */
     suspend fun queueConfirmation(txId: String, signature: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -1102,6 +1102,28 @@ class PolliNetSDK private constructor(
             val requestJson = json.encodeToString(request)
             val resultJson = PolliNetFFI.queueConfirmation(handle, requestJson)
             parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Queue a FAILURE confirmation for relay back to origin.
+     * Call this when a transaction is permanently dropped (stale nonce, max retries
+     * exhausted, or any non-retryable error) so the originating node learns about it.
+     * @param txId Transaction ID (hex string, SHA-256 of tx bytes)
+     * @param error Human-readable reason for failure
+     */
+    suspend fun queueFailureConfirmation(txId: String, error: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val confirmation = Confirmation(
+                txId = txId,
+                status = ConfirmationStatus.Failed(error),
+                timestamp = System.currentTimeMillis(),
+                relayCount = 0
+            )
+            // relayConfirmation serialises to JSON and pushes into the Rust confirmation queue
+            relayConfirmation(confirmation)
         } catch (e: Exception) {
             Result.failure(e)
         }

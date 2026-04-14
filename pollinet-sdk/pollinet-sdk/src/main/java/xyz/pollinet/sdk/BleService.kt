@@ -1136,23 +1136,40 @@ class BleService : Service() {
                     android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
                     appendLog("   Error: $errorMsg")
                     
+                    // Calculate tx hash for failure confirmation (same logic as success path)
+                    val txHash = try {
+                        val txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
+                        val digest = java.security.MessageDigest.getInstance("SHA-256")
+                        digest.update(txBytes)
+                        digest.digest().joinToString("") { "%02x".format(it) }
+                    } catch (hashEx: Exception) {
+                        receivedTx.transactionBase64.take(64)
+                    }
+
                     // Check if this is a stale or permanently invalid transaction error
                     if (isStaleTransactionError(errorMsg)) {
                         appendLog("   🗑️ Invalid transaction detected - dropping (won't retry)")
                         android.util.Log.w("PolliNet.BLE", "Dropping invalid transaction ${receivedTx.txId.take(8)}... due to: $errorMsg")
-                        // Don't add to retry queue - transaction is permanently invalid
+                        // Send failure confirmation so the origin node learns the tx was dropped
+                        sdkInstance.queueFailureConfirmation(txHash, errorMsg)
+                            .onSuccess {
+                                appendLog("   📤 Queued failure confirmation for relay")
+                                workChannel.trySend(WorkEvent.ConfirmationReady)
+                            }
+                            .onFailure { qe ->
+                                appendLog("   ⚠️ Failed to queue failure confirmation: ${qe.message}")
+                            }
                     } else {
-                    appendLog("   Adding to retry queue for later...")
-                    
-                    // Add to retry queue (Phase 2)
-                    sdkInstance.addToRetryQueue(
-                        txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
-                        txId = receivedTx.txId,
+                        appendLog("   Adding to retry queue for later...")
+                        // Add to retry queue (Phase 2)
+                        sdkInstance.addToRetryQueue(
+                            txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP),
+                            txId = receivedTx.txId,
                             error = errorMsg
-                    ).onSuccess {
-                        appendLog("   ✅ Added to retry queue")
-                    }.onFailure { e ->
-                        appendLog("   ❌ Failed to add to retry queue: ${e.message}")
+                        ).onSuccess {
+                            appendLog("   ✅ Added to retry queue")
+                        }.onFailure { e ->
+                            appendLog("   ❌ Failed to add to retry queue: ${e.message}")
                         }
                     }
                 }
@@ -1163,8 +1180,19 @@ class BleService : Service() {
                 appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
                 android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress", e)
                 appendLog("   Exception: ${e.message}")
-                appendLog("   Stack trace: ${e.stackTraceToString()}")
-        }
+                // Best-effort: add to retry queue so the tx isn't silently lost
+                try {
+                    val txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
+                    sdkInstance.addToRetryQueue(
+                        txBytes = txBytes,
+                        txId = receivedTx.txId,
+                        error = e.message ?: "Exception during submission"
+                    )
+                    appendLog("   ↩️ Added to retry queue after exception")
+                } catch (retryEx: Exception) {
+                    appendLog("   ❌ Could not add to retry queue: ${retryEx.message}")
+                }
+            }
         }
         
         // Summary log
@@ -1245,53 +1273,72 @@ class BleService : Service() {
                     verifyNonce = false
                 )
                 
+                // Calculate tx hash once — used for both success and failure confirmations
+                val txHash = try {
+                    val digest = java.security.MessageDigest.getInstance("SHA-256")
+                    digest.update(txBytes)
+                    digest.digest().joinToString("") { "%02x".format(it) }
+                } catch (hashEx: Exception) {
+                    retryItem.txBytes.take(64)
+                }
+
                 submitResult.onSuccess { signature ->
                     appendLog("✅ Retry successful: $signature")
                     sdkInstance.markTransactionSubmitted(txBytes)
-                    
-                    // Calculate transaction hash (SHA-256) for confirmation
-                    // The confirmation queue expects a hex-encoded 32-byte hash, not the UUID txId
-                    val txHash = try {
-                        val digest = java.security.MessageDigest.getInstance("SHA-256")
-                        digest.update(txBytes)
-                        digest.digest().joinToString("") { "%02x".format(it) }
-                    } catch (e: Exception) {
-                        appendLog("❌ Failed to calculate transaction hash: ${e.message}")
-                        // Fallback: use first 64 chars of base64 as identifier (not ideal but better than UUID)
-                        retryItem.txBytes.take(64)
-                    }
-                    
-                    // Queue confirmation
+
+                    // Queue success confirmation
                     sdkInstance.queueConfirmation(txHash, signature)
-                        .onSuccess {
-                            workChannel.trySend(WorkEvent.ConfirmationReady)
-                        }
-                    
+                        .onSuccess { workChannel.trySend(WorkEvent.ConfirmationReady) }
+                        .onFailure { e -> appendLog("⚠️ Failed to queue success confirmation: ${e.message}") }
+
                     processedCount++
                 }.onFailure { error ->
                     val errorMsg = error.message ?: "Unknown error"
                     appendLog("⚠️ Retry failed (attempt ${retryItem.attemptCount}): $errorMsg")
-                    
-                    // Check if this is a stale or permanently invalid transaction error
+
+                    // Check if permanently invalid (stale nonce, bad signature, etc.)
                     if (isStaleTransactionError(errorMsg)) {
-                        appendLog("   🗑️ Invalid transaction detected - dropping (won't retry)")
-                        android.util.Log.w("PolliNet.BLE", "Dropping invalid transaction ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts due to: $errorMsg")
-                        // Don't re-add to retry queue - transaction is permanently invalid
-                    } else {
-                    // Re-add to retry queue with incremented count (if not max)
-                    if (retryItem.attemptCount < 5) {
+                        appendLog("   🗑️ Invalid transaction - dropping permanently")
+                        android.util.Log.w("PolliNet.BLE", "Dropping invalid tx ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts: $errorMsg")
+                        sdkInstance.queueFailureConfirmation(txHash, errorMsg)
+                            .onSuccess {
+                                appendLog("   📤 Queued failure confirmation for relay")
+                                workChannel.trySend(WorkEvent.ConfirmationReady)
+                            }
+                            .onFailure { qe -> appendLog("   ⚠️ Failed to queue failure confirmation: ${qe.message}") }
+                    } else if (retryItem.attemptCount < 5) {
+                        // Re-add to retry queue with incremented count
                         sdkInstance.addToRetryQueue(
                             txBytes = txBytes,
                             txId = retryItem.txId,
-                                error = errorMsg
+                            error = errorMsg
                         )
                     } else {
-                        appendLog("❌ Giving up on tx ${retryItem.txId.take(8)}... after ${retryItem.attemptCount} attempts")
-                        }
+                        // Max retries exhausted — send failure confirmation
+                        appendLog("❌ Max retries (5) exhausted for tx ${retryItem.txId.take(8)}... — sending failure confirmation")
+                        sdkInstance.queueFailureConfirmation(txHash, "Max retries (5) exceeded: $errorMsg")
+                            .onSuccess {
+                                appendLog("   📤 Queued failure confirmation for relay")
+                                workChannel.trySend(WorkEvent.ConfirmationReady)
+                            }
+                            .onFailure { qe -> appendLog("   ⚠️ Failed to queue failure confirmation: ${qe.message}") }
                     }
                 }
             } catch (e: Exception) {
                 appendLog("❌ Exception processing retry: ${e.message}")
+                // Best-effort re-add to retry if we haven't exceeded attempts
+                if (retryItem.attemptCount < 5) {
+                    try {
+                        sdkInstance.addToRetryQueue(
+                            txBytes = txBytes,
+                            txId = retryItem.txId,
+                            error = e.message ?: "Exception during retry"
+                        )
+                        appendLog("   ↩️ Re-added to retry queue after exception")
+                    } catch (retryEx: Exception) {
+                        appendLog("   ❌ Could not re-add to retry queue: ${retryEx.message}")
+                    }
+                }
             }
         }
         
@@ -3035,6 +3082,9 @@ class BleService : Service() {
                         pendingConnectionDevice = null
                     }
 
+                    // Drain any confirmations that queued while disconnected
+                    workChannel.trySend(WorkEvent.ConfirmationReady)
+
                     appendLog("✅ Connected to ${gatt.device.address}")
                     
                     // Stop scanning/advertising now that we're connected
@@ -3522,6 +3572,9 @@ class BleService : Service() {
                     if (pendingConnectionDevice?.address == device.address) {
                         pendingConnectionDevice = null
                     }
+
+                    // Drain any confirmations that queued while disconnected
+                    workChannel.trySend(WorkEvent.ConfirmationReady)
 
                     // Stop scanning/advertising now that we're connected
                     stopScanning()
