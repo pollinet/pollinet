@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+    <!-- ─── Display ─── -->
+    <key>CFBundleDisplayName</key>
+    <string>PolliNet</string>
+
+    <!-- ─── Background execution modes ─── -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <!-- Core Bluetooth state restoration (central role) -->
+        <string>bluetooth-central</string>
+        <!-- Core Bluetooth state restoration (peripheral role) -->
+        <string>bluetooth-peripheral</string>
+        <!-- BGTaskScheduler tasks -->
+        <string>fetch</string>
+        <string>processing</string>
+    </array>
+
+    <!-- ─── Background Task Scheduler identifiers ─── -->
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>xyz.pollinet.example.refresh</string>
+        <string>xyz.pollinet.example.processing</string>
+    </array>
+
+    <!-- ─── Core Bluetooth usage descriptions ─── -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>PolliNet uses Bluetooth to relay Solana transactions through a peer-to-peer mesh network, even when the app is in the background.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>PolliNet advertises as a BLE peripheral so other mesh nodes can connect and relay transactions.</string>
+
+    <!-- ─── Local network (optional — if Wi-Fi RPC is used) ─── -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>PolliNet may contact a local Solana RPC node to submit transactions.</string>
+
+</dict>
+</plist>
