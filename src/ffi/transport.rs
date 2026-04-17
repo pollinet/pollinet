@@ -859,6 +859,35 @@ impl HostBleTransport {
         t_info!("🗑️  Cleared transaction {}", tx_id);
     }
 
+    /// Remove all outbound queue entries belonging to `tx_id`.
+    ///
+    /// Called when a BLE confirmation (success OR failure) is received so the
+    /// originating device stops re-broadcasting a transaction that has already
+    /// been handled by a relay peer.  The `tx_id` is the hex-encoded SHA-256
+    /// hash that is encoded in the first 32 bytes of every bincode-serialized
+    /// `TransactionFragment`.
+    pub fn clear_outbound_for_tx(&self, tx_id: &str) -> usize {
+        let id_bytes = match hex::decode(tx_id) {
+            Ok(b) if b.len() == 32 => b,
+            _ => {
+                t_warn!("⚠️  clear_outbound_for_tx: invalid tx_id '{}'", tx_id);
+                return 0;
+            }
+        };
+        let mut queue = self.outbound_queue.lock();
+        let before = queue.len();
+        queue.retain(|entry| entry.len() < 32 || &entry[..32] != id_bytes.as_slice());
+        let removed = before - queue.len();
+        if removed > 0 {
+            t_info!(
+                "🗑️  Removed {} outbound fragment(s) for confirmed tx {}",
+                removed,
+                &tx_id[..8.min(tx_id.len())]
+            );
+        }
+        removed
+    }
+
     /// Clear all reassembly buffers and completed transactions
     /// Note: This does NOT clear nonce data
     pub fn clear_all_reassembly_buffers(&self) {

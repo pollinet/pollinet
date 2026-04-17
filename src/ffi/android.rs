@@ -338,6 +338,36 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearTransaction(
     create_result_string(&mut env, result)
 }
 
+/// Remove all outbound queue fragments that belong to `tx_id`.
+/// Must be called when a BLE confirmation arrives (success or failure) so the
+/// originating device stops re-broadcasting a transaction already handled by a
+/// relay peer.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearOutboundTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id: JString,
+) -> jstring {
+    let result = (|| {
+        let transport = get_transport(handle)?;
+        let tx_id_str: String = env
+            .get_string(&tx_id)
+            .map_err(|e| format!("Failed to read tx_id: {}", e))?
+            .into();
+
+        let removed = transport.clear_outbound_for_tx(&tx_id_str);
+
+        #[derive(serde::Serialize)]
+        struct Out { removed: usize }
+        let response: FfiResult<Out> = FfiResult::success(Out { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
 // =============================================================================
 // Transaction builders (M4)
 // =============================================================================
