@@ -112,6 +112,20 @@ class PolliNetSDK private constructor(
         }
     }
 
+    /**
+     * Remove all outbound queue fragments for a transaction that has been confirmed
+     * (success or failure) via BLE.  Stops the originating device from continuing
+     * to re-broadcast a transaction that a relay peer has already handled.
+     */
+    suspend fun clearOutboundTransaction(txId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.clearOutboundTransaction(handle, txId)
+            parseResult<Unit>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // =========================================================================
     // Transaction builders
     // =========================================================================

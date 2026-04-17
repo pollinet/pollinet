@@ -1335,14 +1335,14 @@ class BleService : Service() {
         try {
             appendLog("📨 ===== PROCESSING RECEIVED CONFIRMATION =====")
             appendLog("📨 Confirmation size: ${data.size} bytes")
-            
+
             // Deserialize confirmation from JSON
             val confirmationStr = String(data, Charsets.UTF_8)
             val confirmation = json.decodeFromString<Confirmation>(confirmationStr)
-            
+
             appendLog("✅ Confirmation deserialized for tx: ${confirmation.txId.take(8)}...")
             appendLog("   Relay count: ${confirmation.relayCount}")
-            
+
             when (confirmation.status) {
                 is ConfirmationStatus.Success -> {
                     val sig = (confirmation.status as ConfirmationStatus.Success).signature
@@ -1355,11 +1355,42 @@ class BleService : Service() {
                     appendLog("   📝 Transaction ${confirmation.txId.take(8)}... submission failed")
                 }
             }
-            
+
+            // --- Queue cleanup ---
+            // Remove this transaction from the outbound queue regardless of success/failure.
+            // A confirmation means a relay peer has already handled it; there is no point
+            // continuing to broadcast the same fragments to new peers.
+            sdk?.clearOutboundTransaction(confirmation.txId)?.onSuccess {
+                appendLog("🗑️ Cleared outbound queue for confirmed tx ${confirmation.txId.take(8)}…")
+            }?.onFailure { e ->
+                appendLog("⚠️ clearOutboundTransaction failed: ${e.message}")
+            }
+
+            // If this confirmation is for the transaction we are currently broadcasting,
+            // cancel the sending loop immediately — no need to wait out the 12-second window.
+            val pending = pendingTransactionBytes
+            if (pending != null) {
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                val pendingHash = digest.digest(pending)
+                    .joinToString("") { "%02x".format(it) }
+                if (pendingHash == confirmation.txId) {
+                    appendLog("✅ Confirmation is for our pending tx — cancelling send loop early")
+                    sendingJob?.cancel()
+                    pendingTransactionBytes = null
+                    fragmentsQueuedWithMtu = 0
+                    // Brief pause so the peer can finish receiving any in-flight fragment,
+                    // then disconnect to free up the mesh for other peers.
+                    mainHandler.postDelayed({
+                        if (_connectionState.value == ConnectionState.CONNECTED) {
+                            appendLog("🔌 Confirmed — disconnecting from relay peer")
+                            closeGattConnection()
+                        }
+                    }, 300)
+                }
+            }
+
             // Relay confirmation back through the mesh if hop count hasn't exceeded max
-            // In a full mesh, we'd check if this confirmation is for us (we're the origin)
-            // For now, we always relay if hop count allows (mesh will eventually reach origin)
-            val maxHops = 5 // Default max hops
+            val maxHops = 5
             if (confirmation.relayCount < maxHops) {
                 appendLog("🔄 Relaying confirmation (hops: ${confirmation.relayCount}/$maxHops)")
                 sdk?.relayConfirmation(confirmation)?.onSuccess {
@@ -1372,9 +1403,9 @@ class BleService : Service() {
                 appendLog("⚠️ Confirmation exceeded max hops ($maxHops) - dropping")
                 appendLog("   This confirmation has been relayed through the mesh and reached TTL")
             }
-            
+
             appendLog("✅ Confirmation processed")
-            
+
         } catch (e: Exception) {
             appendLog("❌ Failed to process confirmation: ${e.message}")
             android.util.Log.e("PolliNet.BLE", "Failed to process confirmation", e)

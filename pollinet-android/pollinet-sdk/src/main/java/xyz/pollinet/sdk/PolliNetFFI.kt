@@ -67,6 +67,12 @@ object PolliNetFFI {
      */
     external fun clearTransaction(handle: Long, txId: String): String
 
+    /**
+     * Remove all outbound queue fragments for a confirmed transaction.
+     * Call on any BLE confirmation (success or failure) to stop re-broadcasting.
+     */
+    external fun clearOutboundTransaction(handle: Long, txId: String): String
+
     // =========================================================================
     // Transaction builders
     // =========================================================================
