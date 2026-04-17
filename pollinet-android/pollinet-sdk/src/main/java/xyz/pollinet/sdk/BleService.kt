@@ -2404,9 +2404,12 @@ class BleService : Service() {
                 if (pendingTransactionBytes != null) {
                     appendLog("📭 Queue empty - waiting for notification delivery confirmation...")
                     appendLog("   Keeping pending transaction for potential retry if needed")
-                    // Don't clear immediately - wait for connection stability
-                    // Will be cleared on disconnect or after confirmed delivery
-                    delay(2000) // Wait 2s to ensure all notifications delivered
+                    // Don't clear immediately - stay connected so the relay peer can
+                    // send a BLE confirmation notification back after RPC submission.
+                    // RPC round-trip + BLE notification delivery can take 3–10 s;
+                    // 12 s gives a comfortable window without blocking the dancing mesh
+                    // for too long.
+                    delay(12_000)
                     
                     // Check if still connected and no errors
                     if (_connectionState.value == ConnectionState.CONNECTED) {

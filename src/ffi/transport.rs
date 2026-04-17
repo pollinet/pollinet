@@ -714,6 +714,29 @@ impl HostBleTransport {
         // Queue each fragment as compact binary bytes (bincode)
         // We serialize the mesh TransactionFragment which is much more compact
         let mut queue = self.outbound_queue.lock();
+
+        // Remove any existing fragments for this transaction before enqueuing new ones.
+        // This handles MTU re-fragmentation: when the MTU increases mid-connection the
+        // Kotlin layer calls queue_transaction() again with a larger max_payload. Without
+        // this drain, the old (small) fragments remain in the queue alongside the new
+        // (larger) ones, causing the peer to receive two complete copies of the same
+        // transaction. The first 32 bytes of every bincode-serialized TransactionFragment
+        // are always the fixed-size transaction_id array, so we can compare without a
+        // full deserialization pass.
+        if let Some(first) = mesh_fragments.first() {
+            let tx_id = first.transaction_id;
+            let before = queue.len();
+            queue.retain(|entry| entry.len() < 32 || entry[..32] != tx_id);
+            let dropped = before - queue.len();
+            if dropped > 0 {
+                t_info!(
+                    "🔄 Re-fragmentation: removed {} stale outbound fragment(s) for tx {} before re-queuing",
+                    dropped,
+                    hex::encode(tx_id)
+                );
+            }
+        }
+
         let queue_size_before = queue.len();
 
         for fragment in &mesh_fragments {
