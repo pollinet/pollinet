@@ -6,6 +6,7 @@ import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import com.solana.mobilewalletadapter.clientlib.MobileWalletAdapter
 import com.solana.mobilewalletadapter.clientlib.TransactionResult
 import com.solana.mobilewalletadapter.clientlib.ConnectionIdentity
+import com.solana.mobilewalletadapter.clientlib.Solana
 import com.solana.publickey.SolanaPublicKey
 
 /**
@@ -42,6 +43,7 @@ class PolliNetMwaClient private constructor(
                 identityName = identityName
             )
         )
+        walletAdapter.blockchain = Solana.Devnet
     }
     
     companion object {
@@ -312,6 +314,81 @@ class PolliNetMwaClient private constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Sign raw message bytes with the wallet's Ed25519 key.
+     *
+     * Used to sign Pollinet intent bytes (169 bytes) before submitting to pollicore.
+     * The wallet signs the bytes directly; the returned value is the 64-byte signature.
+     *
+     * @param sender ActivityResultSender for launching the wallet.
+     * @param messageBytes Raw bytes to sign.
+     * @return 64-byte Ed25519 signature.
+     */
+    suspend fun signMessage(
+        sender: ActivityResultSender,
+        messageBytes: ByteArray,
+    ): ByteArray {
+        if (!isAuthorized()) {
+            throw MwaException("Not authorized. Call authorize() first.")
+        }
+
+        val pubkeyBase58 = authorizedPublicKey ?: throw MwaException("No authorized public key")
+        // Encode pubkey as bytes for the addresses parameter
+        val pubkeyBytes = bs58Decode(pubkeyBase58)
+
+        val result = walletAdapter.transact(sender) {
+            signMessages(
+                messages = arrayOf(messageBytes),
+                addresses = arrayOf(pubkeyBytes),
+            )
+        }
+
+        return when (result) {
+            is TransactionResult.Success -> {
+                val payload = result.payload
+                val signedPayloads = try {
+                    val field = payload.javaClass.getDeclaredField("signedPayloads")
+                    field.isAccessible = true
+                    field.get(payload) as? Array<ByteArray>
+                } catch (e: Exception) {
+                    android.util.Log.e("PolliNetMwaClient", "signMessage: failed to extract: ${e.message}")
+                    null
+                }
+
+                val signed = signedPayloads?.firstOrNull()
+                    ?: throw MwaException("Wallet returned no signed message payload")
+
+                // Wallets return the 64-byte signature (may be prefixed in some implementations)
+                if (signed.size >= 64) signed.take(64).toByteArray()
+                else throw MwaException("Signed payload is too short: ${signed.size} bytes")
+            }
+            is TransactionResult.NoWalletFound ->
+                throw MwaException("No MWA-compatible wallet found on device")
+            is TransactionResult.Failure ->
+                throw MwaException("Message signing failed: ${result.e.message}", result.e)
+        }
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private fun bs58Decode(input: String): ByteArray {
+        val alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        val bytes = mutableListOf<Int>(0)
+        for (char in input) {
+            val v = alphabet.indexOf(char)
+            if (v < 0) throw MwaException("Invalid base58 character: $char")
+            var carry = v
+            for (i in bytes.indices) {
+                carry += bytes[i] * 58
+                bytes[i] = carry and 0xff
+                carry = carry shr 8
+            }
+            while (carry > 0) { bytes.add(carry and 0xff); carry = carry shr 8 }
+        }
+        for (char in input) { if (char != '1') break; bytes.add(0) }
+        return bytes.reversed().map { it.toByte() }.toByteArray()
     }
 
     /**

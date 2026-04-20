@@ -397,6 +397,9 @@ class BleService : Service() {
     // SDK instance (exposed for testing)
     var sdk: PolliNetSDK? = null
         private set
+
+    // RPC URL stored at init time for direct Solana submissions
+    private var solanaRpcUrl: String = "https://api.devnet.solana.com"
     
     // State
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -1085,10 +1088,7 @@ class BleService : Service() {
             
             try {
                 appendLog("🌐 Submitting transaction to Solana RPC...")
-                val submitResult = sdkInstance.submitOfflineTransaction(
-                    transactionBase64 = receivedTx.transactionBase64,
-                    verifyNonce = false
-                )
+                val submitResult = submitToSolanaRpc(receivedTx.transactionBase64)
                 
                 submitResult.onSuccess { signature ->
                     successCount++
@@ -1269,10 +1269,7 @@ class BleService : Service() {
             val txBytes = android.util.Base64.decode(retryItem.txBytes, android.util.Base64.NO_WRAP)
 
             try {
-                val submitResult = sdkInstance.submitOfflineTransaction(
-                    transactionBase64 = retryItem.txBytes,
-                    verifyNonce = false
-                )
+                val submitResult = submitToSolanaRpc(retryItem.txBytes)
                 
                 // Calculate tx hash once — used for both success and failure confirmations
                 val txHash = try {
@@ -1582,17 +1579,6 @@ class BleService : Service() {
                     workChannel.trySend(WorkEvent.ReceivedReady)
                     workChannel.trySend(WorkEvent.RetryReady)
 
-                    // Quietly refresh offline nonce bundle in the background
-                    serviceScope.launch {
-                        try {
-                            val refreshed = sdk?.refreshOfflineBundle()?.getOrNull() ?: 0
-                            if (refreshed > 0) {
-                                appendLog("♻️ Refreshed $refreshed cached nonces after network recovery")
-                            }
-                        } catch (_: Exception) {
-                            // Best-effort, ignore failures
-                        }
-                    }
                 }
                 
                 override fun onLost(network: Network) {
@@ -1610,17 +1596,6 @@ class BleService : Service() {
                         appendLog("📡 Internet validated - triggering work")
                         workChannel.trySend(WorkEvent.ReceivedReady)
                         
-                        // Also attempt a quiet nonce bundle refresh here (in case onAvailable was missed)
-                        serviceScope.launch {
-                            try {
-                                val refreshed = sdk?.refreshOfflineBundle()?.getOrNull() ?: 0
-                                if (refreshed > 0) {
-                                    appendLog("♻️ Refreshed $refreshed cached nonces after validation")
-                                }
-                            } catch (_: Exception) {
-                                // Ignore, best-effort
-                            }
-                        }
                     }
                 }
             }
@@ -1685,10 +1660,7 @@ class BleService : Service() {
                             appendLog("🌐 Internet available, submitting transaction: ${receivedTx.txId}")
                             
                             try {
-                                val submitResult = sdkInstance.submitOfflineTransaction(
-                                    transactionBase64 = receivedTx.transactionBase64,
-                                    verifyNonce = false  // Don't verify for received transactions
-                                )
+                                val submitResult = submitToSolanaRpc(receivedTx.transactionBase64)
                                 
                                 submitResult.onSuccess { signature ->
                                     appendLog("✅ Auto-submitted transaction: ${receivedTx.txId}")
@@ -1726,9 +1698,9 @@ class BleService : Service() {
 
                                 // Queue for BLE transmission to other peers (re-fragment)
                                 try {
-                                    val fragmentResult = sdkInstance.fragmentTransaction(txBytes)
+                                    val fragmentResult = sdkInstance.fragment(txBytes)
                                     fragmentResult.onSuccess { fragmentDataList ->
-                                        appendLog("📤 Queued ${fragmentDataList.size} fragments for mesh relay")
+                                        appendLog("📤 Queued ${fragmentDataList.fragments.size} fragments for mesh relay")
                                         ensureSendingLoopStarted()
                                     }.onFailure { e ->
                                         appendLog("⚠️ Failed to queue for relay: ${e.message}")
@@ -1801,6 +1773,29 @@ class BleService : Service() {
      * Check if error indicates a stale transaction that should not be retried
      * Detects nonce errors and other permanent failures
      */
+    /** Submit a base64-encoded Solana transaction to the configured RPC and return the signature. */
+    private suspend fun submitToSolanaRpc(transactionBase64: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = """{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["$transactionBase64",{"encoding":"base64","preflightCommitment":"processed"}]}"""
+            val conn = java.net.URL(solanaRpcUrl).openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 30_000
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val response = conn.inputStream.bufferedReader().readText()
+            // Parse "result":"<signature>" from JSON response
+            val sigMatch = Regex(""""result"\s*:\s*"([A-Za-z0-9]+)"""").find(response)
+            val errMatch = Regex(""""message"\s*:\s*"([^"]+)"""").find(response)
+            if (sigMatch != null) {
+                sigMatch.groupValues[1]
+            } else {
+                throw RuntimeException(errMatch?.groupValues?.get(1) ?: "RPC error: $response")
+            }
+        }
+    }
+
     private fun isStaleTransactionError(errorMessage: String?): Boolean {
         if (errorMessage == null) return false
         
@@ -2053,6 +2048,7 @@ class BleService : Service() {
         
         return PolliNetSDK.initialize(config).map {
             sdk = it
+            config.rpcUrl?.let { url -> solanaRpcUrl = url }
             SdkHolder.set(it)
             appendLog("✅ SDK initialized successfully")
             

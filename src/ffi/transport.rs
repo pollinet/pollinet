@@ -8,7 +8,6 @@ use super::types::{Fragment, FragmentReassemblyInfo, MetricsSnapshot};
 use crate::ble::mesh::TransactionFragment;
 use crate::ble::MeshHealthMonitor;
 use crate::storage::SecureStorage;
-use crate::transaction::TransactionService;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -119,9 +118,6 @@ pub struct HostBleTransport {
     /// Metrics
     metrics: Arc<Mutex<TransportMetrics>>,
 
-    /// Transaction service for fragmentation and building
-    transaction_service: Arc<TransactionService>,
-
     /// Secure storage for nonce bundles (optional)
     secure_storage: Option<Arc<SecureStorage>>,
 
@@ -138,14 +134,9 @@ pub struct HostBleTransport {
     /// Used to attribute uptime, relay and submission rewards to the correct wallet.
     /// None until the host app calls `set_wallet_address` or provides it in `SdkConfig`.
     pub wallet_address: Mutex<Option<String>>,
-}
 
-impl HostBleTransport {
-    /// Get reference to transaction service
-    pub fn transaction_service(&self) -> &TransactionService {
-        t_debug!("ℹ️ HostBleTransport::transaction_service() called");
-        &self.transaction_service
-    }
+    /// Pollicore base URL resolved at init time from config or `POLLICORE_URL` env var.
+    pub pollicore_url: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -162,12 +153,6 @@ impl HostBleTransport {
     pub async fn new() -> Result<Self, String> {
         t_info!("🚀 HostBleTransport::new() - creating transport without RPC client");
 
-        let transaction_service = TransactionService::new()
-            .await
-            .map_err(|e| format!("Failed to create transaction service: {}", e))?;
-
-        t_info!("✅ TransactionService created (no RPC)");
-
         let sdk = crate::PolliNetSDK::new()
             .await
             .map_err(|e| format!("Failed to create SDK: {}", e))?;
@@ -182,12 +167,12 @@ impl HostBleTransport {
             received_tx_hash_set: Arc::new(Mutex::new(HashSet::new())),
             submitted_tx_hashes: Arc::new(Mutex::new(HashMap::new())),
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
-            transaction_service: Arc::new(transaction_service),
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
             sdk: Arc::new(sdk),
             queue_storage_dir: Mutex::new(None),
             wallet_address: Mutex::new(None),
+            pollicore_url: Mutex::new(None),
         };
 
         t_info!("✅ HostBleTransport::new() initialized");
@@ -200,12 +185,6 @@ impl HostBleTransport {
             "🚀 HostBleTransport::new_with_rpc() - creating transport with RPC: {}",
             rpc_url
         );
-
-        let transaction_service = TransactionService::new_with_rpc(rpc_url)
-            .await
-            .map_err(|e| format!("Failed to create transaction service: {}", e))?;
-
-        t_info!("✅ TransactionService created with RPC");
 
         let sdk = crate::PolliNetSDK::new_with_rpc(rpc_url)
             .await
@@ -221,12 +200,12 @@ impl HostBleTransport {
             received_tx_hash_set: Arc::new(Mutex::new(HashSet::new())),
             submitted_tx_hashes: Arc::new(Mutex::new(HashMap::new())),
             metrics: Arc::new(Mutex::new(TransportMetrics::default())),
-            transaction_service: Arc::new(transaction_service),
             secure_storage: None,
             health_monitor: Arc::new(MeshHealthMonitor::default()),
             sdk: Arc::new(sdk),
             queue_storage_dir: Mutex::new(None),
             wallet_address: Mutex::new(None),
+            pollicore_url: Mutex::new(None),
         };
 
         t_info!("✅ HostBleTransport::new_with_rpc() initialized");
@@ -326,6 +305,16 @@ impl HostBleTransport {
     /// Return the wallet address associated with this node session, if any.
     pub fn get_wallet_address(&self) -> Option<String> {
         self.wallet_address.lock().clone()
+    }
+
+    /// Set the pollicore base URL.
+    pub fn set_pollicore_url(&self, url: Option<String>) {
+        *self.pollicore_url.lock() = url;
+    }
+
+    /// Return the pollicore base URL, if configured.
+    pub fn get_pollicore_url(&self) -> Option<String> {
+        self.pollicore_url.lock().clone()
     }
 
     /// Get secure storage if available

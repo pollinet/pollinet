@@ -5,6 +5,8 @@
 
 use crate::ble::mesh::{TransactionFragment, MAX_FRAGMENT_DATA};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::time::Instant;
 
 /// Fragment a signed Solana transaction for BLE transmission
 ///
@@ -278,6 +280,97 @@ impl FragmentationStats {
         tracing::info!("  Avg fragment size: {} bytes", self.avg_fragment_size);
         tracing::info!("  Total overhead: {} bytes", self.total_overhead);
         tracing::info!("  Efficiency: {:.1}%", self.efficiency);
+    }
+}
+
+// ── Reassembly cache ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct FragmentSet {
+    pub transaction_id: [u8; 32],
+    pub total_fragments: u16,
+    pub received_fragments: Vec<Option<Vec<u8>>>,
+    pub first_received: Instant,
+    pub last_updated: Instant,
+}
+
+impl FragmentSet {
+    pub fn new(transaction_id: [u8; 32], total_fragments: u16) -> Self {
+        let now = Instant::now();
+        Self {
+            transaction_id,
+            total_fragments,
+            received_fragments: vec![None; total_fragments as usize],
+            first_received: now,
+            last_updated: now,
+        }
+    }
+
+    pub fn received_count(&self) -> usize {
+        self.received_fragments.iter().filter(|f| f.is_some()).count()
+    }
+
+    pub fn is_stale(&self, timeout_secs: u64) -> bool {
+        self.first_received.elapsed().as_secs() > timeout_secs
+    }
+
+    pub fn age_seconds(&self) -> u64 {
+        self.first_received.elapsed().as_secs()
+    }
+}
+
+pub struct TransactionCache {
+    reassembly_buffers: HashMap<String, FragmentSet>,
+}
+
+impl Default for TransactionCache {
+    fn default() -> Self { Self::new() }
+}
+
+impl TransactionCache {
+    pub fn new() -> Self {
+        Self { reassembly_buffers: HashMap::new() }
+    }
+
+    pub fn add_ble_fragment(&mut self, fragment: TransactionFragment) -> Result<(), String> {
+        let tx_id_hex = hex::encode(fragment.transaction_id);
+        let set = self.reassembly_buffers
+            .entry(tx_id_hex.clone())
+            .or_insert_with(|| FragmentSet::new(fragment.transaction_id, fragment.total_fragments));
+
+        if set.transaction_id != fragment.transaction_id {
+            return Err(format!("Transaction ID mismatch for {}", tx_id_hex));
+        }
+        if set.total_fragments != fragment.total_fragments {
+            return Err(format!("Total fragments mismatch for {}", tx_id_hex));
+        }
+        if fragment.fragment_index >= fragment.total_fragments {
+            return Err(format!("Invalid fragment index {} (total: {})", fragment.fragment_index, fragment.total_fragments));
+        }
+
+        set.received_fragments[fragment.fragment_index as usize] = Some(fragment.data);
+        set.last_updated = Instant::now();
+        tracing::debug!(
+            "Added fragment {}/{} for tx {} ({}/{})",
+            fragment.fragment_index + 1, fragment.total_fragments,
+            &tx_id_hex[..8], set.received_count(), set.total_fragments,
+        );
+        Ok(())
+    }
+
+    pub fn cleanup_stale_fragments(&mut self, timeout_secs: u64) -> usize {
+        let stale: Vec<String> = self.reassembly_buffers.iter()
+            .filter(|(_, s)| s.is_stale(timeout_secs))
+            .map(|(k, _)| k.clone())
+            .collect();
+        let count = stale.len();
+        for key in stale {
+            if let Some(s) = self.reassembly_buffers.remove(&key) {
+                tracing::info!("Cleaned stale tx {} (age: {}s, {}/{})",
+                    &key[..8], s.age_seconds(), s.received_count(), s.total_fragments);
+            }
+        }
+        count
     }
 }
 

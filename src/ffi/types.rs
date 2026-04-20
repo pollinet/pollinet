@@ -41,221 +41,6 @@ impl<T> FfiResult<T> {
 }
 
 // ============================================================================
-// Transaction builder requests
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateUnsignedTransactionRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    pub sender: String,
-    pub recipient: String,
-    #[serde(rename = "feePayer")]
-    pub fee_payer: String,
-    pub amount: u64,
-    #[serde(rename = "nonceAccount")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_account: Option<String>,
-    #[serde(rename = "nonceData")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_data: Option<CachedNonceData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateUnsignedSplTransactionRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "senderWallet")]
-    pub sender_wallet: String,
-    #[serde(rename = "recipientWallet")]
-    pub recipient_wallet: String,
-    #[serde(rename = "feePayer")]
-    pub fee_payer: String,
-    #[serde(rename = "mintAddress")]
-    pub mint_address: String,
-    pub amount: u64,
-    #[serde(rename = "nonceAccount")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_account: Option<String>,
-    #[serde(rename = "nonceData")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_data: Option<CachedNonceData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CastUnsignedVoteRequest {
-    pub version: u32,
-    pub voter: String,
-    pub proposal_id: String,
-    pub vote_account: String,
-    pub choice: u8,
-    pub fee_payer: String,
-    #[serde(rename = "nonceAccount")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_account: Option<String>,
-    #[serde(rename = "nonceData")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_data: Option<CachedNonceData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrepareOfflineBundleRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    pub count: usize,
-    #[serde(rename = "bundleFile")]
-    pub bundle_file: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateOfflineTransactionRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    pub recipient: String,
-    pub amount: u64,
-    // NOTE: Nonce is picked automatically from stored bundle
-    // Sender keypair is passed as a separate JByteArray parameter, not in JSON
-}
-
-// MWA-compatible: Create UNSIGNED transaction (no keypairs, only pubkeys)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateUnsignedOfflineTransactionRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "senderPubkey")]
-    pub sender_pubkey: String,
-    #[serde(rename = "nonceAuthorityPubkey")]
-    pub nonce_authority_pubkey: String,
-    pub recipient: String,
-    pub amount: u64,
-    #[serde(rename = "nonceData")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_data: Option<CachedNonceData>,
-    // NOTE: If nonce_data is not provided, nonce is picked automatically from stored bundle
-}
-
-/// Request to create an UNSIGNED offline SPL token transfer for MWA signing
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateUnsignedOfflineSplTransactionRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "senderWallet")]
-    pub sender_wallet: String,
-    #[serde(rename = "recipientWallet")]
-    pub recipient_wallet: String,
-    #[serde(rename = "mintAddress")]
-    pub mint_address: String,
-    pub amount: u64,
-    #[serde(rename = "feePayer")]
-    pub fee_payer: String,
-    #[serde(rename = "nonceData")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce_data: Option<CachedNonceData>,
-    // NOTE: If nonce_data is not provided, nonce is picked automatically from stored bundle
-}
-
-// Get message to sign for MWA
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetMessageToSignRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "unsignedTransactionBase64")]
-    pub unsigned_transaction_base64: String,
-}
-
-// Get required signers for a transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetRequiredSignersRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "unsignedTransactionBase64")]
-    pub unsigned_transaction_base64: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubmitOfflineTransactionRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "transactionBase64")]
-    pub transaction_base64: String,
-    #[serde(rename = "verifyNonce", default = "default_verify_nonce")]
-    pub verify_nonce: bool,
-}
-
-fn default_verify_nonce() -> bool {
-    true
-}
-
-// ============================================================================
-// Nonce and offline bundle responses
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CachedNonceData {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "nonceAccount")]
-    pub nonce_account: String,
-    pub authority: String,
-    pub blockhash: String,
-    #[serde(rename = "lamportsPerSignature")]
-    pub lamports_per_signature: u64,
-    #[serde(rename = "cachedAt")]
-    pub cached_at: u64,
-    pub used: bool,
-}
-
-impl CachedNonceData {
-    /// Convert from FFI type to transaction module's type
-    pub fn to_transaction_type(&self) -> crate::transaction::CachedNonceData {
-        crate::transaction::CachedNonceData {
-            nonce_account: self.nonce_account.clone(),
-            authority: self.authority.clone(),
-            blockhash: self.blockhash.clone(),
-            lamports_per_signature: self.lamports_per_signature,
-            cached_at: self.cached_at,
-            used: self.used,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OfflineTransactionBundle {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "nonceCaches")]
-    pub nonce_caches: Vec<CachedNonceData>,
-    #[serde(rename = "maxTransactions")]
-    pub max_transactions: u32,
-    #[serde(rename = "createdAt")]
-    pub created_at: u64,
-}
-
-impl OfflineTransactionBundle {
-    /// Convert from transaction module's bundle type to FFI bundle type
-    pub fn from_transaction_bundle(bundle: &crate::transaction::OfflineTransactionBundle) -> Self {
-        Self {
-            version: 1,
-            nonce_caches: bundle
-                .nonce_caches
-                .iter()
-                .map(|nc| CachedNonceData {
-                    version: 1,
-                    nonce_account: nc.nonce_account.clone(),
-                    authority: nc.authority.clone(),
-                    blockhash: nc.blockhash.clone(),
-                    lamports_per_signature: nc.lamports_per_signature,
-                    cached_at: nc.cached_at,
-                    used: nc.used,
-                })
-                .collect(),
-            max_transactions: bundle.max_transactions as u32,
-            created_at: bundle.created_at,
-        }
-    }
-}
-
-// ============================================================================
 // Fragmentation types
 // ============================================================================
 
@@ -356,42 +141,14 @@ pub struct SdkConfig {
     pub wallet_address: Option<String>,
 }
 
+// SubmitIntentRequest / SubmitIntentResponse live in crate::submission — see src/submission/mod.rs
+
 pub(crate) fn default_version() -> u32 {
     1
 }
 
 fn default_enable_logging() -> bool {
     true
-}
-
-// ============================================================================
-// Nonce creation for MWA
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateUnsignedNonceTransactionsRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    pub count: usize,
-    #[serde(rename = "payerPubkey")]
-    pub payer_pubkey: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UnsignedNonceTransaction {
-    /// Transaction already partially-signed by the nonce accounts; only payer signature needed
-    #[serde(rename = "unsignedTransactionBase64")]
-    pub unsigned_transaction_base64: String,
-    #[serde(rename = "noncePubkey")]
-    pub nonce_pubkey: Vec<String>, // Multiple pubkeys for batched transactions
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheNonceAccountsRequest {
-    #[serde(default = "default_version")]
-    pub version: u32,
-    #[serde(rename = "nonceAccounts")]
-    pub nonce_accounts: Vec<String>,
 }
 
 // ============================================================================
@@ -553,4 +310,96 @@ pub struct SuccessResponse {
 pub struct QueueSizeResponse {
     #[serde(rename = "queueSize")]
     pub queue_size: usize,
+}
+
+// =============================================================================
+// Intent protocol types
+// =============================================================================
+
+/// One token approval entry inside [CreateApproveTransactionRequest].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenApprovalRequest {
+    pub mint_address: String,
+    pub amount: u64,
+    pub decimals: u8,
+    /// Owner's token account for this mint.
+    pub token_account: String,
+    /// "spl-token" (default) or "token-2022".
+    #[serde(default = "default_spl_token")]
+    pub token_program: String,
+}
+
+fn default_spl_token() -> String {
+    "spl-token".to_string()
+}
+
+/// Builds a batch `approve_checked` transaction (one instruction per token).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateApproveTransactionRequest {
+    /// Wallet that owns the token accounts and will sign the transaction.
+    pub owner_wallet: String,
+    /// Fee payer (may equal owner_wallet).
+    pub fee_payer: String,
+    /// Recent blockhash (base58).
+    pub recent_blockhash: String,
+    /// One entry per token account to approve.
+    pub tokens: Vec<TokenApprovalRequest>,
+}
+
+/// Response for [CreateApproveTransactionRequest]: base64-encoded unsigned transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApproveTransactionResponse {
+    /// Base64-encoded unsigned transaction containing all approve instructions.
+    pub transaction: String,
+    /// Executor PDA that was granted delegate authority.
+    pub executor_pda: String,
+}
+
+/// Builds the canonical 169-byte borsh Intent and returns it as base64.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateIntentBytesRequest {
+    pub from: String,
+    pub to: String,
+    pub token_mint: String,
+    pub amount: u64,
+    pub expires_at: i64,
+    pub gas_fee_amount: u64,
+    pub gas_fee_payee: String,
+    /// 16-byte nonce as lowercase hex (32 chars). Random if omitted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce_hex: Option<String>,
+}
+
+/// Response for [CreateIntentBytesRequest].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentBytesResponse {
+    /// Base64-encoded 169-byte intent (ready to sign with Ed25519).
+    pub intent_bytes: String,
+    /// The nonce used (hex, 32 lowercase chars) — store this for deduplication.
+    pub nonce_hex: String,
+}
+
+/// Response for the executor PDA query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutorPdaResponse {
+    pub pda: String,
+    pub bump: u8,
+}
+
+/// Revokes executor PDA delegate authority from a list of token accounts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRevokeTransactionRequest {
+    pub owner_wallet: String,
+    pub fee_payer: String,
+    pub recent_blockhash: String,
+    pub token_accounts: Vec<String>,
+    #[serde(default = "default_spl_token")]
+    pub token_program: String,
+}
+
+/// Response for [CreateRevokeTransactionRequest].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevokeTransactionResponse {
+    /// Base64-encoded unsigned transaction; sign with owner_wallet before submitting.
+    pub transaction: String,
 }

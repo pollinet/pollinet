@@ -68,66 +68,6 @@ object PolliNetFFI {
     external fun clearTransaction(handle: Long, txId: String): String
 
     // =========================================================================
-    // Transaction builders
-    // =========================================================================
-
-    /**
-     * Create an unsigned SOL transfer transaction
-     * @param requestJson JSON-encoded CreateUnsignedTransactionRequest
-     * @return JSON FfiResult with base64-encoded transaction
-     */
-    external fun createUnsignedTransaction(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Create an unsigned SPL token transfer transaction
-     * @param requestJson JSON-encoded CreateUnsignedSplTransactionRequest
-     * @return JSON FfiResult with base64-encoded transaction
-     */
-    external fun createUnsignedSplTransaction(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Create unsigned governance vote transaction for MWA or manual signing.
-     * Uses a nonce account on-chain (online: fetches nonce data via RPC).
-     *
-     * @param handle SDK handle
-     * @param requestJson JSON-encoded CastUnsignedVoteRequest
-     * @return JSON FfiResult with base64-encoded unsigned vote transaction
-     */
-    external fun castUnsignedVote(handle: Long, requestJson: ByteArray): String
-
-    // =========================================================================
-    // Signature helpers
-    // =========================================================================
-
-    /**
-     * Prepare sign payload - Extract message bytes from transaction
-     * @param base64Tx Base64-encoded unsigned transaction
-     * @return Message bytes to sign, or null on error
-     */
-    external fun prepareSignPayload(handle: Long, base64Tx: String): ByteArray?
-
-    /**
-     * Apply signature to transaction
-     * @param base64Tx Base64-encoded transaction
-     * @param signerPubkey Signer's public key
-     * @param signatureBytes Signature bytes (64 bytes)
-     * @return JSON FfiResult with updated base64 transaction
-     */
-    external fun applySignature(
-        handle: Long,
-        base64Tx: String,
-        signerPubkey: String,
-        signatureBytes: ByteArray
-    ): String
-
-    /**
-     * Verify and serialize transaction for submission/fragmentation
-     * @param base64Tx Base64-encoded signed transaction
-     * @return JSON FfiResult with wire-format base64 transaction
-     */
-    external fun verifyAndSerialize(handle: Long, base64Tx: String): String
-
-    // =========================================================================
     // Fragmentation API
     // =========================================================================
 
@@ -140,137 +80,9 @@ object PolliNetFFI {
     external fun fragment(handle: Long, txBytes: ByteArray, maxPayload: Long = 0): String
 
     // =========================================================================
-    // Offline Bundle Management (Core PolliNet Features)
-    // =========================================================================
-
-    /**
-     * Prepare offline bundle for creating transactions without internet
-     * This is a CORE PolliNet feature for offline/mesh transaction creation
-     * @param requestJson JSON-encoded PrepareOfflineBundleRequest
-     * @param senderKeypairBytes Raw 64-byte sender keypair (never serialized into JSON)
-     * @return JSON FfiResult with OfflineTransactionBundle JSON string
-     */
-    external fun prepareOfflineBundle(handle: Long, requestJson: ByteArray, senderKeypairBytes: ByteArray): String
-
-    /**
-     * Create transaction completely offline using cached nonce data
-     * NO internet required - core PolliNet offline feature
-     * @param requestJson JSON-encoded CreateOfflineTransactionRequest
-     * @param senderKeypairBytes Raw 64-byte sender keypair (never serialized into JSON)
-     * @return JSON FfiResult with base64-encoded compressed transaction
-     */
-    external fun createOfflineTransaction(handle: Long, requestJson: ByteArray, senderKeypairBytes: ByteArray): String
-
-    /**
-     * Submit offline-created transaction to blockchain
-     * @param requestJson JSON-encoded SubmitOfflineTransactionRequest
-     * @return JSON FfiResult with transaction signature
-     */
-    external fun submitOfflineTransaction(handle: Long, requestJson: ByteArray): String
-
-    // =========================================================================
-    // MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
-    // =========================================================================
-
-    /**
-     * Create UNSIGNED offline transaction for MWA/Seed Vault signing
-     * Takes PUBLIC KEYS only (no private keys) - compatible with Solana Mobile Stack
-     * Returns unsigned transaction that MWA will sign securely
-     * @param requestJson JSON-encoded CreateUnsignedOfflineTransactionRequest
-     * @return JSON FfiResult with base64-encoded unsigned transaction
-     */
-    external fun createUnsignedOfflineTransaction(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing
-     * Uses cached nonce data from the offline bundle (no network required).
-     *
-     * @param handle SDK handle
-     * @param requestJson JSON-encoded CreateUnsignedOfflineSplTransactionRequest
-     * @return JSON FfiResult with base64-encoded unsigned SPL transaction
-     */
-    external fun createUnsignedOfflineSplTransaction(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Get transaction message bytes that need to be signed by MWA
-     * Extracts the raw message from unsigned transaction for secure signing
-     * @param requestJson JSON-encoded GetMessageToSignRequest
-     * @return JSON FfiResult with base64-encoded message bytes
-     */
-    external fun getTransactionMessageToSign(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Get list of public keys that need to sign this transaction
-     * Returns signers in the order required by Solana protocol
-     * @param requestJson JSON-encoded GetRequiredSignersRequest
-     * @return JSON FfiResult with array of public key strings
-     */
-    external fun getRequiredSigners(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Create unsigned nonce account creation transactions for MWA signing
-     * Generates N unsigned transactions that create nonce accounts on-chain
-     * Each transaction includes an ephemeral nonce keypair that must be co-signed
-     * 
-     * Workflow:
-     * 1. Call this to get unsigned transactions + nonce keypairs
-     * 2. Sign transactions with nonce keypairs locally
-     * 3. Send to MWA for payer co-signing
-     * 4. Submit fully signed transactions
-     * 5. Cache nonce data for offline transaction creation
-     * 
-     * @param requestJson JSON-encoded CreateUnsignedNonceTransactionsRequest
-     * @return JSON FfiResult with array of UnsignedNonceTransaction
-     */
-    external fun createUnsignedNonceTransactions(handle: Long, requestJson: ByteArray): String
-
-    /**
-     * Cache nonce account data from on-chain accounts
-     * Fetches nonce data from blockchain and saves to secure storage
-     * Call this after successfully creating nonce accounts via MWA
-     * 
-     * @param requestJson JSON-encoded CacheNonceAccountsRequest
-     * @return JSON FfiResult with cached count
-     */
-    external fun cacheNonceAccounts(handle: Long, requestJson: ByteArray): String
-    
-    /**
-     * Refresh all cached nonce data in the offline bundle
-     * 
-     * Fetches latest on-chain nonce state for all cached nonce accounts and updates
-     * the stored OfflineTransactionBundle in secure storage. Marks all nonces as
-     * available (used = false) after refresh.
-     * 
-     * @param handle SDK handle
-     * @return JSON FfiResult with { refreshedCount: Int }
-     */
-    external fun refreshOfflineBundle(handle: Long): String
-
-    external fun getAvailableNonce(handle: Long): String
-
-    /**
-     * Refresh the blockhash in an unsigned transaction.
-     * 
-     * Use this right before sending an unsigned transaction to MWA for signing
-     * to ensure the blockhash is fresh and won't expire during the signing process.
-     * 
-     * @param handle SDK handle
-     * @param unsignedTxBase64 Base64-encoded unsigned transaction
-     * @return JSON FfiResult with refreshed transaction (base64-encoded)
-     */
-    external fun refreshBlockhashInUnsignedTransaction(handle: Long, unsignedTxBase64: String): String
-    
-    // =========================================================================
     // BLE Mesh Operations
     // =========================================================================
-    
-    /**
-     * Fragment a signed transaction for BLE transmission
-     * @param transactionBytes Signed transaction bytes
-     * @return JSON FfiResult with array of FragmentData
-     */
-    external fun fragmentTransaction(transactionBytes: ByteArray): String
-    
+
     /**
      * Reconstruct a transaction from fragments
      * @param fragmentsJson JSON array of FragmentData objects
@@ -469,7 +281,6 @@ object PolliNetFFI {
     
     /**
      * Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
-     * Note: This does NOT clear nonce data
      * @param handle SDK handle
      * @return JSON FfiResult<SuccessResponse>
      */
@@ -531,5 +342,56 @@ object PolliNetFFI {
      * @return JSON FfiResult<WalletAddressResponse> — address field is empty if none set
      */
     external fun getWalletAddress(handle: Long): String
+
+    // =========================================================================
+    // Intent protocol — stateless helpers (no SDK handle needed)
+    // =========================================================================
+
+    /**
+     * Returns the executor PDA address for the pollinet-executor Anchor program.
+     * Stateless — no SDK handle required.
+     * @return JSON FfiResult<ExecutorPdaResponse>
+     */
+    external fun getExecutorPda(): String
+
+    /**
+     * Builds a single unsigned transaction with one `approve_checked` instruction per
+     * token entry. The owner_wallet must sign the returned transaction before submission.
+     * @param requestJson JSON-encoded CreateApproveTransactionRequest
+     * @return JSON FfiResult<ApproveTransactionResponse>
+     */
+    external fun createApproveTransaction(requestJson: ByteArray): String
+
+    /**
+     * Serializes an Intent into the canonical 169-byte borsh layout and returns it
+     * as base64. Generates a random nonce unless nonce_hex is supplied.
+     * @param requestJson JSON-encoded CreateIntentBytesRequest
+     * @return JSON FfiResult<IntentBytesResponse>
+     */
+    external fun createIntentBytes(requestJson: ByteArray): String
+
+    /**
+     * Submit a signed intent to pollicore.
+     * The pollicore URL is resolved from SdkConfig.pollicoreUrl or the POLLICORE_URL env var.
+     * No JWT — authenticated by the Ed25519 wallet signature in the request body.
+     * @param handle  SDK handle from [init]
+     * @param requestJson JSON-encoded SubmitIntentRequest
+     * @return JSON FfiResult<SubmitIntentResponse>
+     */
+    external fun submitIntent(handle: Long, requestJson: ByteArray): String
+
+    /**
+     * Builds a single unsigned transaction with one `revoke` instruction per token account,
+     * clearing the executor PDA's delegate authority.
+     * @param requestJson JSON-encoded CreateRevokeTransactionRequest
+     * @return JSON FfiResult<RevokeTransactionResponse>
+     */
+    external fun createRevokeTransaction(requestJson: ByteArray): String
+
+    /**
+     * Returns the pollicore base URL baked in at compile time from POLLICORE_URL env var.
+     * Returns an empty string if POLLICORE_URL was not set when the native library was built.
+     */
+    external fun getPolliCoreUrl(): String
 }
 

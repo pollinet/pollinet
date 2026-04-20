@@ -120,14 +120,17 @@ val resolvedNdkHome: String? = run {
         ?.absolutePath
 }
 
-// Task to build Rust library using cargo-ndk
+// Task to build Rust library using cargo-ndk.
+// Skipped automatically when:
+//   - SKIP_RUST_BUILD=true is set (composite/incremental builds where .so files are pre-built), OR
+//   - libpollinet.so already exists for all three ABIs (avoids heavy Rust recompile on every build)
+// Run `./gradlew buildRustLib` explicitly to force a rebuild.
 tasks.register<Exec>("buildRustLib") {
     description = "Build Rust library for Android using cargo-ndk"
     group = "build"
 
     workingDir = file("../../")
 
-    // Use absolute path to cargo
     val cargoHome = System.getenv("CARGO_HOME") ?: "${System.getProperty("user.home")}/.cargo"
     val cargoPath = "$cargoHome/bin/cargo"
 
@@ -146,6 +149,18 @@ tasks.register<Exec>("buildRustLib") {
         "--no-default-features",
         "--features", "android"
     )
+
+    // Skip if all pre-built .so files are already in place, or SKIP_RUST_BUILD=true.
+    // This keeps composite/incremental builds fast — run `./gradlew buildRustLib`
+    // explicitly whenever the Rust source changes.
+    onlyIf {
+        val skipEnv = System.getenv("SKIP_RUST_BUILD") == "true"
+        val arm64So   = file("pollinet-sdk/pollinet-sdk/src/main/jniLibs/arm64-v8a/libpollinet.so")
+        val armv7So   = file("pollinet-sdk/pollinet-sdk/src/main/jniLibs/armeabi-v7a/libpollinet.so")
+        val x86_64So  = file("pollinet-sdk/pollinet-sdk/src/main/jniLibs/x86_64/libpollinet.so")
+        val alreadyBuilt = arm64So.exists() && armv7So.exists() && x86_64So.exists()
+        !skipEnv && !alreadyBuilt
+    }
 }
 
 // Make preBuild depend on buildRustLib
