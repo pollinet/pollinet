@@ -207,6 +207,35 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getPolliCoreUrl(
         .into_raw()
 }
 
+/// Derive the Associated Token Account (ATA) address for a given owner wallet and token mint.
+/// Stateless — no SDK handle required.
+/// Returns the base58 ATA address, or an empty string on invalid input.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_deriveAssociatedTokenAccount(
+    mut env: JNIEnv,
+    _class: JClass,
+    owner_j: JString,
+    mint_j: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let owner_str: String = env.get_string(&owner_j).map_err(|e| e.to_string())?.into();
+        let mint_str: String  = env.get_string(&mint_j).map_err(|e| e.to_string())?.into();
+        let owner = Pubkey::from_str(&owner_str).map_err(|e| format!("Invalid owner: {}", e))?;
+        let mint  = Pubkey::from_str(&mint_str).map_err(|e| format!("Invalid mint: {}", e))?;
+        let ata = spl_associated_token_account::get_associated_token_address(&owner, &mint);
+        Ok(ata.to_string())
+    })();
+    let s = match result {
+        Ok(addr) => addr,
+        Err(e) => {
+            error!("❌ deriveAssociatedTokenAccount error: {}", e);
+            String::new()
+        }
+    };
+    env.new_string(s).expect("Failed to create Java string").into_raw()
+}
+
 /// Shutdown the SDK and release resources
 #[cfg(feature = "android")]
 #[no_mangle]

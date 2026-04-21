@@ -2506,29 +2506,27 @@ class BleService : Service() {
                     return
                 }
 
-                // Window expired — proceed to finalise and disconnect
-                if (pendingTransactionBytes != null) {
-                    appendLog("📭 Idle window expired (${elapsed}ms) — confirming delivery and disconnecting")
-                    delay(500) // Small buffer to flush final fragments
-
-                    if (_connectionState.value == ConnectionState.CONNECTED) {
-                        appendLog("✅ All fragments delivered successfully, clearing pending transaction")
+                // Window expired — disconnect regardless of whether we had data to send.
+                // Without this, two devices with empty queues stay connected forever and
+                // starve a third device (C) that is waiting for a turn in the mesh.
+                appendLog("📭 Idle window expired (${elapsed}ms) — disconnecting to rotate mesh")
+                if (_connectionState.value == ConnectionState.CONNECTED) {
+                    if (pendingTransactionBytes != null) {
+                        appendLog("✅ All fragments delivered — clearing pending transaction")
                         pendingTransactionBytes = null
                         fragmentsQueuedWithMtu = 0
-                        queueEmptySinceMs = 0L
-
-                        // Dancing mesh: disconnect and move to next peer
-                        appendLog("🔄 Dancing mesh: Transfer complete - disconnecting to find next peer...")
-                        mainHandler.postDelayed({
-                            if (_connectionState.value == ConnectionState.CONNECTED) {
-                                appendLog("🔌 Dancing mesh: Disconnecting from current peer...")
-                                closeGattConnection()
-                            }
-                        }, 200)
-                    } else {
-                        appendLog("⚠️ Connection lost, keeping transaction for potential retry")
-                        queueEmptySinceMs = 0L
                     }
+                    queueEmptySinceMs = 0L
+
+                    appendLog("🔄 Dancing mesh: Idle timeout — disconnecting to find next peer...")
+                    mainHandler.postDelayed({
+                        if (_connectionState.value == ConnectionState.CONNECTED) {
+                            appendLog("🔌 Dancing mesh: Disconnecting from current peer...")
+                            closeGattConnection()
+                        }
+                    }, 200)
+                } else {
+                    queueEmptySinceMs = 0L
                 }
                 return
             }

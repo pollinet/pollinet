@@ -100,16 +100,43 @@ class SendViewModel : ViewModel() {
             val gasFee = s.gasFeeText.trim().toLongOrNull() ?: 1000L
             val expiresAt = System.currentTimeMillis() / 1000L + (s.expiresInMinutes * 60L)
 
+            step(SendStep.CREATING_INTENT, "Deriving token accounts…")
+
+            // The executor program requires token accounts (not wallet addresses) for both
+            // to_token_account and gateway_fee_account. Derive ATAs deterministically.
+            val recipientTokenAccount = try {
+                sdk.deriveAssociatedTokenAccount(recipient, token.mint).getOrThrow()
+            } catch (e: Exception) {
+                return@launch setError("Failed to derive recipient token account: ${e.message}")
+            }
+
+            // Resolve the gateway's token account for the gas fee.
+            // If gas_fee_amount = 0 and the gateway wallet is unreachable, fall back to
+            // the user's own token account (Anchor skips the transfer when amount == 0).
+            val (resolvedGasFeepayee, resolvedGasFee) = run {
+                val gatewayWallet = sdk.getGatewayWallet().getOrNull()
+                if (gatewayWallet != null) {
+                    val gatewayAta = sdk.deriveAssociatedTokenAccount(gatewayWallet, token.mint).getOrNull()
+                    if (gatewayAta != null) {
+                        gatewayAta to gasFee
+                    } else {
+                        token.pubkey to 0L  // derivation failed, skip fee
+                    }
+                } else {
+                    token.pubkey to 0L  // gateway unreachable (offline), skip fee
+                }
+            }
+
             step(SendStep.CREATING_INTENT, "Building intent…")
             val intentPayload = try {
                 sdk.createIntentBytes(
                     from = from,
-                    to = recipient,
+                    to = recipientTokenAccount,
                     tokenMint = token.mint,
                     amount = rawAmount,
                     expiresAt = expiresAt,
-                    gasFeeAmount = gasFee,
-                    gasFeepayee = from,
+                    gasFeeAmount = resolvedGasFee,
+                    gasFeepayee = resolvedGasFeepayee,
                 ).getOrThrow()
             } catch (e: Exception) {
                 return@launch setError("Failed to build intent: ${e.message}")

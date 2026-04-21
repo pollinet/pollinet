@@ -689,6 +689,46 @@ class PolliNetSDK private constructor(
     // =========================================================================
 
     /**
+     * Fetches the gateway (pollicore) wallet public key.
+     * Use [deriveAssociatedTokenAccount] on this address + the token mint to get the
+     * correct [gasFeepayee] for [createIntentBytes].
+     */
+    suspend fun getGatewayWallet(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val url = pollicoreUrl() + "/sdk/intents/gateway"
+            val body = polliCoreGet(url)
+            val resp = json.decodeFromString<GatewayResponse>(body)
+            Result.success(resp.wallet)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Derives the Associated Token Account (ATA) address for a given wallet and mint.
+     * This is the account that must be used as the `to` field in [createIntentBytes]
+     * — the recipient's wallet address is NOT valid there; their token account is required.
+     *
+     * Stateless and offline-capable; the derivation is deterministic.
+     *
+     * @param ownerWallet Base58 wallet address of the recipient.
+     * @param tokenMint   Base58 mint address of the token.
+     * @return Base58 ATA address.
+     */
+    suspend fun deriveAssociatedTokenAccount(
+        ownerWallet: String,
+        tokenMint: String,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val ata = PolliNetFFI.deriveAssociatedTokenAccount(ownerWallet, tokenMint)
+            if (ata.isEmpty()) Result.failure(Exception("ATA derivation returned empty — check owner/mint are valid base58"))
+            else Result.success(ata)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Returns the executor PDA address for the pollinet-executor Anchor program.
      * Store this address — users must call `approve` on each token account they want
      * to delegate before submitting intents.
@@ -1480,6 +1520,9 @@ internal data class RevokeTransactionResponse(val transaction: String)
 
 @Serializable
 internal data class InitializeRequest(val tx: String, val wallet: String)
+
+@Serializable
+internal data class GatewayResponse(val wallet: String)
 
 @Serializable
 internal data class PolliCoreSubmitIntentResponse(

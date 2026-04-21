@@ -367,11 +367,12 @@ private fun TransferForm(
     OutlinedTextField(
         value = state.recipient,
         onValueChange = onRecipientChange,
-        label = { Text("Recipient Address") },
+        label = { Text("Recipient Wallet Address") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
         enabled = !formLocked,
-        placeholder = { Text("Base58 wallet or token account") },
+        placeholder = { Text("Base58 wallet address") },
+        supportingText = { Text("Token account derived automatically") },
         leadingIcon = { Icon(Icons.Filled.Send, contentDescription = null) },
     )
 

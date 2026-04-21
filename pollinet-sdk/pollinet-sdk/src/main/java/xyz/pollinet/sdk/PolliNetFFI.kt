@@ -393,5 +393,11 @@ object PolliNetFFI {
      * Returns an empty string if POLLICORE_URL was not set when the native library was built.
      */
     external fun getPolliCoreUrl(): String
+
+    /**
+     * Derives the Associated Token Account (ATA) address for the given owner wallet and mint.
+     * Stateless — no SDK handle required. Returns the base58 ATA address, or empty string on error.
+     */
+    external fun deriveAssociatedTokenAccount(ownerBase58: String, mintBase58: String): String
 }
 
