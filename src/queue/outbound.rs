@@ -20,6 +20,9 @@ pub enum Priority {
     Low = 0,
 }
 
+/// Default TTL for origin transactions: 5 minutes
+pub fn default_ttl_secs() -> u64 { 300 }
+
 /// Outbound transaction awaiting BLE transmission
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboundTransaction {
@@ -37,7 +40,26 @@ pub struct OutboundTransaction {
     pub retry_count: u8,
     /// Maximum retries before giving up
     pub max_retries: u8,
+    /// Fan-out relevance counter. Starts at 10; decremented by one each time fragments are
+    /// confirmed delivered to a peer. The transaction is evicted when this reaches 0.
+    #[serde(default = "default_relevance")]
+    pub relevance: u8,
+    /// Compact peer IDs (4 bytes each, flat-packed) of peers we have fully drained to.
+    /// Used by the per-peer materialized queue to skip peers we already delivered to.
+    #[serde(default)]
+    pub delivered_to: Vec<u8>,
+    /// TTL in seconds. Origin transactions: 300s. Relayed: set by sender.
+    #[serde(default = "default_ttl_secs")]
+    pub ttl_secs: u64,
+    /// Relay hop count. Capped at MAX_TX_RELAY_HOPS.
+    #[serde(default)]
+    pub hop_count: u8,
+    /// True if this entry is a signed Pollicore confirmation (higher sort priority).
+    #[serde(default)]
+    pub is_confirmation: bool,
 }
+
+pub fn default_relevance() -> u8 { 10 }
 
 impl OutboundTransaction {
     /// Create new outbound transaction
@@ -60,6 +82,11 @@ impl OutboundTransaction {
             created_at: now,
             retry_count: 0,
             max_retries: 3,
+            relevance: 10,
+            delivered_to: Vec::new(),
+            ttl_secs: default_ttl_secs(),
+            hop_count: 0,
+            is_confirmation: false,
         }
     }
 
@@ -293,6 +320,137 @@ impl OutboundQueue {
             .min_by_key(|tx| tx.created_at);
 
         oldest.map(|tx| tx.age_seconds())
+    }
+
+    /// Return a reference to the highest-relevance transaction ready to send.
+    /// Priority lanes are respected as tiers (HIGH > NORMAL > LOW); within each tier
+    /// the item with the greatest relevance score is selected.
+    pub fn peek_highest_relevance(&self) -> Option<&OutboundTransaction> {
+        for lane in [&self.high_priority, &self.normal_priority, &self.low_priority] {
+            if let Some(tx) = lane.iter().max_by_key(|t| t.relevance) {
+                return Some(tx);
+            }
+        }
+        None
+    }
+
+    /// Confirm that all fragments for `tx_id` were delivered to a peer.
+    /// Decrements the relevance counter by one. Removes the transaction and returns
+    /// `true` when relevance reaches 0 (fan-out exhausted). Returns `false` when the
+    /// transaction still has remaining deliveries and should be kept for the next peer.
+    pub fn confirm_delivered(&mut self, tx_id: &str) -> bool {
+        for lane in [
+            &mut self.high_priority,
+            &mut self.normal_priority,
+            &mut self.low_priority,
+        ] {
+            if let Some(pos) = lane.iter().position(|tx| tx.tx_id == tx_id) {
+                lane[pos].relevance = lane[pos].relevance.saturating_sub(1);
+                if lane[pos].relevance == 0 {
+                    lane.remove(pos);
+                    self.deduplication_set.remove(tx_id);
+                    tracing::info!("Relevance exhausted — evicted tx {}", tx_id);
+                    return true;
+                }
+                tracing::debug!(
+                    "Delivered tx {} — relevance now {}",
+                    tx_id,
+                    lane[pos].relevance
+                );
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Per-peer materialized queue (Subsystem 2).
+    /// Returns tx_ids that should be sent to peer `peer_id` (4-byte compact ID).
+    /// Filters out: already delivered to this peer, zero relevance, TTL expired.
+    /// Sorted by: priority (high→low), then relevance (high→low), then age (oldest first).
+    pub fn outbound_for_peer(&self, peer_id: &[u8; 4]) -> Vec<&OutboundTransaction> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut result: Vec<&OutboundTransaction> = self
+            .high_priority
+            .iter()
+            .chain(self.normal_priority.iter())
+            .chain(self.low_priority.iter())
+            .filter(|tx| {
+                tx.relevance > 0
+                    && !tx.delivered_to.chunks(4).any(|chunk| chunk == peer_id)
+                    && now.saturating_sub(tx.created_at) < tx.ttl_secs
+            })
+            .collect();
+        // Sort: priority desc, relevance desc, age asc (oldest first within tier)
+        result.sort_by(|a, b| {
+            let pa = a.priority as u8;
+            let pb = b.priority as u8;
+            pb.cmp(&pa)
+                .then(b.relevance.cmp(&a.relevance))
+                .then(a.created_at.cmp(&b.created_at))
+        });
+        result
+    }
+
+    /// Drain-conditional delivery confirmation (Subsystem 2).
+    /// Call only on mutual drain. Adds peer to delivered_to, decrements relevance.
+    /// Returns true if the entry was evicted (relevance reached 0).
+    pub fn confirm_delivered_by_peer(&mut self, tx_id: &str, peer_id: &[u8; 4]) -> bool {
+        for lane in [
+            &mut self.high_priority,
+            &mut self.normal_priority,
+            &mut self.low_priority,
+        ] {
+            if let Some(pos) = lane.iter().position(|tx| tx.tx_id == tx_id) {
+                // Record delivery to this peer (idempotent)
+                let already_delivered = lane[pos].delivered_to.chunks(4).any(|c| c == peer_id);
+                if !already_delivered {
+                    lane[pos].delivered_to.extend_from_slice(peer_id);
+                    lane[pos].relevance = lane[pos].relevance.saturating_sub(1);
+                }
+                if lane[pos].relevance == 0 {
+                    lane.remove(pos);
+                    self.deduplication_set.remove(tx_id);
+                    return true;
+                }
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Remove entry by tx_id (for confirmation-driven purge, Subsystem 3).
+    /// Returns true if the entry was found and removed.
+    pub fn purge_by_tx_id(&mut self, tx_id: &str) -> bool {
+        for lane in [
+            &mut self.high_priority,
+            &mut self.normal_priority,
+            &mut self.low_priority,
+        ] {
+            if let Some(pos) = lane.iter().position(|tx| tx.tx_id == tx_id) {
+                lane.remove(pos);
+                self.deduplication_set.remove(tx_id);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Expire cooldown for all peers not in the given delivered_to set.
+    /// Called when a new high-priority entry arrives (Subsystem 1/2 integration).
+    /// Returns the list of peer IDs whose cooldowns were cleared.
+    pub fn get_delivered_to_peers(tx_id: &str, lane: &VecDeque<OutboundTransaction>) -> Vec<[u8; 4]> {
+        lane.iter()
+            .find(|tx| tx.tx_id == tx_id)
+            .map(|tx| {
+                tx.delivered_to
+                    .chunks(4)
+                    .filter_map(|c| c.try_into().ok())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 

@@ -5,6 +5,8 @@
 //! fragment reassembly, broadcast preparation, and network health tracking.
 
 pub mod broadcaster;
+pub mod control_frames;
+pub mod density;
 pub mod fragmenter;
 pub mod health_monitor;
 pub mod mesh;
@@ -27,4 +29,13 @@ pub use broadcaster::{
 pub use health_monitor::{
     HealthConfig, HealthMetrics, HealthSnapshot, MeshHealthMonitor, NetworkTopology, PeerHealth,
     PeerState as HealthPeerState,
+};
+
+// Density-adaptive rotation (Subsystem 1)
+pub use density::{AdaptiveParams, CloseReason, CooldownList, DensityEstimator, SessionTelemetry};
+
+// Control frames (Subsystem 3)
+pub use control_frames::{
+    ConfirmationStatus, ControlFrameType, MeshConfirmation, Tombstone, TxAbortFrame,
+    CONFIRMATION_TTL_SECS,
 };

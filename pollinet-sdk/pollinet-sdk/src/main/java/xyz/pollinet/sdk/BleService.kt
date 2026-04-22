@@ -126,6 +126,17 @@ class BleService : Service() {
     private val operationInProgress = AtomicBoolean(false)
     
     /**
+     * Derives a compact 4-byte peer ID (as 8-char hex) from a BLE MAC address.
+     * Used by Subsystem 2 (deliveredTo tracking) and Subsystem 3 (cooldown override).
+     * Stable across sessions for the same MAC address.
+     */
+    private fun compactPeerId(macAddress: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(macAddress.toByteArray(Charsets.UTF_8))
+        return hash.take(4).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
      * Record a discovered or updated peer in the in-memory map and in the Rust health monitor.
      * Safe to call from any thread (uses serviceScope for the FFI suspend calls).
      */
@@ -175,6 +186,9 @@ class BleService : Service() {
     // Track original transaction bytes for re-fragmentation when MTU changes
     private var pendingTransactionBytes: ByteArray? = null
     private var fragmentsQueuedWithMtu: Int = 0
+
+    // Relevance system: tx currently loaded into the transport frame buffer for this connection
+    private var activeTxId: String? = null
     
     // Track if we're ready to send (descriptor write completed)
     private var descriptorWriteComplete = false
@@ -229,7 +243,13 @@ class BleService : Service() {
     
     // Alternating mesh mode for dancing mesh
     private var alternatingMeshJob: Job? = null
-    private val ALTERNATING_INTERVAL_MS = 8_000L // 8 seconds per mode
+    // Base interval; actual value comes from Rust adaptive params each cycle.
+    private val ALTERNATING_INTERVAL_MS = 8_000L
+    // Adaptive params updated every 10s by the auto-save/maintenance job.
+    @Volatile private var adaptiveSessionTargetMs = 60_000L
+    @Volatile private var adaptiveCooldownMs      = 45_000L
+    // Time this device entered IDLE (not connected) — for sparse-network override.
+    @Volatile private var idleStartMs = 0L
 
     // Fix: Idle-disconnect window — once our outbound queue empties, keep the connection open
     // for this long so the remote peer has a chance to push data back to us.
@@ -1027,9 +1047,33 @@ class BleService : Service() {
         
         appendLog("🔄 processReceivedQueue: Starting queue check...")
         
-        // Check internet connectivity
+        // Check internet connectivity — if offline, relay received transactions via BLE
+        // instead of trying (and failing) to submit them to pollicore directly.
         if (!hasInternetConnection()) {
-            appendLog("⚠️ processReceivedQueue: No internet connection, skipping submission")
+            appendLog("⚠️ processReceivedQueue: No internet — relaying received transactions via BLE mesh")
+            var relayed = 0
+            repeat(5) {
+                val receivedTx = sdkInstance.nextReceivedTransaction().getOrNull() ?: return@repeat
+                val txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
+                val hops = txRelayHops.getOrDefault(receivedTx.txId, 0)
+                if (hops >= MAX_TX_RELAY_HOPS) {
+                    appendLog("🗑️ TX ${receivedTx.txId.take(8)} hit relay TTL — dropping")
+                    txRelayHops.remove(receivedTx.txId)
+                } else {
+                    txRelayHops[receivedTx.txId] = hops + 1
+                    if (txRelayHops.size > 200) txRelayHops.remove(txRelayHops.keys.first())
+                    queueSignedTransaction(txBytes, Priority.LOW)
+                        .onSuccess { frags ->
+                            relayed++
+                            appendLog("📤 Relayed TX ${receivedTx.txId.take(8)} — $frags fragment(s) queued (hop ${hops + 1}/$MAX_TX_RELAY_HOPS)")
+                        }
+                        .onFailure { e ->
+                            appendLog("⚠️ Relay failed for ${receivedTx.txId.take(8)}: ${e.message}")
+                            sdkInstance.pushReceivedTransaction(txBytes)
+                        }
+                }
+            }
+            if (relayed > 0) ensureSendingLoopStarted()
             return
         }
         
@@ -1685,31 +1729,28 @@ class BleService : Service() {
                             // No internet — relay to next BLE peer, subject to hop limit.
                             val hops = txRelayHops.getOrDefault(receivedTx.txId, 0)
                             if (hops >= MAX_TX_RELAY_HOPS) {
-                                appendLog("⚠️ TX ${receivedTx.txId.take(8)} hit relay TTL ($hops/$MAX_TX_RELAY_HOPS) — dropping to prevent infinite circulation")
-                                txRelayHops.remove(receivedTx.txId) // free memory
+                                appendLog("⚠️ TX ${receivedTx.txId.take(8)} hit relay TTL ($hops/$MAX_TX_RELAY_HOPS) — dropping")
+                                txRelayHops.remove(receivedTx.txId)
                             } else {
                                 txRelayHops[receivedTx.txId] = hops + 1
-                                appendLog("📡 No internet, relaying transaction ${receivedTx.txId.take(8)} (hop ${hops + 1}/$MAX_TX_RELAY_HOPS)")
+                                appendLog("📡 No internet — relaying TX ${receivedTx.txId.take(8)} via BLE (hop ${hops + 1}/$MAX_TX_RELAY_HOPS)")
 
-                                // Evict oldest entry if map grows too large (safety valve)
                                 if (txRelayHops.size > 200) {
                                     txRelayHops.remove(txRelayHops.keys.first())
                                 }
 
-                                // Queue for BLE transmission to other peers (re-fragment)
-                                try {
-                                    val fragmentResult = sdkInstance.fragment(txBytes)
-                                    fragmentResult.onSuccess { fragmentDataList ->
-                                        appendLog("📤 Queued ${fragmentDataList.fragments.size} fragments for mesh relay")
+                                // Fragment + push into the outbound queue at LOW priority so the
+                                // sending loop can deliver it to the next BLE peer in the mesh.
+                                queueSignedTransaction(txBytes, Priority.LOW)
+                                    .onSuccess { frags ->
+                                        appendLog("📤 Queued $frags fragment(s) in outbound queue for BLE relay")
                                         ensureSendingLoopStarted()
-                                    }.onFailure { e ->
+                                    }
+                                    .onFailure { e ->
                                         appendLog("⚠️ Failed to queue for relay: ${e.message}")
+                                        // Put it back so it gets another chance next cycle
                                         sdkInstance.pushReceivedTransaction(txBytes)
                                     }
-                                } catch (e: Exception) {
-                                    appendLog("⚠️ Exception while queueing relay: ${e.message}")
-                                    sdkInstance.pushReceivedTransaction(txBytes)
-                                }
                             }
                         }
                     }
@@ -1845,14 +1886,50 @@ class BleService : Service() {
             appendLog("📥 Data size: ${data.size} bytes")
             appendLog("📥 Data preview: ${data.take(32).joinToString(" ") { "%02X".format(it) }}...")
             
-            // Check if this is a confirmation (JSON) or a fragment (binary)
-            // Confirmations start with '{' (JSON), fragments are binary (bincode)
-            val isConfirmation = data.isNotEmpty() && data[0] == '{'.code.toByte()
-            
-            if (isConfirmation) {
-                // Handle confirmation
-                handleReceivedConfirmation(data)
-                return
+            // Check frame type byte (first byte of every frame).
+            // 0x08 = CONFIRMATION, 0x09 = TX_ABORT, 0x0A = DRAIN_READY, 0x0B = CLOSE_ACK
+            // Legacy: '{' (0x7B) = JSON confirmation (old path, keep for backward compat)
+            // 0x01–0x07 = DATA_FRAGMENT types (fall through to pushInbound)
+            if (data.isNotEmpty()) {
+                when (data[0].toInt() and 0xFF) {
+                    0x08 -> {
+                        // Subsystem 3: Pollicore signed confirmation
+                        appendLog("Received CONFIRMATION frame (${data.size}B)")
+                        sdk?.ingestConfirmation(data)?.onSuccess { result ->
+                            appendLog("Confirmation ingested: purged=${result.purged} carrier=${result.addedToCarrier}")
+                        }?.onFailure { e ->
+                            appendLog("Failed to ingest confirmation: ${e.message}")
+                        }
+                        return
+                    }
+                    0x09 -> {
+                        // TX_ABORT: peer is about to send us a confirmation for this tx
+                        appendLog("Received TX_ABORT frame (${data.size}B) — dropping reassembly buffer")
+                        // The tx_id_hash is in bytes 1..16; purge local reassembly buffer
+                        if (data.size >= 17) {
+                            val txIdHashHex = data.drop(1).take(16).joinToString("") { "%02x".format(it) }
+                            sdk?.ingestConfirmation(data)  // let Rust handle it
+                        }
+                        return
+                    }
+                    0x0A -> {
+                        // DRAIN_READY: peer has sent everything it has for us
+                        appendLog("Received DRAIN_READY — peer queue drained")
+                        // Signal our side that mutual drain is possible once we also drain
+                        // (handled in the sending loop via queueEmptySinceMs logic)
+                        return
+                    }
+                    0x0B -> {
+                        // CLOSE_ACK: peer acknowledges graceful close
+                        appendLog("Received CLOSE_ACK — graceful close acknowledged")
+                        return
+                    }
+                    0x7B -> {
+                        // Legacy JSON confirmation ('{' = 0x7B)
+                        handleReceivedConfirmation(data)
+                        return
+                    }
+                }
             }
             
             // Push to SDK for reassembly (fragment)
@@ -2150,57 +2227,73 @@ class BleService : Service() {
             appendLog("🔄 Alternating mesh already running")
             return
         }
-        
-        appendLog("🚀 Starting alternating mesh mode (8s scan ↔ 8s advertise)")
-        
-        // Randomize starting mode to ensure ~50% devices scan first, ~50% advertise first
+
+        appendLog("🚀 Starting alternating mesh mode (density-adaptive)")
+
+        // Phase desync: random offset in [0, 8000) ms so not all devices flip simultaneously.
+        val phaseOffsetMs = Random.nextLong(0L, 8_000L)
         val startWithScan = Random.nextBoolean()
-        appendLog("   Starting with: ${if (startWithScan) "SCAN" else "ADVERTISE"} mode")
-        
+        appendLog("   Phase offset: ${phaseOffsetMs}ms, starting with: ${if (startWithScan) "SCAN" else "ADVERTISE"}")
+        idleStartMs = System.currentTimeMillis()
+
         alternatingMeshJob = serviceScope.launch {
+            // Apply random phase desync before first cycle
+            if (phaseOffsetMs > 0) delay(phaseOffsetMs)
+
             var scanMode = startWithScan
-            
+
             while (isActive) {
                 // Skip alternating if connected (transfer in progress)
                 if (_connectionState.value == ConnectionState.CONNECTED) {
+                    idleStartMs = 0L
                     delay(1000)
                     continue
                 }
-                
+
+                // Update idle start timestamp when transitioning to idle
+                if (idleStartMs == 0L) idleStartMs = System.currentTimeMillis()
+
                 // Skip if Bluetooth disabled
                 if (bluetoothAdapter?.isEnabled != true) {
                     delay(1000)
                     continue
                 }
-                
+
                 // Skip if already have a pending connection attempt
                 if (pendingConnectionDevice != null) {
                     delay(1000)
                     continue
                 }
-                
-                if (scanMode) {
-                    // Scan mode - actively look for peers
-                    appendLog("🔄 Alternating mesh: → SCAN mode (${ALTERNATING_INTERVAL_MS / 1000}s)")
-                    stopAdvertising()
-                    delay(500) // Small gap to avoid BLE conflicts
-                    startScanning()
-                    delay(ALTERNATING_INTERVAL_MS)
-                } else {
-                    // Advertise mode - wait for peers to find us
-                    appendLog("🔄 Alternating mesh: → ADVERTISE mode (${ALTERNATING_INTERVAL_MS / 1000}s)")
-                    stopScanning()
-                    delay(500) // Small gap to avoid BLE conflicts
-                    startAdvertising()
-                    delay(ALTERNATING_INTERVAL_MS)
+
+                // Sparse-network override: if idle too long and all peers in cooldown, clear oldest
+                val idleDuration = System.currentTimeMillis() - idleStartMs
+                if (idleStartMs > 0 && idleDuration > 2 * adaptiveSessionTargetMs) {
+                    serviceScope.launch { sdk?.expireOldestCooldown() }
                 }
-                
-                // Toggle mode for next iteration
+
+                // Per-cycle jitter: ±1000 ms
+                val jitter = Random.nextLong(-1000L, 1001L)
+                val cycleMs = (ALTERNATING_INTERVAL_MS + jitter).coerceAtLeast(3_000L)
+
+                if (scanMode) {
+                    appendLog("🔄 Mesh: → SCAN (${cycleMs / 1000}s, density=${adaptiveSessionTargetMs / 1000}s target)")
+                    stopAdvertising()
+                    delay(500)
+                    startScanning()
+                    delay(cycleMs)
+                } else {
+                    appendLog("🔄 Mesh: → ADVERTISE (${cycleMs / 1000}s)")
+                    stopScanning()
+                    delay(500)
+                    startAdvertising()
+                    delay(cycleMs)
+                }
+
                 scanMode = !scanMode
             }
         }
-        
-        appendLog("✅ Alternating mesh mode started - automatic peer discovery active")
+
+        appendLog("✅ Alternating mesh mode started — density-adaptive rotation active")
     }
     
     /**
@@ -2222,25 +2315,37 @@ class BleService : Service() {
         if (autoSaveJob?.isActive == true) {
             return
         }
-        
+
         autoSaveJob = serviceScope.launch {
             while (isActive) {
                 try {
-                    delay(10_000) // Check every 10 seconds
-                    
+                    delay(10_000) // Every 10 seconds
+
                     // Auto-save queues (debounced internally to 5s)
                     sdk?.autoSaveQueues()?.onFailure { error ->
                         appendLog("⚠️ Auto-save failed: ${error.message}")
                     }
-                    
+
+                    // Subsystem 1: recompute adaptive params from density estimator
+                    sdk?.getAdaptiveParams()?.onSuccess { params ->
+                        adaptiveSessionTargetMs = params.sessionTargetMs
+                        adaptiveCooldownMs      = params.cooldownMs
+                        // Also update the Kotlin-layer cooldown to keep them in sync
+                    }?.onFailure { e ->
+                        appendLog("⚠️ getAdaptiveParams failed: ${e.message}")
+                    }
+
+                    // Subsystem 3: evict expired tombstones and cooldowns
+                    sdk?.periodicMaintenance()
+
                 } catch (e: Exception) {
-                    appendLog("❌ Auto-save job error: ${e.message}")
-                    delay(30_000) // Wait longer on error
+                    appendLog("❌ Auto-save/maintenance job error: ${e.message}")
+                    delay(30_000)
                 }
             }
         }
-        
-        appendLog("✅ Auto-save job started")
+
+        appendLog("✅ Auto-save / adaptive maintenance job started")
     }
     
     /**
@@ -2446,6 +2551,27 @@ class BleService : Service() {
             return
         }
         
+        // Purge relay transactions queued more than 5 minutes ago — they are stale and should
+        // not be forwarded. Dropping them lets the idle-window fire quickly if there's nothing
+        // fresh to send, which frees this connection slot for Device C sooner.
+        serviceScope.launch {
+            val removed = sdk?.purgeStaleOutbound(maxAgeSecs = 300L)?.getOrNull() ?: 0
+            if (removed > 0) appendLog("🗑️ Purged $removed stale outbound transaction(s) before sending")
+        }
+
+        // Relevance system: load the highest-relevance transaction's fragments into the
+        // transport BLE frame buffer so the sending loop can deliver them to this peer.
+        serviceScope.launch {
+            val result = sdk?.loadForSending()?.getOrNull()
+            if (result != null) {
+                activeTxId = result.txId
+                appendLog("📡 Loaded tx ${result.txId.take(8)}… for sending (relevance=${result.relevance}, fragments=${result.fragmentCount})")
+            } else {
+                activeTxId = null
+                appendLog("📭 Outbound queue empty — nothing to load for this peer")
+            }
+        }
+
         appendLog("🚀 Starting sending loop")
         sendingJob = serviceScope.launch {
             while (_connectionState.value == ConnectionState.CONNECTED) {
@@ -2511,8 +2637,28 @@ class BleService : Service() {
                 // starve a third device (C) that is waiting for a turn in the mesh.
                 appendLog("📭 Idle window expired (${elapsed}ms) — disconnecting to rotate mesh")
                 if (_connectionState.value == ConnectionState.CONNECTED) {
-                    if (pendingTransactionBytes != null) {
-                        appendLog("✅ All fragments delivered — clearing pending transaction")
+                    // Relevance system: confirm delivery for the active transaction.
+                    // This decrements its relevance counter; only clear local state if it
+                    // was evicted (relevance hit 0). If it still has deliveries remaining,
+                    // keep pendingTransactionBytes so MTU re-fragmentation stays possible.
+                    val txId = activeTxId
+                    if (txId != null) {
+                        // Mutual drain achieved — use confirmDeliveredByPeer (Subsystem 2).
+                        // Compact peer ID = first 4 bytes of SHA-256(MAC address).
+                        val peerAddr = connectedDevice?.address ?: clientGatt?.device?.address ?: ""
+                        val peerIdHex = compactPeerId(peerAddr)
+                        serviceScope.launch {
+                            val removed = sdk?.confirmDeliveredByPeer(txId, peerIdHex)?.getOrNull() ?: true
+                            if (removed) {
+                                appendLog("TX ${txId.take(8)}… fan-out exhausted — evicted from queue")
+                                pendingTransactionBytes = null
+                                fragmentsQueuedWithMtu = 0
+                            } else {
+                                appendLog("TX ${txId.take(8)}… delivered to peer $peerIdHex — relevance decremented")
+                            }
+                            activeTxId = null
+                        }
+                    } else if (pendingTransactionBytes != null) {
                         pendingTransactionBytes = null
                         fragmentsQueuedWithMtu = 0
                     }
@@ -2898,13 +3044,16 @@ class BleService : Service() {
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val peerAddress = result.device.address
-            
+
             appendLog("📡 Discovered PolliNet device $peerAddress (RSSI: ${result.rssi} dBm)")
 
-            // Record in peer map + Rust health monitor (regardless of connection arbitration)
+            // Record in peer map + Rust health monitor + density estimator
             val alreadyConnected = connectedDevice?.address == peerAddress ||
                     clientGatt?.device?.address == peerAddress
             recordPeer(peerAddress, result.rssi, connected = alreadyConnected)
+
+            // Subsystem 1: feed density estimator (fire-and-forget)
+            serviceScope.launch { sdk?.recordScanResult(peerAddress) }
 
             // Check if already connected to THIS device
             if (alreadyConnected) {
@@ -2912,8 +3061,7 @@ class BleService : Service() {
                 return
             }
 
-            // Peer cooldown — skip devices we recently disconnected from so the mesh can
-            // rotate to a different neighbour instead of re-locking to the same peer.
+            // Peer cooldown — uses both in-memory Kotlin map AND Rust cooldown list
             val cooldownExpiry = recentlyConnectedPeers[peerAddress]
             if (cooldownExpiry != null && System.currentTimeMillis() < cooldownExpiry) {
                 val remainingSecs = (cooldownExpiry - System.currentTimeMillis()) / 1000
@@ -3132,10 +3280,10 @@ class BleService : Service() {
                     sendingJob?.cancel()
                     
                     // Clear re-fragmentation tracking
-                    // Don't clear pending transaction - it might need to be retried on reconnection
-                    // pendingTransactionBytes = null
+                    // Don't clear pending transaction - relevance system keeps it for the next peer
                     fragmentsQueuedWithMtu = 0
-                    
+                    activeTxId = null   // will be reloaded by loadForSending() on next connection
+
                     // Reset descriptor write flag
                     descriptorWriteComplete = false
 
@@ -3143,22 +3291,22 @@ class BleService : Service() {
                     queueEmptySinceMs = 0L
                     lastInboundDataMs = 0L
 
-                    // Cooldown: suppress reconnection to this peer for PEER_COOLDOWN_MS so the
-                    // mesh has a chance to discover a different neighbour next scan cycle.
-                    recentlyConnectedPeers[addr] = System.currentTimeMillis() + PEER_COOLDOWN_MS
-                    // Evict entries whose cooldown has already expired (time-based, not FIFO)
+                    // Subsystem 1: use adaptive cooldown from density estimator
+                    val effectiveCooldown = adaptiveCooldownMs.takeIf { it > 0 } ?: PEER_COOLDOWN_MS
+                    recentlyConnectedPeers[addr] = System.currentTimeMillis() + effectiveCooldown
                     val now = System.currentTimeMillis()
                     recentlyConnectedPeers.entries.removeIf { it.value <= now }
+                    serviceScope.launch { sdk?.addPeerToCooldown(addr, effectiveCooldown) }
+                    idleStartMs = System.currentTimeMillis()
 
                     // Dancing mesh: Automatically restart alternating mode to find next peer.
-                    // Random 2–5 s backoff prevents all nodes from re-scanning simultaneously.
-                    appendLog("🔄 Dancing mesh: Restarting alternating mode to find next peer...")
+                    appendLog("🔄 Dancing mesh: Restarting alternating mode...")
                     val backoffMs = (2000L..5000L).random()
                     mainHandler.postDelayed({
                         if (_connectionState.value == ConnectionState.DISCONNECTED &&
                             connectedDevice == null && clientGatt == null) {
                             startAlternatingMeshMode()
-                            appendLog("✅ Dancing mesh: Alternating mode restarted - will find next peer")
+                            appendLog("✅ Dancing mesh: Alternating mode restarted")
                         }
                     }, backoffMs)
                 }
@@ -3627,7 +3775,8 @@ class BleService : Service() {
                     // Clear re-fragmentation tracking
                     pendingTransactionBytes = null
                     fragmentsQueuedWithMtu = 0
-                    
+                    activeTxId = null   // will be reloaded by loadForSending() on next connection
+
                     // Reset descriptor write flag
                     descriptorWriteComplete = false
 
@@ -3635,21 +3784,22 @@ class BleService : Service() {
                     queueEmptySinceMs = 0L
                     lastInboundDataMs = 0L
 
-                    // Cooldown: suppress reconnection to this peer for PEER_COOLDOWN_MS.
-                    recentlyConnectedPeers[device.address] = System.currentTimeMillis() + PEER_COOLDOWN_MS
-                    // Evict entries whose cooldown has already expired (time-based, not FIFO)
+                    // Subsystem 1: adaptive cooldown
+                    val effectiveCooldown2 = adaptiveCooldownMs.takeIf { it > 0 } ?: PEER_COOLDOWN_MS
+                    recentlyConnectedPeers[device.address] = System.currentTimeMillis() + effectiveCooldown2
                     val now = System.currentTimeMillis()
                     recentlyConnectedPeers.entries.removeIf { it.value <= now }
+                    serviceScope.launch { sdk?.addPeerToCooldown(device.address, effectiveCooldown2) }
+                    idleStartMs = System.currentTimeMillis()
 
-                    // Dancing mesh: Automatically restart alternating mode to find next peer.
-                    // Random 2–5 s backoff so nodes don't all re-scan at the same instant.
-                    appendLog("🔄 Dancing mesh: Restarting alternating mode to find next peer...")
+                    // Dancing mesh: restart alternating mode
+                    appendLog("🔄 Dancing mesh: Restarting alternating mode...")
                     val backoffMs = (2000L..5000L).random()
                     mainHandler.postDelayed({
                         if (_connectionState.value == ConnectionState.DISCONNECTED &&
                             connectedDevice == null && clientGatt == null) {
                             startAlternatingMeshMode()
-                            appendLog("✅ Dancing mesh: Alternating mode restarted - will find next peer")
+                            appendLog("✅ Dancing mesh: Alternating mode restarted")
                         }
                     }, backoffMs)
                 }

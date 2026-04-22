@@ -523,6 +523,184 @@ class PolliNetSDK private constructor(
     }
     
     /**
+     * Confirm that all fragments for [txId] were delivered to the current peer.
+     * Decrements the transaction's relevance counter. When relevance reaches 0 the
+     * transaction is evicted from the queue.
+     * @return true if the transaction was removed (fan-out exhausted), false if retained.
+     */
+    suspend fun confirmDelivered(txId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class ConfirmDeliveredResponse(val removed: Boolean)
+            parseResult<ConfirmDeliveredResponse>(PolliNetFFI.confirmDelivered(handle, txId))
+                .map { it.removed }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Peek at the highest-relevance transaction in the outbound queue and load its
+     * fragments into the transport BLE frame buffer ready for the sending loop.
+     * @return [LoadForSendingResult] with tx metadata, or null if the queue is empty.
+     */
+    suspend fun loadForSending(): Result<LoadForSendingResult?> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<LoadForSendingResult?>(PolliNetFFI.loadForSending(handle))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Purge outbound transactions older than [maxAgeSecs] from all priority queues.
+     * Call this at connection-start to drop stale relayed data before beginning transfer.
+     * @return Number of transactions removed.
+     */
+    suspend fun purgeStaleOutbound(maxAgeSecs: Long = 300L): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class PurgeResponse(val removed: Int)
+            parseResult<PurgeResponse>(PolliNetFFI.purgeStaleOutbound(handle, maxAgeSecs)).map { it.removed }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // Subsystem 1 — Density-adaptive rotation
+    // =========================================================================
+
+    /**
+     * Record a BLE scan observation for density estimation.
+     * Call on every onScanResult with the remote device address.
+     */
+    suspend fun recordScanResult(peerId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<Boolean>(PolliNetFFI.recordScanResult(handle, peerId)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Recompute and return adaptive BLE session/cooldown parameters.
+     * Call every 10 seconds from the mesh loop.
+     */
+    suspend fun getAdaptiveParams(): Result<AdaptiveParams> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.getAdaptiveParams(handle))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Add [peerId] to the cooldown list for [cooldownMs] ms.
+     * Call after every session ends.
+     */
+    suspend fun addPeerToCooldown(peerId: String, cooldownMs: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<Boolean>(PolliNetFFI.addPeerToCooldown(handle, peerId, cooldownMs)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Returns true if [peerId] is currently in cooldown.
+     */
+    suspend fun isPeerInCooldown(peerId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.isPeerInCooldown(handle, peerId))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Sparse-network safety net: expire the oldest cooldown entry early.
+     * Returns the peer_id that was released, or null if the list was empty.
+     */
+    suspend fun expireOldestCooldown(): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.expireOldestCooldown(handle))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Log a session telemetry record.
+     */
+    suspend fun logSessionTelemetry(record: SessionTelemetryRecord): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val json = kotlinx.serialization.json.Json.encodeToString(record)
+            parseResult<Boolean>(PolliNetFFI.logSessionTelemetry(handle, json)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // =========================================================================
+    // Subsystem 2 — Per-peer materialized queue
+    // =========================================================================
+
+    /**
+     * Get the tx_ids that should be sent to [peerIdHex] (8-char hex compact peer ID).
+     * Filters by deliveredTo exclusion, TTL, and relevance > 0.
+     */
+    suspend fun outboundForPeer(peerIdHex: String): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.outboundForPeer(handle, peerIdHex))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Drain-conditional delivery confirmation. Call ONLY on mutual drain.
+     * Adds [peerIdHex] to deliveredTo, decrements relevance.
+     * Returns true if the entry was evicted (relevance reached 0).
+     */
+    suspend fun confirmDeliveredByPeer(txId: String, peerIdHex: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class RemovedResponse(val removed: Boolean)
+            parseResult<RemovedResponse>(PolliNetFFI.confirmDeliveredByPeer(handle, txId, peerIdHex)).map { it.removed }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // =========================================================================
+    // Subsystem 3 — Confirmation-driven purge
+    // =========================================================================
+
+    /**
+     * Ingest a received Pollicore confirmation.
+     * Verifies signature, purges matching entry, creates tombstone, re-queues for relay.
+     * Silently drops tampered confirmations.
+     */
+    suspend fun ingestConfirmation(confirmationBytes: ByteArray): Result<IngestConfirmationResult> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.ingestConfirmation(handle, confirmationBytes))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Returns true if [txIdHashHex] has an active tombstone.
+     * Call before buffering inbound reassembly fragments.
+     */
+    suspend fun isTombstoned(txIdHashHex: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class TombResponse(val tombstoned: Boolean)
+            parseResult<TombResponse>(PolliNetFFI.isTombstoned(handle, txIdHashHex)).map { it.tombstoned }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Periodic maintenance: evict expired tombstones and cooldowns.
+     * Call from the 10-second adaptive params loop.
+     */
+    suspend fun periodicMaintenance(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<Boolean>(PolliNetFFI.periodicMaintenance(handle)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Diagnostic: get count of active tombstones.
+     */
+    suspend fun getTombstoneCount(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class CountResponse(val count: Int)
+            parseResult<CountResponse>(PolliNetFFI.getTombstoneCount(handle)).map { it.count }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
      * Cleanup expired confirmations and retry items
      * @return Pair of (confirmations cleaned, retries cleaned)
      */
@@ -1524,9 +1702,65 @@ internal data class InitializeRequest(val tx: String, val wallet: String)
 @Serializable
 internal data class GatewayResponse(val wallet: String)
 
+/** Result from [PolliNetSDK.loadForSending]. */
+@Serializable
+data class LoadForSendingResult(
+    @SerialName("tx_id")         val txId: String,
+    val relevance: Int,
+    @SerialName("fragment_count") val fragmentCount: Int,
+)
+
 @Serializable
 internal data class PolliCoreSubmitIntentResponse(
     val ok: Boolean,
     @SerialName("tx_signature") val txSignature: String,
+)
+
+// =========================================================================
+// Subsystem 1 — Density-adaptive rotation data classes
+// =========================================================================
+
+/** Adaptive BLE session and cooldown parameters from the Rust density estimator. */
+@Serializable
+data class AdaptiveParams(
+    /** Estimated unique peers observed in the last 2 minutes. */
+    val density: Int,
+    /** Target session duration in ms. Clamped [20_000, 120_000]. */
+    @SerialName("session_target_ms") val sessionTargetMs: Long,
+    /** Peer cooldown duration in ms. Clamped [15_000, 600_000]. */
+    @SerialName("cooldown_ms") val cooldownMs: Long,
+    /** Minimum session duration (constant). */
+    @SerialName("session_min_ms") val sessionMinMs: Long,
+    /** Maximum session duration (= sessionTargetMs × 1.5). */
+    @SerialName("session_max_ms") val sessionMaxMs: Long,
+)
+
+/** Session telemetry record logged after each BLE session. */
+@Serializable
+data class SessionTelemetryRecord(
+    @SerialName("local_device_id")        val localDeviceId: String,
+    @SerialName("peer_id")                val peerId: String,
+    @SerialName("connect_time_ms")        val connectTimeMs: Long,
+    @SerialName("disconnect_time_ms")     val disconnectTimeMs: Long,
+    @SerialName("bytes_out")              val bytesOut: Long,
+    @SerialName("bytes_in")              val bytesIn: Long,
+    @SerialName("fragments_out")          val fragmentsOut: Int,
+    @SerialName("fragments_in")           val fragmentsIn: Int,
+    @SerialName("data_complete")          val dataComplete: Boolean,
+    @SerialName("confirmation_complete")  val confirmationComplete: Boolean,
+    @SerialName("close_reason")           val closeReason: String,
+)
+
+// =========================================================================
+// Subsystem 3 — Confirmation-driven purge data classes
+// =========================================================================
+
+/** Result of [PolliNetSDK.ingestConfirmation]. */
+@Serializable
+data class IngestConfirmationResult(
+    /** True if a matching carrier entry was found and removed. */
+    val purged: Boolean,
+    /** True if the confirmation was added to the carrier set for re-propagation. */
+    @SerialName("added_to_carrier") val addedToCarrier: Boolean,
 )
 

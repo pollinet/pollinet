@@ -260,7 +260,26 @@ object PolliNetFFI {
      * @return JSON FfiResult with cleanup stats
      */
     external fun cleanupExpired(handle: Long): String
-    
+
+    /**
+     * Purge outbound transactions older than [maxAgeSecs] seconds from all priority queues.
+     * @return JSON FfiResult with { removed: Int }
+     */
+    external fun purgeStaleOutbound(handle: Long, maxAgeSecs: Long): String
+
+    /**
+     * Confirm delivery of [txId] to the current peer. Decrements relevance; returns
+     * JSON FfiResult with { removed: Boolean } — true means evicted (relevance = 0).
+     */
+    external fun confirmDelivered(handle: Long, txId: String): String
+
+    /**
+     * Peek at the highest-relevance transaction in the outbound queue, load its
+     * fragments into the transport BLE frame buffer, and return metadata.
+     * Returns JSON FfiResult with { tx_id, relevance, fragment_count } or null.
+     */
+    external fun loadForSending(handle: Long): String
+
     // =========================================================================
     // Queue Persistence (Phase 5)
     // =========================================================================
@@ -399,5 +418,105 @@ object PolliNetFFI {
      * Stateless — no SDK handle required. Returns the base58 ATA address, or empty string on error.
      */
     external fun deriveAssociatedTokenAccount(ownerBase58: String, mintBase58: String): String
+
+    // =========================================================================
+    // Subsystem 1 — Density-adaptive rotation
+    // =========================================================================
+
+    /**
+     * Record a BLE scan observation. Call on every onScanResult with the device address.
+     * Updates the sliding-window density estimator.
+     * @return JSON FfiResult<Boolean>
+     */
+    external fun recordScanResult(handle: Long, peerId: String): String
+
+    /**
+     * Recompute and return adaptive session/cooldown parameters from current density N.
+     * Call every 10 seconds. Returns JSON FfiResult<AdaptiveParams>.
+     */
+    external fun getAdaptiveParams(handle: Long): String
+
+    /**
+     * Add a peer to the cooldown list for [cooldownMs] milliseconds.
+     * Call after every session ends (both mutual-drain and force-close paths).
+     * @return JSON FfiResult<Boolean>
+     */
+    external fun addPeerToCooldown(handle: Long, peerId: String, cooldownMs: Long): String
+
+    /**
+     * Returns true if [peerId] is currently in the cooldown list.
+     * @return JSON FfiResult<Boolean>
+     */
+    external fun isPeerInCooldown(handle: Long, peerId: String): String
+
+    /**
+     * Sparse-network safety net: expire the oldest cooldown entry early.
+     * Call when idle duration > 2 × session_target_ms AND all known peers are in cooldown.
+     * @return JSON FfiResult<String?> — the peer_id that was released, or null if empty.
+     */
+    external fun expireOldestCooldown(handle: Long): String
+
+    /**
+     * Log a session telemetry record.
+     * @param telemetryJson JSON-encoded SessionTelemetry
+     * @return JSON FfiResult<Boolean>
+     */
+    external fun logSessionTelemetry(handle: Long, telemetryJson: String): String
+
+    // =========================================================================
+    // Subsystem 2 — Per-peer materialized queue
+    // =========================================================================
+
+    /**
+     * Get the list of tx_ids to send to [peerIdHex] (8-char hex = 4-byte compact ID).
+     * Filters by deliveredTo exclusion, TTL, and relevance > 0.
+     * Sorted: confirmations first, then priority desc, relevance desc, age asc.
+     * @return JSON FfiResult<List<String>>
+     */
+    external fun outboundForPeer(handle: Long, peerIdHex: String): String
+
+    /**
+     * Drain-conditional delivery confirmation.
+     * Call ONLY after mutual drain is achieved with [peerIdHex].
+     * Adds peer to deliveredTo, decrements relevance. Evicts if relevance reaches 0.
+     * @param txId transaction ID
+     * @param peerIdHex 8-char hex compact peer ID
+     * @return JSON FfiResult<{ removed: Boolean }>
+     */
+    external fun confirmDeliveredByPeer(handle: Long, txId: String, peerIdHex: String): String
+
+    // =========================================================================
+    // Subsystem 3 — Confirmation-driven purge
+    // =========================================================================
+
+    /**
+     * Ingest a received or locally-generated Pollicore confirmation.
+     * Verifies signature, purges matching carrier entry, creates tombstone,
+     * and re-queues the confirmation at HIGH priority for further propagation.
+     * Silently drops tampered confirmations.
+     * @param confirmationBytes bincode-serialized MeshConfirmation
+     * @return JSON FfiResult<{ purged: Boolean, added_to_carrier: Boolean }>
+     */
+    external fun ingestConfirmation(handle: Long, confirmationBytes: ByteArray): String
+
+    /**
+     * Returns true if [txIdHashHex] has an active tombstone.
+     * Call before buffering inbound reassembly fragments for a transaction.
+     * @return JSON FfiResult<{ tombstoned: Boolean }>
+     */
+    external fun isTombstoned(handle: Long, txIdHashHex: String): String
+
+    /**
+     * Periodic maintenance: evict expired tombstones and cooldowns.
+     * Call from the 10-second adaptive params recomputation loop.
+     * @return JSON FfiResult<Boolean>
+     */
+    external fun periodicMaintenance(handle: Long): String
+
+    /**
+     * Diagnostic: get the number of active tombstones.
+     * @return JSON FfiResult<{ count: Int }>
+     */
+    external fun getTombstoneCount(handle: Long): String
 }
 

@@ -385,6 +385,16 @@ struct OutboundTransactionPersist {
     priority: Priority,
     created_at: u64,
     retry_count: u8,
+    #[serde(default = "crate::queue::outbound::default_relevance")]
+    relevance: u8,
+    #[serde(default)]
+    delivered_to: Vec<u8>,
+    #[serde(default = "crate::queue::outbound::default_ttl_secs")]
+    ttl_secs: u64,
+    #[serde(default)]
+    hop_count: u8,
+    #[serde(default)]
+    is_confirmation: bool,
 }
 
 impl OutboundTransactionPersist {
@@ -396,6 +406,11 @@ impl OutboundTransactionPersist {
             priority: tx.priority,
             created_at: tx.created_at,
             retry_count: tx.retry_count,
+            relevance: tx.relevance,
+            delivered_to: tx.delivered_to.clone(),
+            ttl_secs: tx.ttl_secs,
+            hop_count: tx.hop_count,
+            is_confirmation: tx.is_confirmation,
         }
     }
 
@@ -404,7 +419,6 @@ impl OutboundTransactionPersist {
         let original_bytes = base64::decode(&self.original_bytes)
             .map_err(|e| format!("Failed to decode transaction bytes: {}", e))?;
 
-        // Re-fragment the transaction (fragments not persisted to save space)
         let fragments = crate::ble::fragmenter::fragment_transaction(&original_bytes);
 
         Ok(OutboundTransaction {
@@ -415,6 +429,11 @@ impl OutboundTransactionPersist {
             created_at: self.created_at,
             retry_count: self.retry_count,
             max_retries: 3,
+            relevance: self.relevance,
+            delivered_to: self.delivered_to,
+            ttl_secs: self.ttl_secs,
+            hop_count: self.hop_count,
+            is_confirmation: self.is_confirmation,
         })
     }
 }

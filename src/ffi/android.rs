@@ -1585,6 +1585,108 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupExpired(
     create_result_string(&mut env, result)
 }
 
+/// Confirm that all fragments for `tx_id` were delivered to the current peer.
+/// Decrements the transaction's relevance counter by 1. Evicts the transaction and
+/// returns { removed: true } when relevance hits 0 (fan-out exhausted).
+/// Returns { removed: false } when the transaction is retained for future peers.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_confirmDelivered(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id_j: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let tx_id: String = env.get_string(&tx_id_j).map_err(|e| e.to_string())?.into();
+
+        let removed = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.confirm_delivered(&tx_id)
+        });
+
+        #[derive(serde::Serialize)]
+        struct ConfirmDeliveredResponse { removed: bool }
+        let response: FfiResult<ConfirmDeliveredResponse> =
+            FfiResult::success(ConfirmDeliveredResponse { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Peek at the highest-relevance transaction in the outbound queue and load its
+/// fragments into the transport's BLE frame buffer so the sending loop can deliver
+/// them to the current peer. Returns the tx_id, current relevance, and fragment count,
+/// or null data if the queue is empty.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_loadForSending(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        // Peek under a read lock — clone the data we need so we don't hold the lock
+        // while calling queue_fragments (which takes an unrelated mutex).
+        let tx_info = runtime::block_on(async {
+            let queue = transport.sdk.queue_manager().outbound.read().await;
+            queue.peek_highest_relevance().map(|tx| {
+                (tx.tx_id.clone(), tx.fragments.clone(), tx.relevance)
+            })
+        });
+
+        #[derive(serde::Serialize)]
+        struct LoadResponse { tx_id: String, relevance: u8, fragment_count: usize }
+
+        if let Some((tx_id, fragments, relevance)) = tx_info {
+            transport.queue_fragments(&fragments)
+                .map_err(|e| format!("Failed to load fragments into transport: {}", e))?;
+
+            let response: FfiResult<Option<LoadResponse>> =
+                FfiResult::success(Some(LoadResponse {
+                    tx_id,
+                    relevance,
+                    fragment_count: fragments.len(),
+                }));
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        } else {
+            let response: FfiResult<Option<LoadResponse>> = FfiResult::success(None);
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        }
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Purge outbound transactions older than max_age_secs from all priority queues.
+/// Call this at connection-start so stale relayed data is not forwarded.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_purgeStaleOutbound(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    max_age_secs: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let max_age = max_age_secs.max(0) as u64;
+
+        let removed = runtime::block_on(async {
+            let mut outbound = transport.sdk.queue_manager().outbound.write().await;
+            outbound.cleanup_stale(max_age)
+        });
+
+        #[derive(serde::Serialize)]
+        struct PurgeResponse { removed: usize }
+        let response: FfiResult<PurgeResponse> = FfiResult::success(PurgeResponse { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
 /// Queue a confirmation for relay back to origin device
 #[cfg(feature = "android")]
 #[no_mangle]
@@ -2203,4 +2305,418 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_submitIntent(
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
     create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Subsystem 1 — Density-adaptive rotation
+// =============================================================================
+
+/// Record a scan observation for density estimation.
+/// Call on every `onScanResult` with the remote device address.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_recordScanResult(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_str: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("peer_id: {}", e))?
+            .into();
+        transport.density_estimator.lock().record(&peer_str);
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Recompute and return adaptive BLE session/cooldown parameters.
+/// Call every 10 seconds from Kotlin.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getAdaptiveParams(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let params = transport.density_estimator.lock().compute_params();
+        let response: FfiResult<crate::ble::AdaptiveParams> = FfiResult::success(params);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Add `peer_id` to the cooldown list for `cooldown_ms` milliseconds.
+/// Call after every session ends (both mutual-drain and force-close paths).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addPeerToCooldown(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+    cooldown_ms: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_str: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("peer_id: {}", e))?
+            .into();
+        transport
+            .cooldown_list
+            .lock()
+            .add(&peer_str, cooldown_ms as u64);
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Returns true if `peer_id` is currently in cooldown (should not be connected to).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_isPeerInCooldown(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_str: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("peer_id: {}", e))?
+            .into();
+        let cooling = transport.cooldown_list.lock().is_cooling(&peer_str);
+        let response: FfiResult<bool> = FfiResult::success(cooling);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Sparse-network safety net: expire the oldest cooldown entry early.
+/// Call when idle_ms > 2 * session_target_ms AND all eligible peers are in cooldown.
+/// Returns the peer_id that was released, or null if the cooldown list was empty.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_expireOldestCooldown(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let expired = transport.cooldown_list.lock().expire_oldest();
+        let response: FfiResult<Option<String>> = FfiResult::success(expired);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Log a session telemetry record. Stored locally; future versions will relay to Pollicore.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_logSessionTelemetry(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    telemetry_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let _transport = get_transport(handle)?;
+        let json_str: String = env
+            .get_string(&telemetry_json)
+            .map_err(|e| format!("telemetry_json: {}", e))?
+            .into();
+        // Parse to validate the structure before logging.
+        let _record: crate::ble::SessionTelemetry = serde_json::from_str(&json_str)
+            .map_err(|e| format!("Invalid telemetry JSON: {}", e))?;
+        log::info!("[SESSION_TELEMETRY] {}", json_str);
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Subsystem 2 — Per-peer materialized queue
+// =============================================================================
+
+/// Returns the list of tx_ids that should be sent to `peer_id` (4-byte hex compact ID).
+/// Filters by deliveredTo exclusion, TTL, and relevance > 0.
+/// Sorted by: is_confirmation desc, priority desc, relevance desc, age asc.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_outboundForPeer(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id_hex: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_hex: String = env
+            .get_string(&peer_id_hex)
+            .map_err(|e| format!("peer_id_hex: {}", e))?
+            .into();
+        let peer_bytes = hex::decode(&peer_hex)
+            .map_err(|e| format!("Invalid peer_id_hex: {}", e))?;
+        let peer_id: [u8; 4] = peer_bytes
+            .try_into()
+            .map_err(|_| "peer_id must be 4 bytes (8 hex chars)".to_string())?;
+
+        let tx_ids = runtime::block_on(async {
+            let queue = transport.sdk.queue_manager().outbound.read().await;
+            queue.outbound_for_peer(&peer_id)
+                .iter()
+                .map(|tx| tx.tx_id.clone())
+                .collect::<Vec<_>>()
+        });
+
+        let response: FfiResult<Vec<String>> = FfiResult::success(tx_ids);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Drain-conditional delivery confirmation (Subsystem 2).
+/// Call ONLY on mutual drain. Adds `peer_id` to deliveredTo, decrements relevance.
+/// Returns `{ removed: bool }` — true if the entry was evicted (relevance reached 0).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_confirmDeliveredByPeer(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id: JString,
+    peer_id_hex: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let tx_id_str: String = env
+            .get_string(&tx_id)
+            .map_err(|e| format!("tx_id: {}", e))?
+            .into();
+        let peer_hex: String = env
+            .get_string(&peer_id_hex)
+            .map_err(|e| format!("peer_id_hex: {}", e))?
+            .into();
+        let peer_bytes = hex::decode(&peer_hex)
+            .map_err(|e| format!("Invalid peer_id_hex: {}", e))?;
+        let peer_id: [u8; 4] = peer_bytes
+            .try_into()
+            .map_err(|_| "peer_id must be 4 bytes".to_string())?;
+
+        let removed = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.confirm_delivered_by_peer(&tx_id_str, &peer_id)
+        });
+
+        #[derive(serde::Serialize)]
+        struct RemovedResponse { removed: bool }
+        let response: FfiResult<RemovedResponse> = FfiResult::success(RemovedResponse { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Subsystem 3 — Confirmation-driven purge
+// =============================================================================
+
+/// Ingest a received (or locally generated) confirmation.
+///
+/// Verifies the Ed25519 signature against the bundled Pollicore public key.
+/// On success:
+///   - purges any matching entry from the outbound carrier set
+///   - discards the inbound reassembly buffer for this txId (if present)
+///   - creates a tombstone
+///   - queues the confirmation for re-propagation at HIGH priority
+///
+/// Returns `{ purged: bool, added_to_carrier: bool }`.
+/// Silently drops tampered/unverifiable confirmations (returns success with both false).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_ingestConfirmation(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    confirmation_bytes: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let raw: Vec<u8> = env
+            .convert_byte_array(&confirmation_bytes)
+            .map_err(|e| format!("confirmation_bytes: {}", e))?;
+
+        let conf = crate::ble::MeshConfirmation::from_frame_bytes(&raw)
+            .map_err(|e| format!("Deserialize confirmation: {}", e))?;
+
+        // Verify signature — POLLICORE_PUBKEY_BYTES is the 32-byte Ed25519 verifying key
+        // bundled at compile time. If not set, skip verification (dev mode only).
+        let valid = if let Some(pk) = get_pollicore_pubkey() {
+            conf.verify(&pk)
+        } else {
+            log::warn!("POLLICORE_PUBKEY not configured — skipping signature verification (dev mode)");
+            true
+        };
+
+        #[derive(serde::Serialize)]
+        struct IngestResult { purged: bool, added_to_carrier: bool }
+
+        if !valid {
+            log::warn!("Dropped tampered confirmation for tx_id_hash={}", hex::encode(conf.tx_id_hash));
+            let response: FfiResult<IngestResult> = FfiResult::success(IngestResult { purged: false, added_to_carrier: false });
+            return serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e));
+        }
+
+        let tx_id_hash_hex = hex::encode(conf.tx_id_hash);
+
+        // Purge matching entry from outbound carrier set
+        let purged = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.purge_by_tx_id(&tx_id_hash_hex)
+        });
+
+        // Discard inbound reassembly buffer for this txId
+        {
+            let mut bufs = transport.inbound_buffers.lock();
+            bufs.remove(&tx_id_hash_hex);
+        }
+
+        // Create tombstone (valid for 2 × confirmation TTL)
+        {
+            let tomb = crate::ble::Tombstone::new(conf.tx_id_hash, crate::ble::CONFIRMATION_TTL_SECS / 2);
+            transport.tombstones.lock().insert(tx_id_hash_hex.clone(), tomb);
+        }
+
+        // Expire cooldown overrides so peers learn about this purge quickly
+        {
+            transport.cooldown_list.lock().expire_not_delivered(&conf.delivered_to);
+        }
+
+        // Wrap confirmation as an outbound entry and push to HIGH priority
+        let added_to_carrier = if conf.is_alive() {
+            let conf_bytes = conf.to_frame_bytes()?;
+            let fragments = crate::ble::fragment_transaction(&conf_bytes);
+            let tx = crate::queue::OutboundTransaction {
+                tx_id: tx_id_hash_hex.clone(),
+                original_bytes: conf_bytes,
+                fragments,
+                priority: crate::queue::Priority::High,
+                created_at: conf.added_at,
+                retry_count: 0,
+                max_retries: 3,
+                relevance: conf.relevance,
+                delivered_to: conf.delivered_to,
+                ttl_secs: crate::ble::CONFIRMATION_TTL_SECS,
+                hop_count: conf.hop_count,
+                is_confirmation: true,
+            };
+            let pushed = runtime::block_on(async {
+                let mut queue = transport.sdk.queue_manager().outbound.write().await;
+                queue.push(tx).is_ok()
+            });
+            pushed
+        } else {
+            false
+        };
+
+        log::info!("ingestConfirmation txId={} purged={} added_to_carrier={}", tx_id_hash_hex, purged, added_to_carrier);
+
+        let response: FfiResult<IngestResult> = FfiResult::success(IngestResult { purged, added_to_carrier });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Check if a tx_id_hash (hex) has an active tombstone.
+/// Returns `{ tombstoned: bool }`. Call before buffering inbound fragments.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_isTombstoned(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id_hash_hex: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let hash_hex: String = env
+            .get_string(&tx_id_hash_hex)
+            .map_err(|e| format!("tx_id_hash_hex: {}", e))?
+            .into();
+        let tombstoned = transport
+            .tombstones
+            .lock()
+            .get(&hash_hex)
+            .map(|t| t.is_valid())
+            .unwrap_or(false);
+        #[derive(serde::Serialize)]
+        struct TombResponse { tombstoned: bool }
+        let response: FfiResult<TombResponse> = FfiResult::success(TombResponse { tombstoned });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Evict expired tombstones and expired cooldowns. Call in the periodic 10s tick.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_periodicMaintenance(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        // Evict expired tombstones
+        transport.tombstones.lock().retain(|_, t| t.is_valid());
+        // Evict expired cooldowns
+        transport.cooldown_list.lock().evict_expired();
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Get the number of active tombstones (diagnostic only).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getTombstoneCount(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let count = transport.tombstones.lock().len();
+        #[derive(serde::Serialize)]
+        struct CountResponse { count: usize }
+        let response: FfiResult<CountResponse> = FfiResult::success(CountResponse { count });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Pollicore public key resolution
+// =============================================================================
+
+/// Returns the bundled Pollicore Ed25519 public key (32 bytes), or None in dev mode.
+/// The key is embedded at compile time via the POLLICORE_PUBKEY env var (64-char hex).
+fn get_pollicore_pubkey() -> Option<[u8; 32]> {
+    let hex_str = option_env!("POLLICORE_PUBKEY")?;
+    if hex_str.is_empty() {
+        return None;
+    }
+    let bytes = hex::decode(hex_str).ok()?;
+    bytes.try_into().ok()
 }

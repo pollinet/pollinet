@@ -100,7 +100,7 @@ pub struct HostBleTransport {
     outbound_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
 
     /// Inbound reassembly buffers keyed by transaction ID
-    inbound_buffers: Arc<Mutex<HashMap<String, Vec<TransactionFragment>>>>,
+    pub inbound_buffers: Arc<Mutex<HashMap<String, Vec<TransactionFragment>>>>,
 
     /// Completed transactions ready for processing
     completed_transactions: CompletedTxQueue,
@@ -131,12 +131,28 @@ pub struct HostBleTransport {
     queue_storage_dir: Mutex<Option<String>>,
 
     /// Base58-encoded Solana wallet address for this node session.
-    /// Used to attribute uptime, relay and submission rewards to the correct wallet.
-    /// None until the host app calls `set_wallet_address` or provides it in `SdkConfig`.
     pub wallet_address: Mutex<Option<String>>,
 
     /// Pollicore base URL resolved at init time from config or `POLLICORE_URL` env var.
     pub pollicore_url: Mutex<Option<String>>,
+
+    // ---- Subsystem 1: Density-adaptive rotation ----
+
+    /// Sliding-window density estimator. Updated on every scan result.
+    pub density_estimator: Mutex<crate::ble::DensityEstimator>,
+
+    /// Per-device cooldown list. Entries added after each session ends.
+    pub cooldown_list: Mutex<crate::ble::CooldownList>,
+
+    // ---- Subsystem 3: Confirmation-driven purge ----
+
+    /// Tombstones keyed by tx_id_hash (16-byte key as hex). Prevents re-introduction
+    /// of transactions whose confirmations have already been received.
+    pub tombstones: Mutex<HashMap<String, crate::ble::Tombstone>>,
+
+    /// Pending confirmations waiting to be queued as outbound carrier entries.
+    /// Keyed by tx_id_hash hex. Written by `ingest_confirmation`, read by FFI.
+    pub pending_confirmations: Mutex<VecDeque<crate::ble::MeshConfirmation>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -173,6 +189,10 @@ impl HostBleTransport {
             queue_storage_dir: Mutex::new(None),
             wallet_address: Mutex::new(None),
             pollicore_url: Mutex::new(None),
+            density_estimator: Mutex::new(crate::ble::DensityEstimator::new()),
+            cooldown_list: Mutex::new(crate::ble::CooldownList::new()),
+            tombstones: Mutex::new(HashMap::new()),
+            pending_confirmations: Mutex::new(VecDeque::new()),
         };
 
         t_info!("✅ HostBleTransport::new() initialized");
@@ -206,6 +226,10 @@ impl HostBleTransport {
             queue_storage_dir: Mutex::new(None),
             wallet_address: Mutex::new(None),
             pollicore_url: Mutex::new(None),
+            density_estimator: Mutex::new(crate::ble::DensityEstimator::new()),
+            cooldown_list: Mutex::new(crate::ble::CooldownList::new()),
+            tombstones: Mutex::new(HashMap::new()),
+            pending_confirmations: Mutex::new(VecDeque::new()),
         };
 
         t_info!("✅ HostBleTransport::new_with_rpc() initialized");
