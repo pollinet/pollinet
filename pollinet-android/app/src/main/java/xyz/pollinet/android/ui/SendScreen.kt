@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -47,9 +49,12 @@ fun SendScreen(
         walletState.walletAddress?.let { sendViewModel.setWallet(it) }
     }
 
+    // Keep a sticky copy of the last error so it stays visible as a card
+    var stickyError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(sendState.error) {
-        sendState.error?.let {
-            snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Long)
+        sendState.error?.let { msg ->
+            stickyError = msg
+            snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Long)
             sendViewModel.clearError()
         }
     }
@@ -67,7 +72,7 @@ fun SendScreen(
                 title = { Text("Send via Pollinet", fontWeight = FontWeight.Bold) },
                 actions = {
                     if (sendState.step != SendStep.IDLE) {
-                        TextButton(onClick = { sendViewModel.reset() }) { Text("Reset") }
+                        TextButton(onClick = { stickyError = null; sendViewModel.reset() }) { Text("Reset") }
                     }
                 }
             )
@@ -88,11 +93,50 @@ fun SendScreen(
                 NoApprovedTokensBanner(); return@Column
             }
             if (sendState.step == SendStep.SUCCESS) {
+                stickyError = null
                 SuccessCard(
                     txSignature = sendState.txSignature ?: "",
-                    onSendAgain = { sendViewModel.reset() },
+                    onSendAgain = { stickyError = null; sendViewModel.reset() },
                 )
                 return@Column
+            }
+
+            // ── Sticky error card ──
+            stickyError?.let { msg ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(18.dp).padding(top = 2.dp),
+                        )
+                        Text(
+                            msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = { stickyError = null },
+                            modifier = Modifier.size(20.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Dismiss",
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    }
+                }
             }
 
             // ── Transfer form (always shown until SUCCESS) ──

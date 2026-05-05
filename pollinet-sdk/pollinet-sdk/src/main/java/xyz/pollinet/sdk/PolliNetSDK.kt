@@ -4,6 +4,9 @@ import kotlinx.coroutines.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 
@@ -15,12 +18,16 @@ import kotlinx.serialization.decodeFromString
  */
 class PolliNetSDK private constructor(
     private val handle: Long,
+    private val rpcUrl: String?,
     private val json: Json = Json {
         ignoreUnknownKeys = true
         prettyPrint = false
         encodeDefaults = true
     }
 ) {
+    // Cached executor PDA, populated on first listTokenAccounts call.
+    @Volatile private var cachedExecutorPda: String? = null
+
     companion object {
         /**
          * Initialize a new PolliNet SDK instance
@@ -29,11 +36,11 @@ class PolliNetSDK private constructor(
             try {
                 val configJson = Json.encodeToString(config)
                 val handle = PolliNetFFI.init(configJson.toByteArray())
-                
+
                 if (handle < 0) {
                     Result.failure(Exception("Failed to initialize SDK: invalid handle"))
                 } else {
-                    Result.success(PolliNetSDK(handle))
+                    Result.success(PolliNetSDK(handle = handle, rpcUrl = config.rpcUrl))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -1040,6 +1047,86 @@ class PolliNetSDK private constructor(
     }
 
     /**
+     * List all SPL token accounts owned by [walletAddress] together with their delegation
+     * status against the Pollinet executor PDA. This is the canonical "is this token
+     * Pollinet-ready?" query — `isExecutorDelegated == true && delegatedRawAmount > 0` means
+     * the token can be used for offline transfers without further setup.
+     *
+     * Uses the RPC URL from [SdkConfig.rpcUrl] (set at SDK init). Caches the executor PDA
+     * after the first call to avoid an extra FFI hop per refresh.
+     *
+     * @param walletAddress Base58 wallet address to query.
+     * @param tokenProgramId SPL token program ID (default: classic SPL token program).
+     * @return List of [DelegatedTokenAccount] with mint, balance, decimals, delegate, and
+     *         a precomputed `isExecutorDelegated` flag.
+     */
+    suspend fun listTokenAccounts(
+        walletAddress: String,
+        tokenProgramId: String = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    ): Result<List<DelegatedTokenAccount>> = withContext(Dispatchers.IO) {
+        try {
+            val rpc = rpcUrl
+                ?: return@withContext Result.failure(Exception("rpcUrl not set on SdkConfig"))
+
+            val executorPda = cachedExecutorPda ?: run {
+                val pda = getExecutorPda().getOrThrow().pda
+                cachedExecutorPda = pda
+                pda
+            }
+
+            val body = """{"jsonrpc":"2.0","id":1,"method":"getTokenAccountsByOwner","params":["$walletAddress",{"programId":"$tokenProgramId"},{"encoding":"jsonParsed","commitment":"confirmed"}]}"""
+            val conn = java.net.URL(rpc).openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 30_000
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val response = conn.inputStream.bufferedReader().readText()
+
+            val root = json.parseToJsonElement(response).jsonObject
+            val result = root["result"]?.jsonObject
+                ?: return@withContext Result.failure(Exception("RPC returned no result: $response"))
+            val valueArray = result["value"]?.jsonArray
+                ?: return@withContext Result.success(emptyList())
+
+            val tokens = valueArray.mapNotNull { elem ->
+                val obj = elem.jsonObject
+                val pubkey = obj["pubkey"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val info = obj["account"]?.jsonObject
+                    ?.get("data")?.jsonObject
+                    ?.get("parsed")?.jsonObject
+                    ?.get("info")?.jsonObject ?: return@mapNotNull null
+
+                val mint = info["mint"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val owner = info["owner"]?.jsonPrimitive?.content ?: walletAddress
+                val tokenAmountObj = info["tokenAmount"]?.jsonObject
+                val decimals = tokenAmountObj?.get("decimals")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val balance = tokenAmountObj?.get("amount")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+
+                val delegate = info["delegate"]?.jsonPrimitive?.content
+                val delegateAmountObj = info["delegatedAmount"]?.jsonObject
+                val delegatedRaw = delegateAmountObj?.get("amount")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                val isExecutorDelegated = delegate == executorPda && delegatedRaw > 0
+
+                DelegatedTokenAccount(
+                    pubkey = pubkey,
+                    mint = mint,
+                    owner = owner,
+                    decimals = decimals,
+                    rawBalance = balance,
+                    delegate = delegate,
+                    delegatedRawAmount = delegatedRaw,
+                    isExecutorDelegated = isExecutorDelegated,
+                )
+            }
+            Result.success(tokens)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Submits a signed intent to pollicore for on-chain execution.
      *
      * Prerequisites:
@@ -1603,6 +1690,31 @@ data class ApproveTransactionResponse(
 data class ExecutorPdaResponse(
     val pda: String,
     val bump: Int,
+)
+
+/**
+ * Snapshot of a single SPL token account owned by a wallet, with its delegation status
+ * resolved against the Pollinet executor PDA. Returned by [PolliNetSDK.listTokenAccounts].
+ *
+ * @property pubkey Token account address (NOT the wallet — this is the SPL account holding the balance).
+ * @property mint Token mint address.
+ * @property owner Wallet that owns this token account.
+ * @property decimals Number of decimal places for display formatting.
+ * @property rawBalance Raw token balance in smallest units (multiply by 10^decimals to display).
+ * @property delegate Current delegate authority (null if none, base58 string otherwise).
+ * @property delegatedRawAmount Amount the current delegate may spend, in smallest units.
+ * @property isExecutorDelegated `true` iff [delegate] is the Pollinet executor PDA AND
+ *           [delegatedRawAmount] > 0 — i.e. the token is ready for offline Pollinet transfers.
+ */
+data class DelegatedTokenAccount(
+    val pubkey: String,
+    val mint: String,
+    val owner: String,
+    val decimals: Int,
+    val rawBalance: Long,
+    val delegate: String?,
+    val delegatedRawAmount: Long,
+    val isExecutorDelegated: Boolean,
 )
 
 /** Parameters for [PolliNetSDK.createIntentBytes]. */

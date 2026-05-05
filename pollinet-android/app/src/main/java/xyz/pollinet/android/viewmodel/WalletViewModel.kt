@@ -1,6 +1,5 @@
 package xyz.pollinet.android.viewmodel
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -11,10 +10,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.TokenApprovalEntry
 
@@ -29,9 +26,13 @@ data class TokenAccount(
     val decimals: Int,
     val delegate: String?,
     val delegatedRawAmount: Long,
+    // True iff `delegate` is the Pollinet executor PDA AND `delegatedRawAmount > 0`.
+    // Source of truth comes from `PolliNetSDK.listTokenAccounts` which compares against the
+    // canonical executor PDA from the Rust SDK — don't recompute this client-side.
+    val isExecutorDelegated: Boolean = false,
 ) {
-    val isOfflineReady: Boolean get() =
-        !delegate.isNullOrEmpty() && delegatedRawAmount > 0
+    /** True only when this token is delegated to the Pollinet executor PDA with a non-zero amount. */
+    val isOfflineReady: Boolean get() = isExecutorDelegated
 
     val shortMint: String get() =
         if (mint.length > 12) "${mint.take(6)}…${mint.takeLast(4)}" else mint
@@ -72,10 +73,10 @@ class WalletViewModel : ViewModel() {
     private val json = Json { ignoreUnknownKeys = true }
 
     // Called from MainActivity once wallet is connected
-    fun onWalletConnected(address: String) {
+    fun onWalletConnected(address: String, sdk: PolliNetSDK?) {
         _state.update { it.copy(walletAddress = address, error = null) }
         loadExecutorPda()
-        loadTokenAccounts()
+        if (sdk != null) loadTokenAccounts(sdk)
     }
 
     fun onWalletDisconnected() {
@@ -169,7 +170,7 @@ class WalletViewModel : ViewModel() {
                     statusMessage = "Approved ${formatUiAmount(rawAmount, draft.tokenAccount.decimals)} ${draft.tokenAccount.symbol} for offline use",
                     approvalDrafts = it.approvalDrafts - mint,
                 ) }
-                loadTokenAccounts()
+                loadTokenAccounts(sdk)
             } catch (e: Exception) {
                 _state.update { st ->
                     val d = st.approvalDrafts[mint]
@@ -208,7 +209,7 @@ class WalletViewModel : ViewModel() {
                 submitTx(signedBytes)
 
                 _state.update { it.copy(statusMessage = "${token.symbol} offline capability revoked") }
-                loadTokenAccounts()
+                loadTokenAccounts(sdk)
             } catch (e: Exception) {
                 _state.update { it.copy(error = "Revoke failed: ${e.message}", statusMessage = null) }
             }
@@ -217,12 +218,27 @@ class WalletViewModel : ViewModel() {
 
     // ─── Load token accounts ─────────────────────────────────────────────────
 
-    fun loadTokenAccounts() {
+    fun loadTokenAccounts(sdk: PolliNetSDK) {
         val wallet = _state.value.walletAddress ?: return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingTokens = true) }
             try {
-                val accounts = fetchTokenAccounts(wallet, _state.value.rpcUrl)
+                val delegated = sdk.listTokenAccounts(wallet).getOrThrow()
+                val accounts = delegated.map { dt ->
+                    TokenAccount(
+                        pubkey = dt.pubkey,
+                        mint = dt.mint,
+                        symbol = KNOWN_TOKENS[dt.mint] ?: dt.mint.take(6),
+                        uiAmount = if (dt.decimals > 0) {
+                            dt.rawBalance.toDouble() / Math.pow(10.0, dt.decimals.toDouble())
+                        } else dt.rawBalance.toDouble(),
+                        rawAmount = dt.rawBalance,
+                        decimals = dt.decimals,
+                        delegate = dt.delegate,
+                        delegatedRawAmount = dt.delegatedRawAmount,
+                        isExecutorDelegated = dt.isExecutorDelegated,
+                    )
+                }
                 _state.update { it.copy(tokens = accounts, isLoadingTokens = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoadingTokens = false, error = "Failed to load tokens: ${e.message}") }
@@ -241,45 +257,6 @@ class WalletViewModel : ViewModel() {
     }
 
     // ─── RPC helpers ─────────────────────────────────────────────────────────
-
-    private suspend fun fetchTokenAccounts(owner: String, rpcUrl: String): List<TokenAccount> =
-        withContext(Dispatchers.IO) {
-            val body = """{"jsonrpc":"2.0","id":1,"method":"getTokenAccountsByOwner","params":["$owner",{"programId":"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},{"encoding":"jsonParsed","commitment":"confirmed"}]}"""
-            val response = rpcPost(rpcUrl, body)
-            val root = json.parseToJsonElement(response).jsonObject
-            val result = root["result"]?.jsonObject ?: return@withContext emptyList()
-            val valueArray = result["value"]?.jsonArray ?: return@withContext emptyList()
-
-            valueArray.mapNotNull { elem ->
-                val obj = elem.jsonObject
-                val pubkey = obj["pubkey"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                val info = obj["account"]?.jsonObject
-                    ?.get("data")?.jsonObject
-                    ?.get("parsed")?.jsonObject
-                    ?.get("info")?.jsonObject ?: return@mapNotNull null
-
-                val mint = info["mint"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                val tokenAmountObj = info["tokenAmount"]?.jsonObject
-                val uiAmount = tokenAmountObj?.get("uiAmount")?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
-                val rawAmount = tokenAmountObj?.get("amount")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
-                val decimals = tokenAmountObj?.get("decimals")?.jsonPrimitive?.longOrNull?.toInt() ?: 0
-
-                val delegate = info["delegate"]?.jsonPrimitive?.content
-                val delegateAmountObj = info["delegatedAmount"]?.jsonObject
-                val delegatedRaw = delegateAmountObj?.get("amount")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
-
-                TokenAccount(
-                    pubkey = pubkey,
-                    mint = mint,
-                    symbol = KNOWN_TOKENS[mint] ?: mint.take(6),
-                    uiAmount = uiAmount,
-                    rawAmount = rawAmount,
-                    decimals = decimals,
-                    delegate = delegate,
-                    delegatedRawAmount = delegatedRaw,
-                )
-            }
-        }
 
     private suspend fun fetchRecentBlockhash(rpcUrl: String): String = withContext(Dispatchers.IO) {
         val body = """{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[{"commitment":"confirmed"}]}"""

@@ -49,6 +49,15 @@ fun WalletScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var isConnecting by remember { mutableStateOf(false) }
 
+    // If the SDK initializes after the wallet was already connected (or vice versa), kick off
+    // the initial token load. listTokenAccounts depends on the SDK, which may arrive on a
+    // different frame than the wallet authorize callback.
+    LaunchedEffect(sdk, state.walletAddress) {
+        if (sdk != null && state.walletAddress != null && state.tokens.isEmpty() && !state.isLoadingTokens) {
+            viewModel.loadTokenAccounts(sdk)
+        }
+    }
+
     // Show errors / status as snackbar
     LaunchedEffect(state.error) {
         state.error?.let { snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short) }
@@ -84,7 +93,7 @@ fun WalletScreen(
                 AnimatedVisibility(visible = state.showSettings) {
                     SettingsPanel(
                         rpcUrl = state.rpcUrl,
-                        onRefreshTokens = { viewModel.loadTokenAccounts() },
+                        onRefreshTokens = { sdk?.let { viewModel.loadTokenAccounts(it) } },
                     )
                 }
             }
@@ -100,7 +109,7 @@ fun WalletScreen(
                             isConnecting = true
                             try {
                                 val pubkey = mwaClient.authorize(mwaSender)
-                                viewModel.onWalletConnected(pubkey)
+                                viewModel.onWalletConnected(pubkey, sdk)
                                 onWalletConnected(pubkey)
                             } catch (e: Exception) {
                                 snackbarHostState.showSnackbar(
@@ -140,8 +149,9 @@ fun WalletScreen(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
                             IconButton(
-                                onClick = { viewModel.loadTokenAccounts() },
+                                onClick = { sdk?.let { viewModel.loadTokenAccounts(it) } },
                                 modifier = Modifier.size(32.dp),
+                                enabled = sdk != null,
                             ) {
                                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp))
                             }

@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import xyz.pollinet.android.BuildConfig
 import xyz.pollinet.android.mwa.PolliNetMwaClient
@@ -39,7 +40,8 @@ fun DiagnosticsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+    val snackbarHostState = remember { SnackbarHostState() }
+
     var bleService by remember { mutableStateOf<BleService?>(null) }
     var isBound by remember { mutableStateOf(false) }
     
@@ -57,6 +59,18 @@ fun DiagnosticsScreen(
 
     val logsState = bleService?.logs?.collectAsStateWithLifecycle(emptyList())
     val bleLogs = logsState?.value ?: emptyList()
+
+    val peers by bleService?.peers?.collectAsStateWithLifecycle(emptyMap())
+        ?: remember { mutableStateOf(emptyMap()) }
+
+    val connectionCounts by bleService?.connectionCounts?.collectAsStateWithLifecycle(emptyMap())
+        ?: remember { mutableStateOf(emptyMap()) }
+
+    val receivedTransactions by bleService?.receivedTransactions?.collectAsStateWithLifecycle(emptyList())
+        ?: remember { mutableStateOf(emptyList()) }
+
+    val confirmationLog by bleService?.confirmationLog?.collectAsStateWithLifecycle(emptyList())
+        ?: remember { mutableStateOf(emptyList()) }
     
     var permissionsGranted by remember { mutableStateOf(false) }
     var sdkVersion by remember { mutableStateOf("Unknown") }
@@ -175,10 +189,31 @@ fun DiagnosticsScreen(
         }
     }
 
+    // Collect confirmation events and surface them as Snackbars
+    LaunchedEffect(bleService) {
+        bleService?.confirmationEvents?.collectLatest { event ->
+            val message = when (event) {
+                is BleService.ConfirmationEvent.Success ->
+                    if (event.txIdShort.isNotEmpty())
+                        "✓ Tx ${event.txIdShort}… confirmed on Solana"
+                    else
+                        "✓ Transaction confirmed on Solana"
+                is BleService.ConfirmationEvent.Failure ->
+                    "✗ Tx ${event.txIdShort}… failed: ${event.error}"
+            }
+            snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+        }
+    }
+
     // UI
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(innerPadding)
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -204,6 +239,33 @@ fun DiagnosticsScreen(
                     connectionState = connectionState,
                     permissionsGranted = permissionsGranted
                 )
+            }
+        )
+
+        // Device Roster
+        StatusCard(
+            title = "Device Roster",
+            content = {
+                DeviceRosterContent(
+                    peers = peers,
+                    connectionCounts = connectionCounts
+                )
+            }
+        )
+
+        // Received Transactions (status: RECEIVED, SUBMITTED, RELAYED, FAILED)
+        StatusCard(
+            title = "Received Transactions",
+            content = {
+                ReceivedTransactionsContent(records = receivedTransactions)
+            }
+        )
+
+        // Confirmations Received
+        StatusCard(
+            title = "Confirmations Received",
+            content = {
+                ConfirmationsContent(records = confirmationLog)
             }
         )
 
@@ -264,6 +326,7 @@ fun DiagnosticsScreen(
             }
         )
     }
+    } // Scaffold
 }
 
 @Composable
@@ -505,6 +568,312 @@ private fun BleMeshManualTestContent(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DeviceRosterContent(
+    peers: Map<String, BleService.DiscoveredPeer>,
+    connectionCounts: Map<String, Int>
+) {
+    val now = System.currentTimeMillis()
+    val totalDiscovered = peers.size
+    val previouslyConnected = connectionCounts.keys.size
+    val currentlyConnected = peers.values.count { it.isConnected }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        StatusRow("Total Devices Seen", totalDiscovered.toString())
+        StatusRow("Previously Connected", previouslyConnected.toString())
+        StatusRow("Currently Connected", currentlyConnected.toString(), isGood = currentlyConnected > 0)
+
+        if (peers.isNotEmpty()) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text(
+                text = "Known Devices",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            peers.values
+                .sortedWith(compareByDescending<BleService.DiscoveredPeer> { it.isConnected }
+                    .thenByDescending { connectionCounts[it.address] ?: 0 }
+                    .thenByDescending { it.lastSeenAt })
+                .forEach { peer ->
+                    val sessions = connectionCounts[peer.address] ?: 0
+                    val lastSeen = when {
+                        peer.isConnected -> "now"
+                        else -> {
+                            val ageSec = (now - peer.lastSeenAt) / 1000
+                            when {
+                                ageSec < 60  -> "${ageSec}s ago"
+                                ageSec < 3600 -> "${ageSec / 60}m ago"
+                                else          -> "${ageSec / 3600}h ago"
+                            }
+                        }
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (peer.isConnected)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = peer.address,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "RSSI ${peer.rssi} dBm  •  seen $lastSeen",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = if (peer.isConnected) "LIVE" else "${sessions}x",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (peer.isConnected)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (sessions > 0 && !peer.isConnected) {
+                                    Text(
+                                        text = "sessions",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+        } else {
+            Text(
+                text = "No devices discovered yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReceivedTransactionsContent(
+    records: List<BleService.ReceivedTxRecord>
+) {
+    val now = System.currentTimeMillis()
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val total = records.size
+        val submitted = records.count { it.status == BleService.ReceivedTxStatus.SUBMITTED }
+        val relayed = records.count { it.status == BleService.ReceivedTxStatus.RELAYED }
+        val failed = records.count { it.status == BleService.ReceivedTxStatus.FAILED }
+        val pending = records.count { it.status == BleService.ReceivedTxStatus.RECEIVED }
+
+        StatusRow("Total Tracked", total.toString())
+        StatusRow("Submitted", submitted.toString(), isGood = submitted > 0)
+        StatusRow("Relayed", relayed.toString())
+        StatusRow("Failed", failed.toString(), isGood = if (failed > 0) false else null)
+        StatusRow("Awaiting Submit", pending.toString())
+
+        if (records.isNotEmpty()) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text(
+                text = "Recent",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            records.forEach { record ->
+                val ageSec = (now - record.timestamp) / 1000
+                val age = when {
+                    ageSec < 60 -> "${ageSec}s ago"
+                    ageSec < 3600 -> "${ageSec / 60}m ago"
+                    else -> "${ageSec / 3600}h ago"
+                }
+                val (badge, container, onContainer) = when (record.status) {
+                    BleService.ReceivedTxStatus.SUBMITTED -> Triple(
+                        "SUBMITTED",
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    BleService.ReceivedTxStatus.RELAYED -> Triple(
+                        "RELAYED${record.relayHop?.let { " (hop $it)" } ?: ""}",
+                        MaterialTheme.colorScheme.secondaryContainer,
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    BleService.ReceivedTxStatus.FAILED -> Triple(
+                        "FAILED",
+                        MaterialTheme.colorScheme.errorContainer,
+                        MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    BleService.ReceivedTxStatus.RECEIVED -> Triple(
+                        "RECEIVED",
+                        MaterialTheme.colorScheme.surface,
+                        MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = container)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = record.txId.take(16) + if (record.txId.length > 16) "…" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = onContainer,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = badge,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = onContainer
+                            )
+                        }
+                        record.signature?.let {
+                            Text(
+                                text = "sig ${it.take(24)}…",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = onContainer
+                            )
+                        }
+                        record.error?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = onContainer
+                            )
+                        }
+                        Text(
+                            text = age,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = onContainer
+                        )
+                    }
+                }
+            }
+        } else {
+            Text(
+                text = "No received transactions yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfirmationsContent(
+    records: List<BleService.ConfirmationRecord>
+) {
+    val now = System.currentTimeMillis()
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val total = records.size
+        val successCount = records.count { it.success }
+        val failureCount = records.count { !it.success }
+
+        StatusRow("Total", total.toString())
+        StatusRow("Success", successCount.toString(), isGood = successCount > 0)
+        StatusRow("Failed", failureCount.toString(), isGood = if (failureCount > 0) false else null)
+
+        if (records.isNotEmpty()) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text(
+                text = "Recent",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            records.forEach { record ->
+                val ageSec = (now - record.timestamp) / 1000
+                val age = when {
+                    ageSec < 60 -> "${ageSec}s ago"
+                    ageSec < 3600 -> "${ageSec / 60}m ago"
+                    else -> "${ageSec / 3600}h ago"
+                }
+                val container = if (record.success)
+                    MaterialTheme.colorScheme.primaryContainer
+                else
+                    MaterialTheme.colorScheme.errorContainer
+                val onContainer = if (record.success)
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                else
+                    MaterialTheme.colorScheme.onErrorContainer
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = container)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (record.txIdShort.isNotEmpty())
+                                    "tx ${record.txIdShort}…"
+                                else
+                                    "(self-originated)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = onContainer,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = if (record.success) "SUCCESS" else "FAILED",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = onContainer
+                            )
+                        }
+                        Text(
+                            text = record.detail,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = onContainer
+                        )
+                        Text(
+                            text = age,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = onContainer
+                        )
+                    }
+                }
+            }
+        } else {
+            Text(
+                text = "No confirmations received yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

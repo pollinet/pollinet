@@ -28,7 +28,9 @@ import xyz.pollinet.sdk.workers.RetryWorker
 import xyz.pollinet.sdk.workers.CleanupWorker
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -53,8 +55,52 @@ import kotlinx.serialization.encodeToString
  */
 class BleService : Service() {
     
+    /** Emitted when a confirmation is received for a transaction originated on this device. */
+    sealed class ConfirmationEvent {
+        data class Success(val txIdShort: String, val detail: String) : ConfirmationEvent()
+        data class Failure(val txIdShort: String, val error: String) : ConfirmationEvent()
+    }
+
+    /** Emitted when the rotation policy force-disconnects a peer for fairness. */
+    sealed class RotationEvent {
+        data class Forced(
+            val peerAddress: String,
+            val sessionMs: Long,
+            val visiblePeers: Int
+        ) : RotationEvent()
+    }
+
+    /** Lifecycle status of a transaction received over the BLE mesh. */
+    enum class ReceivedTxStatus { RECEIVED, SUBMITTED, RELAYED, FAILED }
+
+    /** A snapshot of one received transaction's current state, displayed on the Dev screen. */
+    data class ReceivedTxRecord(
+        val txId: String,
+        val status: ReceivedTxStatus,
+        val timestamp: Long,
+        val signature: String? = null,
+        val error: String? = null,
+        val relayHop: Int? = null
+    )
+
+    /** A single received confirmation entry. */
+    data class ConfirmationRecord(
+        val txIdShort: String,
+        val success: Boolean,
+        val detail: String,
+        val timestamp: Long
+    )
+
     companion object {
+        // Process-scoped reference to the running BleService instance. Mirrors SdkHolder so
+        // callers (e.g. ViewModels that don't have a service binder) can route work through the
+        // single SDK that the BLE sending loop is actually polling. Cleared in onDestroy so the
+        // service can be GC'd. Returns null when the service is not running yet.
+        @Volatile private var runningInstance: BleService? = null
+        @JvmStatic fun get(): BleService? = runningInstance
+
         private const val NOTIFICATION_ID = 1001
+        private const val CONFIRMATION_NOTIFICATION_ID = 1002
         private const val CHANNEL_ID = "pollinet_ble_service"
         
         // PolliNet UUIDs
@@ -80,6 +126,16 @@ class BleService : Service() {
         // Prevents dead/orphaned transactions from circulating indefinitely when all
         // devices in the mesh lack internet.  Mirrors the confirmation relay cap below.
         private const val MAX_TX_RELAY_HOPS = 5
+
+        // Cap for the on-screen received-tx and confirmation history (oldest entries dropped).
+        private const val MAX_TX_LOG_SIZE = 50
+
+        // Hard cap on fragment payload regardless of currentMtu. Android negotiates 247 ATT MTU
+        // by default (we request 247); subtracting 10 bytes of header overhead leaves a payload
+        // that fits on virtually every peer. Using a stale or pre-negotiation currentMtu (e.g.
+        // 498 from a previous session) to size fragments leads to oversized notifies that the
+        // BLE stack silently drops. Always cap below this value.
+        private const val SAFE_MAX_FRAGMENT_PAYLOAD = 237
     }
 
     private val binder = LocalBinder()
@@ -223,6 +279,16 @@ class BleService : Service() {
     
     // Event channel for unified worker (replaces 4-5 polling loops!)
     private val workChannel = Channel<WorkEvent>(Channel.UNLIMITED)
+
+    // Reassembly buffer for fragmented confirmations (frame type 0x0C). Confirmations sometimes
+    // exceed the ATT notify cap (MTU-3) — particularly Failed confirmations with long error
+    // messages. We chunk them across multiple packets and rebuild here on the receiver.
+    private val confFragBuffer = mutableListOf<ByteArray>()
+    @Volatile private var confFragTotalChunks: Int = 0
+    @Volatile private var confFragTotalBytes: Int = 0
+    @Volatile private var confFragLastUpdateMs: Long = 0L
+    private val CONF_FRAG_HEADER_SIZE = 5  // 0x0C, total_chunks, index, total_bytes_lo, total_bytes_hi
+    private val CONF_FRAG_TIMEOUT_MS = 5_000L
     
     // Unified event-driven worker
     private var unifiedWorker: Job? = null
@@ -257,10 +323,24 @@ class BleService : Service() {
     @Volatile private var queueEmptySinceMs = 0L   // timestamp when our queue first went empty
     private val IDLE_DISCONNECT_WINDOW_MS = 4_000L // 4 s of silence on both sides → disconnect
 
+    // Fix: Stale-connection fallback — if the OS doesn't deliver STATE_DISCONNECTED after we
+    // call cancelConnection(), force-reset connection state ourselves after this delay.
+    private val FORCE_DISCONNECT_FALLBACK_MS = 1_500L
+
     // Fix: Peer cooldown — after disconnecting from a device, suppress reconnection for this
     // long so the alternating loop has a chance to find a different peer.
     private val recentlyConnectedPeers = LinkedHashMap<String, Long>() // address → disconnect timestamp
     private val PEER_COOLDOWN_MS = 45_000L // 45 seconds
+
+    // Connection rotation (fairness): when ≥ rotationPeerThreshold peers are visible recently,
+    // force-tear-down the active connection after rotationMaxSessionMs so we don't camp on one
+    // peer while a third (or more) peer starves. Cooldown + alternating mesh handles re-pairing.
+    private val ROTATION_PEER_FRESHNESS_MS = 60_000L
+    private val ROTATION_TICK_MS = 1_000L
+    @Volatile private var rotationPeerThreshold: Int = 3
+    @Volatile private var rotationMaxSessionMs: Long = 30_000L
+    @Volatile private var sessionStartMs: Long = 0L
+    private var rotationJob: Job? = null
 
     // TTL: track how many times THIS device has relayed each transaction so we can drop
     // transactions that have already been forwarded MAX_TX_RELAY_HOPS times.
@@ -445,6 +525,24 @@ class BleService : Service() {
     private val _peers = MutableStateFlow<Map<String, DiscoveredPeer>>(emptyMap())
     val peers: StateFlow<Map<String, DiscoveredPeer>> = _peers
 
+    /** Per-device connection count. Key = MAC address, value = total times connected. */
+    private val _connectionCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val connectionCounts: StateFlow<Map<String, Int>> = _connectionCounts
+
+    private val _confirmationEvents = MutableSharedFlow<ConfirmationEvent>(extraBufferCapacity = 8)
+    val confirmationEvents: SharedFlow<ConfirmationEvent> = _confirmationEvents
+
+    private val _rotationEvents = MutableSharedFlow<RotationEvent>(extraBufferCapacity = 8)
+    val rotationEvents: SharedFlow<RotationEvent> = _rotationEvents
+
+    /** Rolling list (newest first, capped at MAX_TX_LOG_SIZE) of transactions received via BLE. */
+    private val _receivedTransactions = MutableStateFlow<List<ReceivedTxRecord>>(emptyList())
+    val receivedTransactions: StateFlow<List<ReceivedTxRecord>> = _receivedTransactions
+
+    /** Rolling list (newest first, capped at MAX_TX_LOG_SIZE) of received confirmations. */
+    private val _confirmationLog = MutableStateFlow<List<ConfirmationRecord>>(emptyList())
+    val confirmationLog: StateFlow<List<ConfirmationRecord>> = _confirmationLog
+
     /** Snapshot of a discovered/connected BLE peer. */
     data class DiscoveredPeer(
         val address: String,
@@ -471,7 +569,8 @@ class BleService : Service() {
     override fun onCreate() {
         super.onCreate()
         android.util.Log.d("BleService", "onCreate: Starting BLE service initialization")
-        
+        runningInstance = this
+
         createNotificationChannel()
         
         // Register bond state receiver for authentication/encryption support
@@ -561,24 +660,58 @@ class BleService : Service() {
         serviceScope.launch {
             appendLog("🧪 Queueing sample transaction (${byteSize} bytes)")
             val payload = ByteArray(byteSize) { Random.nextInt(0, 256).toByte() }
-            val maxPayload = (currentMtu - 10).coerceAtLeast(20)
-            appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment")
+            val maxPayload = minOf((currentMtu - 10).coerceAtLeast(20), SAFE_MAX_FRAGMENT_PAYLOAD)
+            appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment (capped at $SAFE_MAX_FRAGMENT_PAYLOAD)")
             sdkInstance.fragment(payload, maxPayload).onSuccess { fragments ->
                 val count = fragments.fragments.size
-                val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
-                val firstFragmentData = fragments.fragments.firstOrNull()?.data;
-                val firstFragmentType = fragments.fragments.firstOrNull()?.fragmentType
-                appendLog("📤 Queued $count fragments for tx ${txId}…")
+                val firstFragment = fragments.fragments.firstOrNull()
+                val firstFragmentData = firstFragment?.data
+                val firstFragmentType = firstFragment?.fragmentType
+                appendLog("📤 Fragmenting sample tx into $count fragments")
                 appendLog("   Fragment size calculation: ${byteSize} bytes ÷ $maxPayload = ~$count fragments")
                 appendLog(" Fragment Data: ${firstFragmentData}…")
                 appendLog(" Fragment Type: $firstFragmentType")
 
-                // Store original bytes for potential re-fragmentation if MTU increases
-                pendingTransactionBytes = payload
-                fragmentsQueuedWithMtu = currentMtu
-                
-                // Start sending loop if not already running
-                ensureSendingLoopStarted()
+                if (firstFragment == null) {
+                    appendLog("❌ Fragment list is empty")
+                    return@onSuccess
+                }
+
+                val txId = try {
+                    val checksumBytes = android.util.Base64.decode(firstFragment.checksum, android.util.Base64.DEFAULT)
+                    if (checksumBytes.size != 32) {
+                        appendLog("❌ Invalid checksum size: ${checksumBytes.size} (expected 32)")
+                        return@onSuccess
+                    }
+                    checksumBytes.joinToString("") { "%02x".format(it) }
+                } catch (e: Exception) {
+                    appendLog("❌ Failed to decode checksum: ${e.message}")
+                    return@onSuccess
+                }
+
+                val fragmentsFFI = fragments.fragments.map { frag ->
+                    FragmentFFI(
+                        transactionId = txId,
+                        fragmentIndex = frag.index,
+                        totalFragments = frag.total,
+                        dataBase64 = frag.data
+                    )
+                }
+
+                sdkInstance.pushOutboundTransaction(
+                    txBytes = payload,
+                    txId = txId,
+                    fragments = fragmentsFFI,
+                    priority = Priority.NORMAL
+                ).onSuccess {
+                    appendLog("✅ Sample tx queued ($count fragments) txId=${txId.take(16)}…")
+                    workChannel.trySend(WorkEvent.OutboundReady)
+                    pendingTransactionBytes = payload
+                    fragmentsQueuedWithMtu = currentMtu
+                    ensureSendingLoopStarted()
+                }.onFailure { e ->
+                    appendLog("❌ Failed to push sample tx to outbound queue: ${e.message}")
+                }
             }.onFailure {
                 appendLog("❌ Failed to queue sample transaction: ${it.message}")
             }
@@ -609,33 +742,66 @@ class BleService : Service() {
                 }
                 
                 appendLog("🧾 Queueing provided transaction (${bytes.size} bytes)")
-                val maxPayload = (currentMtu - 10).coerceAtLeast(20)
-                appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment")
+                val maxPayload = minOf((currentMtu - 10).coerceAtLeast(20), SAFE_MAX_FRAGMENT_PAYLOAD)
+                appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment (capped at $SAFE_MAX_FRAGMENT_PAYLOAD)")
                 sdkInstance.fragment(bytes, maxPayload).onSuccess { fragments ->
                     val count = fragments.fragments.size
-                    val txId = fragments.fragments.firstOrNull()?.id ?: "unknown"
-                    appendLog("📤 Queued $count fragments for tx ${txId}…")
+                    val firstFragment = fragments.fragments.firstOrNull()
+                    appendLog("📤 Fragmenting provided tx into $count fragments")
                     appendLog("   Fragment size calculation: ${bytes.size} bytes ÷ $maxPayload = ~$count fragments")
-                    
-                    // Store original bytes for potential re-fragmentation if MTU increases
-                    pendingTransactionBytes = bytes
-                    fragmentsQueuedWithMtu = currentMtu
-                    
-                    // Start sending loop if not already running
-                    ensureSendingLoopStarted()
-                    
-                    // If not connected, ensure scanning/advertising is active to establish connection
-                    if (_connectionState.value != ConnectionState.CONNECTED) {
-                        appendLog("⚠️ Not connected - ensuring BLE discovery is active...")
-                        // Start scanning if not already scanning and not advertising
-                        if (!_isScanning.value && !_isAdvertising.value) {
-                            appendLog("   Starting scan to find peers...")
-                            startScanning()
-                        } else if (_isAdvertising.value) {
-                            appendLog("   Already advertising - waiting for peer to connect...")
-                        } else {
-                            appendLog("   Already scanning - waiting to find peer...")
+
+                    if (firstFragment == null) {
+                        appendLog("❌ Fragment list is empty")
+                        return@onSuccess
+                    }
+
+                    val txId = try {
+                        val checksumBytes = android.util.Base64.decode(firstFragment.checksum, android.util.Base64.DEFAULT)
+                        if (checksumBytes.size != 32) {
+                            appendLog("❌ Invalid checksum size: ${checksumBytes.size} (expected 32)")
+                            return@onSuccess
                         }
+                        checksumBytes.joinToString("") { "%02x".format(it) }
+                    } catch (e: Exception) {
+                        appendLog("❌ Failed to decode checksum: ${e.message}")
+                        return@onSuccess
+                    }
+
+                    val fragmentsFFI = fragments.fragments.map { frag ->
+                        FragmentFFI(
+                            transactionId = txId,
+                            fragmentIndex = frag.index,
+                            totalFragments = frag.total,
+                            dataBase64 = frag.data
+                        )
+                    }
+
+                    sdkInstance.pushOutboundTransaction(
+                        txBytes = bytes,
+                        txId = txId,
+                        fragments = fragmentsFFI,
+                        priority = Priority.NORMAL
+                    ).onSuccess {
+                        appendLog("✅ Tx queued ($count fragments) txId=${txId.take(16)}…")
+                        workChannel.trySend(WorkEvent.OutboundReady)
+                        pendingTransactionBytes = bytes
+                        fragmentsQueuedWithMtu = currentMtu
+                        ensureSendingLoopStarted()
+
+                        // If not connected, ensure scanning/advertising is active to establish connection
+                        if (_connectionState.value != ConnectionState.CONNECTED) {
+                            appendLog("⚠️ Not connected - ensuring BLE discovery is active...")
+                            if (!_isScanning.value && !_isAdvertising.value) {
+                                appendLog("   Starting scan to find peers...")
+                                startScanning()
+                            } else if (_isAdvertising.value) {
+                                appendLog("   Already advertising - waiting for peer to connect...")
+                            } else {
+                                appendLog("   Already scanning - waiting to find peer...")
+                            }
+                        }
+                    }.onFailure { e ->
+                        appendLog("❌ Failed to push tx to outbound queue: ${e.message}")
                     }
                 }.onFailure {
                     appendLog("❌ Failed to queue provided transaction: ${it.message}")
@@ -674,8 +840,8 @@ class BleService : Service() {
 
         try {
             appendLog("🧾 Queueing signed transaction (${txBytes.size} bytes, priority: $priority) [MWA]")
-            val maxPayload = (currentMtu - 10).coerceAtLeast(20)
-            appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment")
+            val maxPayload = minOf((currentMtu - 10).coerceAtLeast(20), SAFE_MAX_FRAGMENT_PAYLOAD)
+            appendLog("📏 Using MTU=$currentMtu, maxPayload=$maxPayload bytes per fragment (capped at $SAFE_MAX_FRAGMENT_PAYLOAD)")
             
             // Fragment transaction
             val fragmentResult = sdkInstance.fragment(txBytes, maxPayload)
@@ -908,14 +1074,19 @@ class BleService : Service() {
                     
                     when (event) {
                         WorkEvent.OutboundReady -> {
-                            appendLog("📤 Event: OutboundReady (sending loop handles transmission)")
+                            appendLog("📤 Event: OutboundReady")
                             eventCount++
                             lastEventTime = System.currentTimeMillis()
-                            // DISABLED: processOutboundQueue() was redundant - sending loop handles transmission via nextOutbound()
-                            // The sending loop (started by ensureSendingLoopStarted()) already reads fragments from the queue
-                            // and sends them via sendNextOutbound() -> nextOutbound() -> sendToGatt()
-                            // processOutboundQueue() was only logging "Would transmit" without actually sending
-                            // processOutboundQueue()
+                            // Pull the freshly-queued tx into the transport-level fragment queue
+                            // immediately so the sending loop picks it up on its next 800ms tick
+                            // (or sooner — the load resets the idle window).
+                            if (_connectionState.value == ConnectionState.CONNECTED && activeTxId == null) {
+                                sdk?.loadForSending()?.getOrNull()?.let { loaded ->
+                                    activeTxId = loaded.txId
+                                    queueEmptySinceMs = 0L
+                                    appendLog("📡 Pre-loaded tx ${loaded.txId.take(8)}… on OutboundReady (relevance=${loaded.relevance}, fragments=${loaded.fragmentCount})")
+                                }
+                            }
                         }
                         WorkEvent.ReceivedReady -> {
                             appendLog("📥 Event: ReceivedReady")
@@ -1059,6 +1230,7 @@ class BleService : Service() {
                 if (hops >= MAX_TX_RELAY_HOPS) {
                     appendLog("🗑️ TX ${receivedTx.txId.take(8)} hit relay TTL — dropping")
                     txRelayHops.remove(receivedTx.txId)
+                    upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.FAILED, error = "Relay TTL exceeded", relayHop = hops)
                 } else {
                     txRelayHops[receivedTx.txId] = hops + 1
                     if (txRelayHops.size > 200) txRelayHops.remove(txRelayHops.keys.first())
@@ -1066,9 +1238,11 @@ class BleService : Service() {
                         .onSuccess { frags ->
                             relayed++
                             appendLog("📤 Relayed TX ${receivedTx.txId.take(8)} — $frags fragment(s) queued (hop ${hops + 1}/$MAX_TX_RELAY_HOPS)")
+                            upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.RELAYED, relayHop = hops + 1)
                         }
                         .onFailure { e ->
                             appendLog("⚠️ Relay failed for ${receivedTx.txId.take(8)}: ${e.message}")
+                            upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.FAILED, error = "Relay queue failed: ${e.message}", relayHop = hops)
                             sdkInstance.pushReceivedTransaction(txBytes)
                         }
                 }
@@ -1129,10 +1303,10 @@ class BleService : Service() {
             appendLog("📥 Processing received tx: ${receivedTx.txId} $progressIndicator")
             android.util.Log.d("PolliNet.BLE", "📥 Processing received tx: ${receivedTx.txId} $progressIndicator")
             appendLog("   Transaction size: ${receivedTx.transactionBase64.length} base64 chars")
-            
+            upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.RECEIVED)
+
             try {
-                appendLog("🌐 Submitting transaction to Solana RPC...")
-                val submitResult = submitToSolanaRpc(receivedTx.transactionBase64)
+                val submitResult = submitReceivedPayload(receivedTx.transactionBase64)
                 
                 submitResult.onSuccess { signature ->
                     successCount++
@@ -1142,6 +1316,7 @@ class BleService : Service() {
                     android.util.Log.d("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
                     appendLog("   Signature: $signature")
                     appendLog("   Transaction is now on-chain")
+                    upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.SUBMITTED, signature = signature)
                     
                     // Mark as submitted for deduplication
                     val txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
@@ -1179,6 +1354,7 @@ class BleService : Service() {
                     appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
                     android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress")
                     appendLog("   Error: $errorMsg")
+                    upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.FAILED, error = errorMsg)
                     
                     // Calculate tx hash for failure confirmation (same logic as success path)
                     val txHash = try {
@@ -1224,6 +1400,7 @@ class BleService : Service() {
                 appendLog("   Transaction ID: ${receivedTx.txId} $txProgress")
                 android.util.Log.e("PolliNet.BLE", "   Transaction ID: ${receivedTx.txId} $txProgress", e)
                 appendLog("   Exception: ${e.message}")
+                upsertReceivedTx(receivedTx.txId, ReceivedTxStatus.FAILED, error = e.message ?: "Exception during submission")
                 // Best-effort: add to retry queue so the tx isn't silently lost
                 try {
                     val txBytes = android.util.Base64.decode(receivedTx.transactionBase64, android.util.Base64.NO_WRAP)
@@ -1313,7 +1490,7 @@ class BleService : Service() {
             val txBytes = android.util.Base64.decode(retryItem.txBytes, android.util.Base64.NO_WRAP)
 
             try {
-                val submitResult = submitToSolanaRpc(retryItem.txBytes)
+                val submitResult = submitReceivedPayload(retryItem.txBytes)
                 
                 // Calculate tx hash once — used for both success and failure confirmations
                 val txHash = try {
@@ -1327,6 +1504,7 @@ class BleService : Service() {
                 submitResult.onSuccess { signature ->
                     appendLog("✅ Retry successful: $signature")
                     sdkInstance.markTransactionSubmitted(txBytes)
+                    upsertReceivedTx(retryItem.txId, ReceivedTxStatus.SUBMITTED, signature = signature)
 
                     // Queue success confirmation
                     sdkInstance.queueConfirmation(txHash, signature)
@@ -1427,15 +1605,18 @@ class BleService : Service() {
                 }
             }
             
-                // Send confirmation over BLE using the same mechanism as fragments
-                // Since confirmations are small, we can send them as a single packet
-                if (jsonBytes.size <= currentMtu - 10) {
-                    // Send directly if it fits in one packet
+                // Single-packet threshold = ATT notify cap (MTU - 3). The previous check used
+                // MTU - 10, which falsely rejected 244-byte confirmations on MTU 247. For
+                // confirmations that genuinely exceed MTU - 3 (e.g. Failed with long error
+                // messages), fall through to multi-packet fragmentation via the 0x0C frame type.
+                val singlePacketCap = (currentMtu - 3).coerceAtLeast(20)
+                if (jsonBytes.size <= singlePacketCap) {
                     sendConfirmationToGatt(jsonBytes)
-            processedCount++
+                    processedCount++
                 } else {
-                    // If confirmation is too large (unlikely), log error
-                    appendLog("❌ Confirmation too large (${jsonBytes.size} bytes) for MTU ($currentMtu)")
+                    appendLog("📦 Confirmation ${jsonBytes.size}B exceeds single-packet cap ${singlePacketCap}B — fragmenting")
+                    val ok = sendFragmentedConfirmation(jsonBytes)
+                    if (ok) processedCount++
                 }
             } catch (e: Exception) {
                 appendLog("❌ Failed to serialize/send confirmation: ${e.message}")
@@ -1462,16 +1643,23 @@ class BleService : Service() {
             appendLog("✅ Confirmation deserialized for tx: ${confirmation.txId.take(8)}...")
             appendLog("   Relay count: ${confirmation.relayCount}")
             
+            val txShort = confirmation.txId.take(8)
             when (confirmation.status) {
                 is ConfirmationStatus.Success -> {
                     val sig = (confirmation.status as ConfirmationStatus.Success).signature
                     appendLog("   ✅ SUCCESS: ${sig.take(16)}...")
-                    appendLog("   📝 Transaction ${confirmation.txId.take(8)}... was successfully submitted!")
+                    appendLog("   📝 Transaction $txShort... was successfully submitted!")
+                    _confirmationEvents.tryEmit(ConfirmationEvent.Success(txShort, sig.take(16)))
+                    recordConfirmation(txShort, success = true, detail = sig.take(16))
+                    postConfirmationNotification("Transaction Confirmed ✓", "Tx $txShort… confirmed on Solana")
                 }
                 is ConfirmationStatus.Failed -> {
                     val err = (confirmation.status as ConfirmationStatus.Failed).error
                     appendLog("   ❌ FAILED: $err")
-                    appendLog("   📝 Transaction ${confirmation.txId.take(8)}... submission failed")
+                    appendLog("   📝 Transaction $txShort... submission failed")
+                    _confirmationEvents.tryEmit(ConfirmationEvent.Failure(txShort, err))
+                    recordConfirmation(txShort, success = false, detail = err)
+                    postConfirmationNotification("Transaction Failed", "Tx $txShort… failed: $err")
                 }
             }
             
@@ -1559,6 +1747,110 @@ class BleService : Service() {
         }
     }
     
+    /**
+     * Send a confirmation that exceeds the single-packet cap by chunking it across multiple
+     * notifies/writes. Wire format per chunk:
+     *   byte 0:    0x0C  (frame type CONFIRMATION_FRAG)
+     *   byte 1:    total chunks (u8, 1..255)
+     *   byte 2:    chunk index (u8, 0-based)
+     *   bytes 3-4: total payload length (u16 LE)
+     *   bytes 5+:  this chunk's slice of the JSON payload
+     *
+     * Returns true if all chunks were dispatched. Receiver reassembles in handleConfirmationFragment.
+     */
+    private suspend fun sendFragmentedConfirmation(jsonBytes: ByteArray): Boolean {
+        val maxChunkPayload = ((currentMtu - 3) - CONF_FRAG_HEADER_SIZE).coerceAtLeast(20)
+        val totalChunks = (jsonBytes.size + maxChunkPayload - 1) / maxChunkPayload
+
+        if (totalChunks > 255) {
+            appendLog("❌ Confirmation ${jsonBytes.size}B too large to fragment (would need $totalChunks chunks, max 255)")
+            return false
+        }
+        if (jsonBytes.size > 0xFFFF) {
+            appendLog("❌ Confirmation ${jsonBytes.size}B exceeds u16 length limit (65535)")
+            return false
+        }
+
+        appendLog("📦 Sending confirmation in $totalChunks chunks (chunkPayload=${maxChunkPayload}B, total=${jsonBytes.size}B)")
+        for (i in 0 until totalChunks) {
+            val start = i * maxChunkPayload
+            val end = minOf(start + maxChunkPayload, jsonBytes.size)
+            val chunkData = jsonBytes.copyOfRange(start, end)
+            val frame = ByteArray(CONF_FRAG_HEADER_SIZE + chunkData.size)
+            frame[0] = 0x0C.toByte()
+            frame[1] = totalChunks.toByte()
+            frame[2] = i.toByte()
+            frame[3] = (jsonBytes.size and 0xFF).toByte()
+            frame[4] = ((jsonBytes.size shr 8) and 0xFF).toByte()
+            chunkData.copyInto(frame, CONF_FRAG_HEADER_SIZE)
+            sendConfirmationToGatt(frame)
+            // Small spacing between chunks so the BLE stack doesn't drop notifies under burst
+            delay(50)
+        }
+        return true
+    }
+
+    /**
+     * Reassemble a multi-packet confirmation. Each chunk carries the total chunk count and the
+     * total payload length, so we can detect a new confirmation (chunk index 0) and complete one
+     * (buffer length == declared total). Stale buffers older than CONF_FRAG_TIMEOUT_MS are reset
+     * on the next chunk arrival to recover from lost fragments.
+     */
+    private suspend fun handleConfirmationFragment(data: ByteArray) {
+        if (data.size < CONF_FRAG_HEADER_SIZE + 1) {
+            appendLog("⚠️ Confirmation fragment too short (${data.size}B) — dropping")
+            return
+        }
+        val totalChunks = data[1].toInt() and 0xFF
+        val chunkIndex = data[2].toInt() and 0xFF
+        val totalBytes = (data[3].toInt() and 0xFF) or ((data[4].toInt() and 0xFF) shl 8)
+        val chunk = data.copyOfRange(CONF_FRAG_HEADER_SIZE, data.size)
+        val now = System.currentTimeMillis()
+
+        appendLog("📨 Confirmation fragment ${chunkIndex + 1}/$totalChunks (${chunk.size}B, total=${totalBytes}B)")
+
+        // Reset stale buffer (timeout) or on a fresh sequence (chunk 0 with different totals)
+        val stale = confFragLastUpdateMs > 0 && (now - confFragLastUpdateMs) > CONF_FRAG_TIMEOUT_MS
+        val newSequence = chunkIndex == 0 || confFragTotalChunks != totalChunks || confFragTotalBytes != totalBytes
+        if (stale || newSequence) {
+            if (stale && confFragBuffer.isNotEmpty()) {
+                appendLog("⚠️ Discarding stale confirmation fragments (${confFragBuffer.size} chunks, ${(now - confFragLastUpdateMs)}ms old)")
+            }
+            confFragBuffer.clear()
+            confFragTotalChunks = totalChunks
+            confFragTotalBytes = totalBytes
+        }
+
+        confFragBuffer.add(chunk)
+        confFragLastUpdateMs = now
+
+        if (confFragBuffer.size < confFragTotalChunks) {
+            return // wait for more
+        }
+
+        // All chunks received — concatenate and hand off to the existing JSON handler.
+        val assembled = ByteArray(confFragTotalBytes)
+        var pos = 0
+        for (frag in confFragBuffer) {
+            val copyLen = minOf(frag.size, assembled.size - pos)
+            if (copyLen <= 0) break
+            frag.copyInto(assembled, pos, 0, copyLen)
+            pos += copyLen
+        }
+        confFragBuffer.clear()
+        confFragTotalChunks = 0
+        confFragTotalBytes = 0
+        confFragLastUpdateMs = 0L
+
+        if (pos != assembled.size) {
+            appendLog("⚠️ Confirmation reassembly size mismatch (got ${pos}B, expected ${assembled.size}B) — dropping")
+            return
+        }
+
+        appendLog("✅ Confirmation reassembled (${assembled.size}B) — handing off to JSON handler")
+        handleReceivedConfirmation(assembled)
+    }
+
     /**
      * Process cleanup (remove stale data)
      */
@@ -1704,8 +1996,8 @@ class BleService : Service() {
                             appendLog("🌐 Internet available, submitting transaction: ${receivedTx.txId}")
                             
                             try {
-                                val submitResult = submitToSolanaRpc(receivedTx.transactionBase64)
-                                
+                                val submitResult = submitReceivedPayload(receivedTx.transactionBase64)
+
                                 submitResult.onSuccess { signature ->
                                     appendLog("✅ Auto-submitted transaction: ${receivedTx.txId}")
                                     appendLog("   Signature: $signature")
@@ -1814,6 +2106,66 @@ class BleService : Service() {
      * Check if error indicates a stale transaction that should not be retried
      * Detects nonce errors and other permanent failures
      */
+    /**
+     * Intent-envelope wire format used by SendViewModel.transferViaBle: a JSON object containing
+     * the user-signed intent (NOT a Solana VersionedTransaction). Pollicore constructs the real
+     * transaction with the current blockhash and submits to Solana on behalf of the originator.
+     */
+    @kotlinx.serialization.Serializable
+    private data class IntentEnvelope(
+        @kotlinx.serialization.SerialName("intent_bytes") val intentBytes: String,
+        val signature: String,
+        @kotlinx.serialization.SerialName("from_token_account") val fromTokenAccount: String,
+        @kotlinx.serialization.SerialName("token_program") val tokenProgram: String = "spl-token"
+    )
+
+    /**
+     * Quick sniff of the first bytes to decide whether a received payload is an IntentEnvelope
+     * JSON or a raw signed Solana VersionedTransaction. Solana txs start with a u8 signature count
+     * (typically 0x01) followed by 64 bytes of signature, never with `{` (0x7B). Returning null
+     * means "treat as raw Solana tx".
+     */
+    private fun parseIntentEnvelope(rawBytes: ByteArray): IntentEnvelope? {
+        if (rawBytes.isEmpty() || rawBytes[0] != '{'.code.toByte()) return null
+        return try {
+            val str = rawBytes.toString(Charsets.UTF_8)
+            if (!str.contains("intent_bytes")) return null
+            json.decodeFromString<IntentEnvelope>(str)
+        } catch (e: Exception) {
+            appendLog("⚠️ Payload looked like JSON but failed envelope parse: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Single entry point for submitting a received payload. Routes to pollicore via submitIntent
+     * for IntentEnvelope JSON, or to Solana RPC for raw signed VersionedTransactions. This is the
+     * fix for "failed to deserialize VersionedTransaction" — the receiver was blindly handing JSON
+     * intent envelopes to sendTransaction, which expects a serialized Solana transaction.
+     */
+    private suspend fun submitReceivedPayload(transactionBase64: String): Result<String> {
+        return try {
+            val rawBytes = android.util.Base64.decode(transactionBase64, android.util.Base64.NO_WRAP)
+            val envelope = parseIntentEnvelope(rawBytes)
+            if (envelope != null) {
+                appendLog("📨 Detected intent envelope — submitting to pollicore (fromTokenAccount=${envelope.fromTokenAccount})")
+                val sdkInstance = sdk
+                    ?: return Result.failure(Exception("SDK not initialized"))
+                sdkInstance.submitIntent(
+                    intentBytesBase64 = envelope.intentBytes,
+                    signatureBase64 = envelope.signature,
+                    fromTokenAccount = envelope.fromTokenAccount,
+                    tokenProgram = envelope.tokenProgram,
+                )
+            } else {
+                appendLog("🌐 Submitting raw transaction to Solana RPC...")
+                submitToSolanaRpc(transactionBase64)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /** Submit a base64-encoded Solana transaction to the configured RPC and return the signature. */
     private suspend fun submitToSolanaRpc(transactionBase64: String): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
@@ -1888,6 +2240,7 @@ class BleService : Service() {
             
             // Check frame type byte (first byte of every frame).
             // 0x08 = CONFIRMATION, 0x09 = TX_ABORT, 0x0A = DRAIN_READY, 0x0B = CLOSE_ACK
+            // 0x0C = CONFIRMATION_FRAG (multi-packet JSON confirmation, new)
             // Legacy: '{' (0x7B) = JSON confirmation (old path, keep for backward compat)
             // 0x01–0x07 = DATA_FRAGMENT types (fall through to pushInbound)
             if (data.isNotEmpty()) {
@@ -1897,6 +2250,12 @@ class BleService : Service() {
                         appendLog("Received CONFIRMATION frame (${data.size}B)")
                         sdk?.ingestConfirmation(data)?.onSuccess { result ->
                             appendLog("Confirmation ingested: purged=${result.purged} carrier=${result.addedToCarrier}")
+                            if (result.purged) {
+                                // This device originated the transaction — it has been confirmed.
+                                _confirmationEvents.tryEmit(ConfirmationEvent.Success("", "Confirmed on Solana"))
+                                recordConfirmation(txIdShort = "", success = true, detail = "Confirmed on Solana")
+                                postConfirmationNotification("Transaction Confirmed ✓", "Your transaction was confirmed on Solana")
+                            }
                         }?.onFailure { e ->
                             appendLog("Failed to ingest confirmation: ${e.message}")
                         }
@@ -1922,6 +2281,11 @@ class BleService : Service() {
                     0x0B -> {
                         // CLOSE_ACK: peer acknowledges graceful close
                         appendLog("Received CLOSE_ACK — graceful close acknowledged")
+                        return
+                    }
+                    0x0C -> {
+                        // Multi-packet JSON confirmation — reassemble and dispatch when complete.
+                        handleConfirmationFragment(data)
                         return
                     }
                     0x7B -> {
@@ -2051,6 +2415,7 @@ class BleService : Service() {
         unifiedWorker?.cancel() // Phase 4: Cancel unified worker
         autoSaveJob?.cancel() // Phase 5: Cancel auto-save job
         alternatingMeshJob?.cancel() // Cancel alternating mesh mode
+        rotationJob?.cancel() // Cancel rotation watchdog
         serviceScope.cancel()
         
         // Phase 4: Cancel WorkManager background tasks
@@ -2085,6 +2450,7 @@ class BleService : Service() {
         gattServer?.close()
         sdk?.shutdown()
         SdkHolder.clear() // Release WeakReference so workers see null and skip gracefully
+        runningInstance = null
         super.onDestroy()
     }
     
@@ -2096,6 +2462,9 @@ class BleService : Service() {
      */
     @SuppressLint("MissingPermission")
     private fun closeGattConnection() {
+        val clientPeerAddr = clientGatt?.device?.address
+        val serverPeerAddr = connectedDevice?.address
+
         clientGatt?.let { gatt ->
             appendLog("🔌 Disconnecting and closing GATT connection to ${gatt.device.address}")
             // Official Android sample shows: disconnect() -> close()
@@ -2104,6 +2473,227 @@ class BleService : Service() {
             gatt.close()
             clientGatt = null
         }
+        // Server-mode tear-down: when this device is the GATT server (peer connected to us)
+        // gatt.disconnect() above is a no-op because clientGatt is null. We must actively kick
+        // the peer via the GATT server, otherwise the idle-disconnect path silently fails and
+        // we stay glued to the same peer forever — starving any third device.
+        connectedDevice?.let { device ->
+            gattServer?.let { server ->
+                try {
+                    appendLog("🔌 (Server) cancelling connection to ${device.address}")
+                    server.cancelConnection(device)
+                } catch (e: Exception) {
+                    appendLog("⚠️ (Server) cancelConnection threw: ${e.message}")
+                }
+            }
+        }
+
+        // Stale-connection fallback: Android's BluetoothGattServer.cancelConnection() and
+        // BluetoothGatt.disconnect() are best-effort. On many devices the link can die at the
+        // OS level (RF blip, peer unsubscribed, etc.) without the corresponding STATE_DISCONNECTED
+        // callback ever being delivered to user-space. Symptom: notifies/writes return
+        // GATT_SUCCESS locally but never reach the peer; _connectionState stays CONNECTED forever
+        // and the sending loop keeps shouting into the void. If the platform doesn't fire the
+        // callback within FORCE_DISCONNECT_FALLBACK_MS, we manually transition state ourselves.
+        val staleAddr = clientPeerAddr ?: serverPeerAddr ?: return
+        mainHandler.postDelayed({
+            // Bail if the legitimate callback already fired and reset state, or if a fresh
+            // connection to a different peer was established in the meantime.
+            if (_connectionState.value != ConnectionState.CONNECTED) return@postDelayed
+            if (connectedDevice?.address != staleAddr && clientGatt?.device?.address != staleAddr) {
+                return@postDelayed
+            }
+            appendLog("⚠️ STATE_DISCONNECTED never fired for $staleAddr after ${FORCE_DISCONNECT_FALLBACK_MS}ms — forcing local state reset")
+            forceDisconnectState(staleAddr)
+        }, FORCE_DISCONNECT_FALLBACK_MS)
+    }
+
+    /**
+     * Manually drive the cleanup the gattCallback / gattServerCallback STATE_DISCONNECTED branches
+     * would normally do, plus cooldown insertion and alternating-mesh restart. Used as a fallback
+     * when the OS doesn't deliver STATE_DISCONNECTED after closeGattConnection() (see comment on
+     * the postDelayed block above).
+     */
+    @SuppressLint("MissingPermission")
+    private fun forceDisconnectState(addr: String) {
+        _connectionState.value = ConnectionState.DISCONNECTED
+
+        _peers.value = _peers.value.toMutableMap().apply {
+            get(addr)?.let {
+                put(addr, it.copy(isConnected = false, lastSeenAt = System.currentTimeMillis()))
+            }
+        }
+
+        if (pendingConnectionDevice?.address == addr) {
+            pendingConnectionDevice = null
+        }
+
+        connectedDevice = null
+        clientGatt = null
+        remoteTxCharacteristic = null
+        remoteRxCharacteristic = null
+        remoteWriteInProgress = false
+        operationInProgress.set(false)
+        operationQueue.clear()
+        descriptorWriteRetries = 0
+        pendingDescriptorWrite = null
+        pendingGatt = null
+        sendingJob?.cancel()
+        fragmentsQueuedWithMtu = 0
+        activeTxId = null
+        descriptorWriteComplete = false
+        queueEmptySinceMs = 0L
+        lastInboundDataMs = 0L
+
+        stopRotationTimer()
+
+        val effectiveCooldown = adaptiveCooldownMs.takeIf { it > 0 } ?: PEER_COOLDOWN_MS
+        recentlyConnectedPeers[addr] = System.currentTimeMillis() + effectiveCooldown
+        val now = System.currentTimeMillis()
+        recentlyConnectedPeers.entries.removeIf { it.value <= now }
+        serviceScope.launch { sdk?.addPeerToCooldown(addr, effectiveCooldown) }
+        idleStartMs = System.currentTimeMillis()
+
+        appendLog("🔄 Force-reset complete; restarting alternating mesh")
+        val backoffMs = (2000L..5000L).random()
+        mainHandler.postDelayed({
+            if (_connectionState.value == ConnectionState.DISCONNECTED &&
+                connectedDevice == null && clientGatt == null) {
+                startAlternatingMeshMode()
+                appendLog("✅ Alternating mode restarted after force-reset")
+            }
+        }, backoffMs)
+    }
+
+    /**
+     * Tune the fairness rotation policy.
+     *
+     * @param peerThreshold Minimum unique peers seen recently before forced rotation kicks in.
+     *                      Use 0 to disable rotation entirely.
+     * @param maxSessionMs  Maximum time a single connection may run while at/above the threshold.
+     */
+    fun setRotationConfig(peerThreshold: Int, maxSessionMs: Long) {
+        rotationPeerThreshold = peerThreshold.coerceAtLeast(0)
+        rotationMaxSessionMs = maxSessionMs.coerceAtLeast(1_000L)
+        appendLog("⚙️ Rotation config: threshold=$rotationPeerThreshold peers, maxSession=${rotationMaxSessionMs}ms")
+    }
+
+    /**
+     * Count peers "around" for the rotation policy.
+     *
+     * We can't rely on a tight freshness window because Android stops scanning while a GATT
+     * connection is active — peers other than the connected one will not have their lastSeenAt
+     * refreshed during the session. Instead we union three signals that all imply a peer was
+     * recently around: any entry in [_peers] (added on scan/connect, never pruned in-session),
+     * any address in the cooldown table, and any address with a connection-count entry.
+     */
+    private fun visiblePeerCount(): Int {
+        val seen = HashSet<String>()
+        seen.addAll(_peers.value.keys)
+        seen.addAll(recentlyConnectedPeers.keys)
+        seen.addAll(_connectionCounts.value.keys)
+        return seen.size
+    }
+
+    /**
+     * Force-disconnect the active peer regardless of role (client or server) so the cooldown +
+     * alternating mesh can rotate to the next device. closeGattConnection() now handles both
+     * client and server tear-down.
+     */
+    @SuppressLint("MissingPermission")
+    private fun forceRotateNow(reason: String) {
+        val peerAddress = clientGatt?.device?.address ?: connectedDevice?.address
+        val sessionMs = if (sessionStartMs > 0L) System.currentTimeMillis() - sessionStartMs else 0L
+        val visible = visiblePeerCount()
+        appendLog("🔁 Rotation: forcing disconnect ($reason) — peer=$peerAddress, sessionMs=$sessionMs, visible=$visible")
+
+        if (peerAddress != null) {
+            _rotationEvents.tryEmit(RotationEvent.Forced(peerAddress, sessionMs, visible))
+        }
+
+        closeGattConnection()
+    }
+
+    /**
+     * Start the rotation watchdog. Called from STATE_CONNECTED on both client and server paths.
+     * Idempotent — re-entering CONNECTED simply restarts the timer.
+     */
+    private fun startRotationTimer() {
+        rotationJob?.cancel()
+        sessionStartMs = System.currentTimeMillis()
+
+        if (rotationPeerThreshold <= 0) {
+            return // rotation disabled
+        }
+
+        rotationJob = serviceScope.launch {
+            while (isActive) {
+                delay(ROTATION_TICK_MS)
+
+                if (_connectionState.value != ConnectionState.CONNECTED) {
+                    break
+                }
+
+                val sessionMs = System.currentTimeMillis() - sessionStartMs
+                if (sessionMs < rotationMaxSessionMs) continue
+
+                val visible = visiblePeerCount()
+                if (visible < rotationPeerThreshold) continue
+
+                // Avoid killing a fragment in mid-flight — wait for the in-progress write to
+                // settle before tearing down (existing watchdog clears this within 5s).
+                if (operationInProgress.get()) continue
+
+                forceRotateNow(
+                    "≥$rotationPeerThreshold peers visible ($visible) and session ${sessionMs}ms ≥ ${rotationMaxSessionMs}ms"
+                )
+                break
+            }
+        }
+    }
+
+    /** Stop the rotation watchdog. Called from every STATE_DISCONNECTED path. */
+    private fun stopRotationTimer() {
+        rotationJob?.cancel()
+        rotationJob = null
+        sessionStartMs = 0L
+    }
+
+    /**
+     * Upsert a received-tx record. Newest record is at index 0; entries with the same txId are
+     * replaced rather than duplicated so the UI reflects the latest status per transaction.
+     */
+    private fun upsertReceivedTx(
+        txId: String,
+        status: ReceivedTxStatus,
+        signature: String? = null,
+        error: String? = null,
+        relayHop: Int? = null
+    ) {
+        val record = ReceivedTxRecord(
+            txId = txId,
+            status = status,
+            timestamp = System.currentTimeMillis(),
+            signature = signature,
+            error = error,
+            relayHop = relayHop
+        )
+        val current = _receivedTransactions.value
+        val withoutDup = current.filterNot { it.txId == txId }
+        val next = (listOf(record) + withoutDup).take(MAX_TX_LOG_SIZE)
+        _receivedTransactions.value = next
+    }
+
+    /** Append a confirmation entry to the rolling log shown on the Dev screen. */
+    private fun recordConfirmation(txIdShort: String, success: Boolean, detail: String) {
+        val record = ConfirmationRecord(
+            txIdShort = txIdShort,
+            success = success,
+            detail = detail,
+            timestamp = System.currentTimeMillis()
+        )
+        val next = (listOf(record) + _confirmationLog.value).take(MAX_TX_LOG_SIZE)
+        _confirmationLog.value = next
     }
 
     /**
@@ -2122,38 +2712,91 @@ class BleService : Service() {
             appendLog("   This prevents resource leaks from duplicate initialization")
             return Result.success(Unit)
         }
-        
-        return PolliNetSDK.initialize(config).map {
-            sdk = it
-            config.rpcUrl?.let { url -> solanaRpcUrl = url }
-            SdkHolder.set(it)
-            appendLog("✅ SDK initialized successfully")
-            
-            // Phase 4: Start unified event-driven worker (replaces multiple polling loops)
-            startUnifiedEventWorker()
-            appendLog("🚀 Event-driven worker started (battery-optimized)")
-            
-            // Phase 4: Start network state listener
-            registerNetworkCallback()
-            appendLog("📡 Network state listener registered")
-            
-            // Phase 4: Schedule WorkManager tasks for battery-efficient background work
-            scheduleBackgroundTasks()
-            appendLog("⏰ WorkManager tasks scheduled (retry: 15min, cleanup: 30min)")
-            
-            // Phase 5: Start auto-save job for queue persistence
-            startAutoSaveJob()
-            appendLog("💾 Auto-save job started (debounced: 5s)")
-            
-            // If already connected, start the sending loop now that SDK is ready
-            if (_connectionState.value == ConnectionState.CONNECTED) {
-                appendLog("🔄 Connection already established - starting sending loop now that SDK is ready")
-                ensureSendingLoopStarted()
-            }
-        }.onFailure { error ->
-            // Log initialization failure for debugging
+
+        val initResult = PolliNetSDK.initialize(config)
+        val newSdk = initResult.getOrNull() ?: run {
+            val error = initResult.exceptionOrNull() ?: Exception("Unknown SDK init error")
             appendLog("❌ SDK initialization failed: ${error.message}")
             appendLog("   SDK will remain null - operations requiring SDK will be skipped")
+            return Result.failure(error)
+        }
+
+        sdk = newSdk
+        config.rpcUrl?.let { url -> solanaRpcUrl = url }
+        SdkHolder.set(newSdk)
+        appendLog("✅ SDK initialized successfully")
+
+        // CRITICAL: wipe persisted queues BEFORE the worker / sending loop comes up if the app
+        // versionCode has changed since last init. Stale fragments queued at a different MTU,
+        // or with an old fragmentation scheme, will silently brick transfers — see the 482-byte
+        // notify drop bug. This is a one-shot per upgrade; the prefs key tracks last-seen version.
+        wipeQueuesIfVersionChanged(newSdk)
+
+        // Phase 4: Start unified event-driven worker (replaces multiple polling loops)
+        startUnifiedEventWorker()
+        appendLog("🚀 Event-driven worker started (battery-optimized)")
+
+        // Phase 4: Start network state listener
+        registerNetworkCallback()
+        appendLog("📡 Network state listener registered")
+
+        // Phase 4: Schedule WorkManager tasks for battery-efficient background work
+        scheduleBackgroundTasks()
+        appendLog("⏰ WorkManager tasks scheduled (retry: 15min, cleanup: 30min)")
+
+        // Phase 5: Start auto-save job for queue persistence
+        startAutoSaveJob()
+        appendLog("💾 Auto-save job started (debounced: 5s)")
+
+        // If already connected, start the sending loop now that SDK is ready
+        if (_connectionState.value == ConnectionState.CONNECTED) {
+            appendLog("🔄 Connection already established - starting sending loop now that SDK is ready")
+            ensureSendingLoopStarted()
+        }
+
+        return Result.success(Unit)
+    }
+
+    /**
+     * One-shot wipe of persisted SDK queues when the app's versionCode changes (fresh install,
+     * upgrade, or downgrade). Prevents fragments persisted by an older SDK build — sized for an
+     * older MTU or fragmentation scheme — from poisoning transfers after an upgrade.
+     */
+    private suspend fun wipeQueuesIfVersionChanged(sdkInstance: PolliNetSDK) {
+        try {
+            val pkgInfo = packageManager.getPackageInfo(packageName, 0)
+            val currentVersion = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pkgInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pkgInfo.versionCode.toLong()
+            }
+            val prefs = getSharedPreferences("pollinet_internal", Context.MODE_PRIVATE)
+            val lastVersion = prefs.getLong("last_sdk_version", -1L)
+
+            if (lastVersion == currentVersion) {
+                return // no version change, nothing to wipe
+            }
+
+            if (lastVersion < 0) {
+                appendLog("🆕 First SDK init for this install (v$currentVersion) — wiping any stale persisted queues")
+            } else {
+                appendLog("♻️ App version changed ($lastVersion → $currentVersion) — wiping persisted queues to prevent stale-fragment poisoning")
+            }
+
+            sdkInstance.clearAllQueues()
+                .onSuccess {
+                    appendLog("✅ Queues wiped (outbound, retry, confirmation, received, reassembly buffers)")
+                }
+                .onFailure { e ->
+                    appendLog("⚠️ Queue wipe failed: ${e.message}")
+                }
+
+            // Persist regardless of clear result — we don't want to retry forever if Rust SDK
+            // genuinely refuses; the next push will at least produce fresh, properly-sized fragments.
+            prefs.edit().putLong("last_sdk_version", currentVersion).apply()
+        } catch (e: Exception) {
+            appendLog("⚠️ Version-change wipe check failed: ${e.message}")
         }
     }
     
@@ -2543,11 +3186,14 @@ class BleService : Service() {
             return
         }
         
-        // CRITICAL: Don't start sending until descriptor write completes (client mode)
-        // In server mode, we can send immediately
-        if (clientGatt != null && !descriptorWriteComplete) {
-            appendLog("⚠️ Waiting for descriptor write to complete before sending...")
-            appendLog("   This ensures receiver is ready to receive notifications")
+        // CRITICAL: Don't start sending until descriptor write completes — in BOTH directions.
+        // - Client mode: we wrote the CCCD on the remote TX char, so we can RECEIVE notifies.
+        // - Server mode: peer wrote the CCCD on our TX char, so our notifies will actually be
+        //   delivered. Without this gate the first notifies fire before peer subscribes and
+        //   are silently dropped → receiver missing fragment 0 → reassembly stuck forever.
+        if (!descriptorWriteComplete) {
+            appendLog("⚠️ Waiting for CCCD subscribe to complete before sending...")
+            appendLog("   This ensures notifications will actually be delivered")
             return
         }
         
@@ -2559,9 +3205,13 @@ class BleService : Service() {
             if (removed > 0) appendLog("🗑️ Purged $removed stale outbound transaction(s) before sending")
         }
 
-        // Relevance system: load the highest-relevance transaction's fragments into the
-        // transport BLE frame buffer so the sending loop can deliver them to this peer.
-        serviceScope.launch {
+        appendLog("🚀 Starting sending loop")
+        sendingJob = serviceScope.launch {
+            // Load the highest-relevance transaction BEFORE the loop starts so that
+            // sendNextOutbound()'s first call always finds frames in the transport buffer.
+            // Previously this ran in a parallel coroutine, causing a race where the sending
+            // loop fired before loadForSending() completed and incorrectly triggered the idle
+            // window → 4-second disconnect → transaction never transmitted.
             val result = sdk?.loadForSending()?.getOrNull()
             if (result != null) {
                 activeTxId = result.txId
@@ -2570,16 +3220,10 @@ class BleService : Service() {
                 activeTxId = null
                 appendLog("📭 Outbound queue empty — nothing to load for this peer")
             }
-        }
 
-        appendLog("🚀 Starting sending loop")
-        sendingJob = serviceScope.launch {
             while (_connectionState.value == ConnectionState.CONNECTED) {
                 sendNextOutbound()
-                // Increased delay per Android BLE best practices
-                // 500ms was too aggressive, causing connection degradation
-                // 800ms provides better stability for notification-based transfers
-                delay(800) // Increased from 500ms for better stability
+                delay(800)
             }
             appendLog("🛑 Sending loop stopped")
         }
@@ -2610,8 +3254,22 @@ class BleService : Service() {
             // BLE safe fragment size: dynamically tied to negotiated MTU
             // Use currentMtu - 10 to ensure reliable transmission (10 bytes safety margin)
             val safeMaxLen = (currentMtu - 10).coerceAtLeast(20) // guard against too small values
-            val data = sdkInstance.nextOutbound(maxLen = safeMaxLen)
-            
+            var data = sdkInstance.nextOutbound(maxLen = safeMaxLen)
+
+            // The transport's low-level outbound_queue only refills via loadForSending(), which
+            // pulls from queue_manager().outbound. loadForSending() is called once at connect;
+            // if a tx is queued mid-session it never reaches the wire. Re-load defensively only
+            // when there is NO active tx — otherwise we'd re-send fragments of the in-flight tx
+            // forever, since relevance is only decremented on idle-disconnect.
+            if (data == null && activeTxId == null) {
+                val loaded = sdkInstance.loadForSending().getOrNull()
+                if (loaded != null) {
+                    activeTxId = loaded.txId
+                    appendLog("📡 Loaded fresh tx ${loaded.txId.take(8)}… mid-session (relevance=${loaded.relevance}, fragments=${loaded.fragmentCount})")
+                    data = sdkInstance.nextOutbound(maxLen = safeMaxLen)
+                }
+            }
+
             if (data == null) {
                 // Outbound queue is empty.  Before disconnecting, give the remote peer a window
                 // to push data back to us (the "server-send window").  We only disconnect once
@@ -2696,6 +3354,24 @@ class BleService : Service() {
         appendLog("📤 sendToGatt: Attempting to send ${data.size} bytes")
         appendLog("   Server path: server=${gattServer != null}, txChar=${gattCharacteristicTx != null}, device=${connectedDevice?.address}")
         appendLog("   Client path: gatt=${clientGatt != null}, remoteRx=${remoteRxCharacteristic != null}")
+
+        // Last-line-of-defence size guard. ATT notify is capped at MTU-3, write at MTU-5.
+        // If a fragment from the queue is somehow oversized for the active link (stale MTU
+        // from a previous session, racing re-fragmentation, etc.), the BLE stack will silently
+        // drop the notify and the peer will be stuck waiting for missing fragments forever.
+        // We refuse to ship it; the next nextOutbound() call will pop the next fragment and
+        // these stale oversized ones will eventually drain. The queue-time cap
+        // (SAFE_MAX_FRAGMENT_PAYLOAD) prevents this from happening for fresh transactions.
+        val maxNotifyPayload = (currentMtu - 3).coerceAtLeast(20)
+        val maxWritePayload = (currentMtu - 5).coerceAtLeast(20)
+        if (data.size > maxNotifyPayload && data.size > maxWritePayload) {
+            appendLog("❌ Fragment ${data.size}B exceeds MTU $currentMtu (notify max $maxNotifyPayload, write max $maxWritePayload) — DROPPING to avoid silent loss on the wire")
+            appendLog("   Cause: fragments queued at a higher MTU than the current link supports (stale queue).")
+            // Release the in-progress flag so the loop continues; do NOT clear activeTxId or
+            // we'll re-load the same tx (with the same oversized fragments) and loop forever.
+            operationInProgress.set(false)
+            return
+        }
         
         // CRITICAL FIX: Prioritize client path when we have an active client connection
         // This prevents dual-role confusion where device tries to notify AND write
@@ -3220,6 +3896,12 @@ class BleService : Service() {
                     // Record in peer map + Rust health monitor
                     recordPeer(gatt.device.address, rssi = _peers.value[gatt.device.address]?.rssi ?: 0, connected = true)
 
+                    // Track per-device connection count
+                    val addr0 = gatt.device.address
+                    _connectionCounts.value = _connectionCounts.value.toMutableMap().apply {
+                        put(addr0, (getOrDefault(addr0, 0) + 1))
+                    }
+
                     // Clear pending connection on success
                     if (pendingConnectionDevice?.address == gatt.device.address) {
                         pendingConnectionDevice = null
@@ -3227,6 +3909,10 @@ class BleService : Service() {
 
                     // Drain any confirmations that queued while disconnected
                     workChannel.trySend(WorkEvent.ConfirmationReady)
+
+                    // Start rotation watchdog — forces disconnect when ≥3 peers are visible
+                    // and the session has run past rotationMaxSessionMs.
+                    startRotationTimer()
 
                     appendLog("✅ Connected to ${gatt.device.address}")
                     
@@ -3254,6 +3940,9 @@ class BleService : Service() {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     appendLog("🔌 Disconnected from ${gatt.device.address}")
+
+                    // Stop rotation watchdog — session is over
+                    stopRotationTimer()
 
                     // Mark peer as no longer connected in local map
                     val addr = gatt.device.address
@@ -3322,41 +4011,40 @@ class BleService : Service() {
             appendLog("   Max payload per fragment: $maxPayload bytes")
             appendLog("   Expected fragments for 1KB tx: ~${1024 / maxPayload} (was ~${1024 / oldMaxPayload})")
             
-            // Re-queue fragments with new MTU if significantly larger (critical optimization!)
-            // This reduces fragment count from ~6 to ~4 for typical 1KB transactions
-            val mtuIncrease = mtu - oldMtu
-            if (mtuIncrease >= 30 && pendingTransactionBytes != null) {
-                appendLog("🔄 MTU increased by $mtuIncrease bytes - re-fragmenting with larger size...")
-                appendLog("   Pausing sending loop for re-fragmentation...")
-                
-                // Pause sending loop
+            // Re-fragment when EITHER (a) the new MTU is below what we queued fragments at —
+            // they would otherwise be dropped silently by the BLE stack, OR (b) the MTU is
+            // significantly larger than the queue-time MTU (fewer fragments = less overhead).
+            // Skipping re-fragmentation on a decrease is the bug that left receivers stuck
+            // at "fragment 1/2" forever.
+            val mtuDelta = mtu - oldMtu
+            val needReFragmentForShrink = pendingTransactionBytes != null &&
+                fragmentsQueuedWithMtu > 0 &&
+                mtu < fragmentsQueuedWithMtu
+            val needReFragmentForGrowth = pendingTransactionBytes != null && mtuDelta >= 30
+            if (needReFragmentForShrink || needReFragmentForGrowth) {
+                val reason = if (needReFragmentForShrink)
+                    "MTU shrunk below queue-time MTU ($fragmentsQueuedWithMtu → $mtu) — fragments would be dropped"
+                else
+                    "MTU increased by $mtuDelta bytes — fewer fragments possible"
+                appendLog("🔄 Re-fragmenting: $reason")
+
                 sendingJob?.cancel()
-                
-                // Re-fragment with new MTU
+
                 serviceScope.launch {
                     val txBytes = pendingTransactionBytes
                     if (txBytes != null) {
                         val sdkInstance = sdk
                         if (sdkInstance != null) {
-                            // Clear outbound queue (old small fragments)
-                            // Note: We can't directly clear the Rust queue, but new fragments will be prioritized
-                            
-                            appendLog("♻️ Re-fragmenting ${txBytes.size} bytes with new MTU...")
-                            val newMaxPayload = (currentMtu - 10).coerceAtLeast(20)
+                            val newMaxPayload = minOf((currentMtu - 10).coerceAtLeast(20), SAFE_MAX_FRAGMENT_PAYLOAD)
+                            appendLog("♻️ Re-fragmenting ${txBytes.size} bytes with maxPayload=$newMaxPayload")
                             sdkInstance.fragment(txBytes, newMaxPayload).onSuccess { fragments ->
                                 val newCount = fragments.fragments.size
                                 val oldCount = (txBytes.size + oldMaxPayload - 1) / oldMaxPayload
                                 appendLog("✅ Re-fragmented: $oldCount → $newCount fragments")
-                                appendLog("   Improvement: ${((oldCount - newCount).toFloat() / oldCount * 100).toInt()}% fewer fragments")
-                                
-                                // Update tracking
                                 fragmentsQueuedWithMtu = currentMtu
-                                
-                                // Restart sending loop with optimized fragments
                                 ensureSendingLoopStarted()
                             }.onFailure {
                                 appendLog("❌ Re-fragmentation failed: ${it.message}")
-                                // Continue with old fragments
                                 ensureSendingLoopStarted()
                             }
                         } else {
@@ -3364,8 +4052,6 @@ class BleService : Service() {
                         }
                     }
                 }
-            } else if (mtuIncrease < 30) {
-                appendLog("   MTU increase too small ($mtuIncrease bytes), keeping existing fragments")
             }
             
             // CRITICAL: Discover services after MTU negotiation
@@ -3711,6 +4397,12 @@ class BleService : Service() {
                     // Record in peer map + Rust health monitor (server-side connection)
                     recordPeer(device.address, rssi = _peers.value[device.address]?.rssi ?: 0, connected = true)
 
+                    // Track per-device connection count
+                    val addr1 = device.address
+                    _connectionCounts.value = _connectionCounts.value.toMutableMap().apply {
+                        put(addr1, (getOrDefault(addr1, 0) + 1))
+                    }
+
                     // Clear pending connection on success
                     if (pendingConnectionDevice?.address == device.address) {
                         pendingConnectionDevice = null
@@ -3722,6 +4414,9 @@ class BleService : Service() {
                     // Stop scanning/advertising now that we're connected
                     stopScanning()
                     stopAdvertising()
+
+                    // Start rotation watchdog — same fairness policy as client mode
+                    startRotationTimer()
 
                     appendLog("🤝 🤝 🤝 (SERVER) CONNECTED ${device.address} 🤝 🤝 🤝")
                     appendLog("   Server mode: Can send notifications immediately")
@@ -3743,22 +4438,35 @@ class BleService : Service() {
                         appendLog("   TX UUID: ${tx.uuid}")
                     }
                     
-                    // In server mode, we can SEND immediately (don't need descriptor write for TX)
-                    // But descriptor write is still needed on client side to RECEIVE
-                    // Only set flag if we don't have a client connection active
-                    if (clientGatt == null) {
-                        descriptorWriteComplete = true
-                        appendLog("   No client connection, marking ready to send")
-                    } else {
-                        appendLog("   Client connection exists, waiting for its descriptor write...")
-                    }
-                    // Start sending loop for server mode
-                    ensureSendingLoopStarted()
+                    // CRITICAL: In server mode we cannot send immediately. The peer (acting as
+                    // GATT client) still needs ~500ms after STATE_CONNECTED to do service
+                    // discovery and write our TX characteristic's CCCD descriptor — only after
+                    // that does Android actually deliver our notifies. Notifies fired before
+                    // that are silently dropped at the BLE stack, leaving the receiver missing
+                    // the first fragment(s) and reassembly stuck forever.
+                    //
+                    // Wait for the CCCD subscribe (handled in onDescriptorWriteRequest below).
+                    // If the peer never subscribes within 3s, fall back to sending anyway as a
+                    // best-effort safety net (some peers don't honour the standard CCCD flow).
+                    appendLog("   Server mode: waiting for peer CCCD subscribe before sending notifies")
+                    val peerAddr = device.address
+                    mainHandler.postDelayed({
+                        if (_connectionState.value == ConnectionState.CONNECTED &&
+                            connectedDevice?.address == peerAddr &&
+                            !descriptorWriteComplete) {
+                            appendLog("⚠️ Peer $peerAddr did not write CCCD within 3s — falling back to sending anyway")
+                            descriptorWriteComplete = true
+                            ensureSendingLoopStarted()
+                        }
+                    }, 3_000L)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
                     connectedDevice = null
                     sendingJob?.cancel()
+
+                    // Stop rotation watchdog — session is over
+                    stopRotationTimer()
 
                     // Mark peer as no longer connected in local map
                     _peers.value = _peers.value.toMutableMap().apply {
@@ -3940,9 +4648,20 @@ class BleService : Service() {
             
             // Handle CCCD descriptor writes (for enabling notifications)
             if (descriptor.uuid == cccdUuid) {
-                appendLog("   ✅ CCCD descriptor write - notifications ${if (value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) "ENABLED" else "DISABLED"}")
+                val enabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                appendLog("   ✅ CCCD descriptor write - notifications ${if (enabled) "ENABLED" else "DISABLED"}")
+
+                // The peer (GATT client) has now subscribed to our TX characteristic. Notifies
+                // fired before this point would have been silently dropped by the BLE stack.
+                // Now it is safe to start the sending loop. This is the missing-fragment-0 fix.
+                if (enabled && _connectionState.value == ConnectionState.CONNECTED &&
+                    connectedDevice?.address == device.address && !descriptorWriteComplete) {
+                    descriptorWriteComplete = true
+                    appendLog("   🚀 Peer subscribed to TX — starting sending loop now")
+                    ensureSendingLoopStarted()
+                }
             }
-            
+
             // Send response
             if (responseNeeded) {
                 val responseSent = gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null) ?: false
@@ -3968,6 +4687,33 @@ class BleService : Service() {
             currentMtu = mtu
             val maxPayload = (mtu - 10).coerceAtLeast(20)
             appendLog("   MTU: $oldMtu → $mtu bytes, maxPayload=$maxPayload bytes")
+
+            // Same re-fragmentation rule as the client-side handler: if the new MTU is below
+            // what fragments were sized for, they will be silently dropped at the BLE stack
+            // (notify is capped at MTU-3). Re-fragment so notifies actually reach the peer.
+            val needReFragmentForShrink = pendingTransactionBytes != null &&
+                fragmentsQueuedWithMtu > 0 &&
+                mtu < fragmentsQueuedWithMtu
+            if (needReFragmentForShrink) {
+                appendLog("🔄 (Server) Re-fragmenting: MTU shrunk below queue-time MTU ($fragmentsQueuedWithMtu → $mtu)")
+                sendingJob?.cancel()
+                serviceScope.launch {
+                    val txBytes = pendingTransactionBytes
+                    val sdkInstance = sdk
+                    if (txBytes != null && sdkInstance != null) {
+                        val newMaxPayload = minOf((currentMtu - 10).coerceAtLeast(20), SAFE_MAX_FRAGMENT_PAYLOAD)
+                        appendLog("♻️ (Server) Re-fragmenting ${txBytes.size} bytes with maxPayload=$newMaxPayload")
+                        sdkInstance.fragment(txBytes, newMaxPayload).onSuccess { fragments ->
+                            appendLog("✅ (Server) Re-fragmented into ${fragments.fragments.size} fragments")
+                            fragmentsQueuedWithMtu = currentMtu
+                            ensureSendingLoopStarted()
+                        }.onFailure {
+                            appendLog("❌ (Server) Re-fragmentation failed: ${it.message}")
+                            ensureSendingLoopStarted()
+                        }
+                    }
+                }
+            }
         }
 
         override fun onPhyUpdate(device: BluetoothDevice, txPhy: Int, rxPhy: Int, status: Int) {
@@ -4041,6 +4787,18 @@ class BleService : Service() {
                 android.util.Log.w("BleService", "Failed to check battery optimization status", e)
             }
         }
+    }
+
+    private fun postConfirmationNotification(title: String, text: String) {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        nm.notify(CONFIRMATION_NOTIFICATION_ID, notification)
     }
 
     private fun createNotification(): Notification {

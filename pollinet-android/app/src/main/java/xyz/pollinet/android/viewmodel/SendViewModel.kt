@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import xyz.pollinet.sdk.BleService
 import xyz.pollinet.sdk.FragmentFFI
 import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.Priority
@@ -77,6 +78,9 @@ class SendViewModel : ViewModel() {
     }
     fun reset() = _state.update { SendUiState(from = it.from) }
 
+    private fun log(msg: String) = android.util.Log.d("SendViewModel", msg)
+    private fun logE(msg: String, t: Throwable? = null) = android.util.Log.e("SendViewModel", msg, t)
+
     // ─── Step 1: Create Intent ────────────────────────────────────────────────
 
     /**
@@ -100,6 +104,7 @@ class SendViewModel : ViewModel() {
             val gasFee = s.gasFeeText.trim().toLongOrNull() ?: 1000L
             val expiresAt = System.currentTimeMillis() / 1000L + (s.expiresInMinutes * 60L)
 
+            log("createIntent: from=$from recipient=$recipient mint=${token.mint} amount=$rawAmount gasFee=$gasFee expiresAt=$expiresAt")
             step(SendStep.CREATING_INTENT, "Deriving token accounts…")
 
             // The executor program requires token accounts (not wallet addresses) for both
@@ -107,27 +112,34 @@ class SendViewModel : ViewModel() {
             val recipientTokenAccount = try {
                 sdk.deriveAssociatedTokenAccount(recipient, token.mint).getOrThrow()
             } catch (e: Exception) {
+                logE("createIntent: failed to derive recipient ATA", e)
                 return@launch setError("Failed to derive recipient token account: ${e.message}")
             }
+            log("createIntent: recipientTokenAccount=$recipientTokenAccount")
 
             // Resolve the gateway's token account for the gas fee.
             // If gas_fee_amount = 0 and the gateway wallet is unreachable, fall back to
             // the user's own token account (Anchor skips the transfer when amount == 0).
             val (resolvedGasFeepayee, resolvedGasFee) = run {
                 val gatewayWallet = sdk.getGatewayWallet().getOrNull()
+                log("createIntent: gatewayWallet=$gatewayWallet")
                 if (gatewayWallet != null) {
                     val gatewayAta = sdk.deriveAssociatedTokenAccount(gatewayWallet, token.mint).getOrNull()
+                    log("createIntent: gatewayAta=$gatewayAta")
                     if (gatewayAta != null) {
                         gatewayAta to gasFee
                     } else {
-                        token.pubkey to 0L  // derivation failed, skip fee
+                        log("createIntent: gateway ATA derivation failed — skipping fee")
+                        token.pubkey to 0L
                     }
                 } else {
-                    token.pubkey to 0L  // gateway unreachable (offline), skip fee
+                    log("createIntent: gateway unreachable (offline) — skipping fee")
+                    token.pubkey to 0L
                 }
             }
 
             step(SendStep.CREATING_INTENT, "Building intent…")
+            log("createIntent: building intent bytes to=$recipientTokenAccount gasFeepayee=$resolvedGasFeepayee resolvedGasFee=$resolvedGasFee")
             val intentPayload = try {
                 sdk.createIntentBytes(
                     from = from,
@@ -139,20 +151,26 @@ class SendViewModel : ViewModel() {
                     gasFeepayee = resolvedGasFeepayee,
                 ).getOrThrow()
             } catch (e: Exception) {
+                logE("createIntent: createIntentBytes failed", e)
                 return@launch setError("Failed to build intent: ${e.message}")
             }
+            log("createIntent: intent built nonce=${intentPayload.nonceHex} bytes=${intentPayload.intentBytes.take(24)}…")
 
             step(SendStep.AWAITING_SIGN, "Waiting for wallet signature…")
             val intentBytes = try {
                 android.util.Base64.decode(intentPayload.intentBytes, android.util.Base64.NO_WRAP)
             } catch (e: Exception) {
+                logE("createIntent: failed to decode intent bytes", e)
                 return@launch setError("Failed to decode intent bytes: ${e.message}")
             }
+            log("createIntent: requesting wallet signature for ${intentBytes.size}-byte intent")
             val signature = try {
                 signIntentFn(intentBytes)
             } catch (e: Exception) {
+                logE("createIntent: signing cancelled/failed", e)
                 return@launch setError("Signing cancelled or failed: ${e.message}")
             }
+            log("createIntent: signature obtained (${signature.size} bytes) — intent ready")
 
             _state.update { it.copy(
                 step = SendStep.INTENT_READY,
@@ -179,45 +197,47 @@ class SendViewModel : ViewModel() {
             val signature  = s.signatureBase64   ?: return@launch setError("Create an intent first")
             val fromAcc    = s.fromTokenAccount  ?: return@launch setError("Create an intent first")
 
+            // We must route through the running BleService — its internal SDK is the one whose
+            // outbound_queue the BLE sending loop polls. Pushing to any other PolliNetSDK
+            // instance lands the tx in a queue nobody reads, and the fragment never goes on the
+            // wire. queueSignedTransaction also fires WorkEvent.OutboundReady so the loop wakes
+            // up immediately rather than waiting for the next 800ms tick.
+            val bleService = BleService.get() ?: return@launch setError(
+                "BLE service not running — open Dev tab once to start it"
+            )
+
             step(SendStep.TRANSFERRING, "Fragmenting for BLE…")
 
             // Compact JSON payload that a relay node can POST to pollicore directly
             val payloadJson = """{"intent_bytes":"$intentBytes","signature":"$signature","from_token_account":"$fromAcc","token_program":"spl-token"}"""
             val payloadBytes = payloadJson.toByteArray(Charsets.UTF_8)
-
-            val fragmentList = try {
-                sdk.fragment(payloadBytes).getOrThrow()
-            } catch (e: Exception) {
-                return@launch setError("Fragmentation failed: ${e.message}")
-            }
-
-            // SHA-256 of the payload as hex txId
             val txId = sha256Hex(payloadBytes)
+            log("transferViaBle: payload=${payloadBytes.size}B txId=${txId.take(16)}…")
 
-            val fragmentsFFI = fragmentList.fragments.mapIndexed { idx, frag ->
-                FragmentFFI(
-                    transactionId = txId,
-                    fragmentIndex = idx,
-                    totalFragments = fragmentList.fragments.size,
-                    dataBase64 = frag.data,
-                )
-            }
+            val pushResult = bleService.queueSignedTransaction(payloadBytes, Priority.HIGH)
 
-            try {
-                sdk.pushOutboundTransaction(
-                    txBytes = payloadBytes,
-                    txId = txId,
-                    fragments = fragmentsFFI,
-                    priority = Priority.HIGH,
-                ).getOrThrow()
-            } catch (e: Exception) {
+            pushResult.onFailure { e ->
+                val isDuplicate = e.message?.contains("already in queue", ignoreCase = true) == true ||
+                                  e.message?.contains("duplicate", ignoreCase = true) == true
+                if (isDuplicate) {
+                    log("transferViaBle: txId=${txId.take(16)}… already in BLE outbound queue — treating as TRANSFERRED")
+                    _state.update { it.copy(
+                        step = SendStep.TRANSFERRED,
+                        stepLabel = "Already queued for BLE relay",
+                        error = null,
+                    ) }
+                    return@launch
+                }
+                logE("transferViaBle: queueSignedTransaction failed", e)
                 return@launch setError("Failed to queue for BLE: ${e.message}")
             }
 
+            val fragmentCount = pushResult.getOrNull() ?: 0
+            log("transferViaBle: pushed $fragmentCount fragments to BLE outbound queue — TRANSFERRED")
             _state.update { it.copy(
                 step = SendStep.TRANSFERRED,
                 stepLabel = "Queued for BLE relay",
-                fragmentCount = fragmentList.fragments.size,
+                fragmentCount = fragmentCount,
                 error = null,
             ) }
         }
@@ -236,6 +256,7 @@ class SendViewModel : ViewModel() {
             val signature  = s.signatureBase64   ?: return@launch setError("Create an intent first")
             val fromAcc    = s.fromTokenAccount  ?: return@launch setError("Create an intent first")
 
+            log("submitToPollicore: fromTokenAccount=$fromAcc intent=${intentBytes.take(24)}…")
             step(SendStep.SUBMITTING, "Submitting to Pollinet…")
             try {
                 val txSig = sdk.submitIntent(
@@ -244,13 +265,26 @@ class SendViewModel : ViewModel() {
                     fromTokenAccount = fromAcc,
                 ).getOrThrow()
 
+                log("submitToPollicore: SUCCESS txSignature=$txSig")
                 _state.update { it.copy(
                     step = SendStep.SUCCESS,
                     stepLabel = "Submitted!",
                     txSignature = txSig,
                 ) }
             } catch (e: Exception) {
-                setError("Submission failed: ${e.message}")
+                logE("submitToPollicore: failed", e)
+                val friendlyMsg = when {
+                    e.message?.contains("AccountNotInitialized") == true ||
+                    e.message?.contains("to_token_account") == true ->
+                        "Recipient's token account doesn't exist on-chain yet. " +
+                        "They need to receive tokens for this mint at least once to initialize their account."
+                    e.message?.contains("already in queue", ignoreCase = true) == true ->
+                        "This intent is already queued for submission."
+                    e.message?.contains("422") == true ->
+                        "Pollicore rejected the transaction (422). Details: ${e.message}"
+                    else -> "Submission failed: ${e.message}"
+                }
+                setError(friendlyMsg)
             }
         }
     }
