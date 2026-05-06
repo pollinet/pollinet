@@ -1047,6 +1047,68 @@ class PolliNetSDK private constructor(
     }
 
     /**
+     * Fetch the most recent confirmed blockhash from the configured Solana RPC.
+     * Used as input to [createApproveTransaction] / [createRevokeTransaction]. Pure RPC call,
+     * no FFI hop. Throws if `SdkConfig.rpcUrl` was not set at SDK init.
+     */
+    suspend fun fetchRecentBlockhash(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val rpc = rpcUrl
+                ?: return@withContext Result.failure(Exception("rpcUrl not set on SdkConfig"))
+            val body = """{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[{"commitment":"confirmed"}]}"""
+            val response = rpcPost(rpc, body)
+            val root = json.parseToJsonElement(response).jsonObject
+            val blockhash = root["result"]?.jsonObject
+                ?.get("value")?.jsonObject
+                ?.get("blockhash")?.jsonPrimitive?.content
+                ?: return@withContext Result.failure(Exception("Could not parse blockhash from RPC response: $response"))
+            Result.success(blockhash)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Submit a fully-signed raw Solana transaction to the configured RPC's `sendTransaction`
+     * endpoint. The bytes must already be signed (e.g. by MWA on Android). Returns the resulting
+     * Solana transaction signature on success. Throws if `SdkConfig.rpcUrl` was not set at init.
+     */
+    suspend fun submitSignedTransaction(signedTxBytes: ByteArray): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val rpc = rpcUrl
+                ?: return@withContext Result.failure(Exception("rpcUrl not set on SdkConfig"))
+            val encoded = android.util.Base64.encodeToString(signedTxBytes, android.util.Base64.NO_WRAP)
+            val body = """{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["$encoded",{"encoding":"base64","preflightCommitment":"confirmed"}]}"""
+            val response = rpcPost(rpc, body)
+            val sigMatch = Regex(""""result"\s*:\s*"([^"]+)"""").find(response)
+            val errMatch = Regex(""""message"\s*:\s*"([^"]+)"""").find(response)
+            if (sigMatch != null) {
+                Result.success(sigMatch.groupValues[1])
+            } else {
+                Result.failure(Exception(errMatch?.groupValues?.get(1) ?: "sendTransaction failed: $response"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Internal helper for the two RPC methods above. Keeps a single HTTP code path. */
+    private fun rpcPost(url: String, body: String): String {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.doOutput = true
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 30_000
+        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        if (conn.responseCode !in 200..299) {
+            val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
+            throw Exception("RPC HTTP ${conn.responseCode}: $err")
+        }
+        return conn.inputStream.bufferedReader(Charsets.UTF_8).readText()
+    }
+
+    /**
      * List all SPL token accounts owned by [walletAddress] together with their delegation
      * status against the Pollinet executor PDA. This is the canonical "is this token
      * Pollinet-ready?" query — `isExecutorDelegated == true && delegatedRawAmount > 0` means

@@ -2,16 +2,11 @@ package xyz.pollinet.android.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.TokenApprovalEntry
 
@@ -70,13 +65,13 @@ class WalletViewModel : ViewModel() {
     private val _state = MutableStateFlow(WalletUiState())
     val state: StateFlow<WalletUiState> = _state.asStateFlow()
 
-    private val json = Json { ignoreUnknownKeys = true }
-
     // Called from MainActivity once wallet is connected
     fun onWalletConnected(address: String, sdk: PolliNetSDK?) {
         _state.update { it.copy(walletAddress = address, error = null) }
-        loadExecutorPda()
-        if (sdk != null) loadTokenAccounts(sdk)
+        if (sdk != null) {
+            loadExecutorPda(sdk)
+            loadTokenAccounts(sdk)
+        }
     }
 
     fun onWalletDisconnected() {
@@ -148,7 +143,7 @@ class WalletViewModel : ViewModel() {
 
                 // Step 1: approve token for executor PDA
                 _state.update { it.copy(statusMessage = "Sign approval transaction in wallet…") }
-                val blockhash = fetchRecentBlockhash(s.rpcUrl)
+                val blockhash = sdk.fetchRecentBlockhash().getOrThrow()
 
                 val approveTx = sdk.createApproveTransaction(
                     ownerWallet = wallet,
@@ -197,7 +192,7 @@ class WalletViewModel : ViewModel() {
             _state.update { it.copy(statusMessage = "Revoking ${token.symbol}…") }
 
             try {
-                val blockhash = fetchRecentBlockhash(s.rpcUrl)
+                val blockhash = sdk.fetchRecentBlockhash().getOrThrow()
 
                 val revokeTx = sdk.createRevokeTransaction(
                     ownerWallet = wallet,
@@ -246,47 +241,16 @@ class WalletViewModel : ViewModel() {
         }
     }
 
-    private fun loadExecutorPda() {
+    /** Resolve the canonical executor PDA from the SDK and cache it on UI state. */
+    fun loadExecutorPda(sdk: PolliNetSDK) {
         viewModelScope.launch {
-            try {
-                // We need sdk but it's passed in per-operation; cache the PDA via a one-off call
-                // The PDA is deterministic so we can derive it from the program ID directly
-                _state.update { it.copy(executorPda = EXECUTOR_PDA) }
-            } catch (_: Exception) {}
+            sdk.getExecutorPda()
+                .onSuccess { resp -> _state.update { it.copy(executorPda = resp.pda) } }
+                .onFailure { /* leave executorPda as null; UI handles missing value */ }
         }
-    }
-
-    // ─── RPC helpers ─────────────────────────────────────────────────────────
-
-    private suspend fun fetchRecentBlockhash(rpcUrl: String): String = withContext(Dispatchers.IO) {
-        val body = """{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[{"commitment":"confirmed"}]}"""
-        val response = rpcPost(rpcUrl, body)
-        val root = json.parseToJsonElement(response).jsonObject
-        root["result"]?.jsonObject
-            ?.get("value")?.jsonObject
-            ?.get("blockhash")?.jsonPrimitive?.content
-            ?: throw Exception("Could not parse blockhash from RPC response")
-    }
-
-    private fun rpcPost(url: String, body: String): String {
-        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doOutput = true
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 30_000
-        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-        if (conn.responseCode !in 200..299) {
-            val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
-            throw Exception("RPC error ${conn.responseCode}: $err")
-        }
-        return conn.inputStream.bufferedReader(Charsets.UTF_8).readText()
     }
 
     companion object {
-        // Hardcoded executor PDA (deterministic from the program ID)
-        const val EXECUTOR_PDA = "EJ28rMA3AgRVdNqdCnq4DrpRUfYA12aPdJy1bbFNsQ1A" // program ID placeholder; real PDA resolved by SDK
-
         val KNOWN_TOKENS = mapOf(
             "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" to "USDC",
             "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" to "USDT",

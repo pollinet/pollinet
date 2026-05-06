@@ -26,9 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import xyz.pollinet.android.mwa.PolliNetMwaClient
 import xyz.pollinet.android.mwa.MwaException
 import xyz.pollinet.android.viewmodel.TokenAccount
@@ -53,8 +51,9 @@ fun WalletScreen(
     // the initial token load. listTokenAccounts depends on the SDK, which may arrive on a
     // different frame than the wallet authorize callback.
     LaunchedEffect(sdk, state.walletAddress) {
-        if (sdk != null && state.walletAddress != null && state.tokens.isEmpty() && !state.isLoadingTokens) {
-            viewModel.loadTokenAccounts(sdk)
+        if (sdk != null && state.walletAddress != null) {
+            if (state.executorPda == null) viewModel.loadExecutorPda(sdk)
+            if (state.tokens.isEmpty() && !state.isLoadingTokens) viewModel.loadTokenAccounts(sdk)
         }
     }
 
@@ -191,8 +190,8 @@ fun WalletScreen(
                                     signedBytes
                                 },
                                 submitTx = { signedBytes ->
-                                    // Submit raw signed transaction via Solana RPC
-                                    submitSignedTx(signedBytes, state.rpcUrl)
+                                    // Pure JSON-RPC sendTransaction — handled by the SDK now.
+                                    sdk.submitSignedTransaction(signedBytes).getOrThrow()
                                 },
                             )
                         },
@@ -205,7 +204,7 @@ fun WalletScreen(
                                     mwaClient.signTransaction(mwaSender, txBase64)
                                 },
                                 submitTx = { signedBytes ->
-                                    submitSignedTx(signedBytes, state.rpcUrl)
+                                    sdk.submitSignedTransaction(signedBytes).getOrThrow()
                                 },
                             )
                         },
@@ -495,27 +494,3 @@ private fun SettingsPanel(
     }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Submit a fully-signed raw transaction to Solana via JSON-RPC. Returns the signature. */
-private suspend fun submitSignedTx(signedTxBytes: ByteArray, rpcUrl: String): String =
-    withContext(Dispatchers.IO) {
-        val encoded = android.util.Base64.encodeToString(signedTxBytes, android.util.Base64.NO_WRAP)
-        val body = """{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["$encoded",{"encoding":"base64","preflightCommitment":"confirmed"}]}"""
-        val conn = java.net.URL(rpcUrl).openConnection() as java.net.HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doOutput = true
-        conn.connectTimeout = 15_000
-        conn.readTimeout = 30_000
-        conn.outputStream.use { it.write(body.toByteArray()) }
-        val responseCode = conn.responseCode
-        val responseBody = if (responseCode in 200..299) {
-            conn.inputStream.bufferedReader().readText()
-        } else {
-            val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
-            throw Exception("RPC HTTP $responseCode: $err")
-        }
-        val match = Regex("\"result\"\\s*:\\s*\"([^\"]+)\"").find(responseBody)
-        match?.groupValues?.get(1) ?: throw Exception("sendTransaction failed: $responseBody")
-    }

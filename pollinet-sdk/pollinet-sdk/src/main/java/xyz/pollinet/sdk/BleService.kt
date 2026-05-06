@@ -280,6 +280,22 @@ class BleService : Service() {
     // Event channel for unified worker (replaces 4-5 polling loops!)
     private val workChannel = Channel<WorkEvent>(Channel.UNLIMITED)
 
+    // De-dupe set for received confirmations, keyed by full txId. Prevents the A↔B echo loop
+    // where a confirmation bounces back and forth — without this every round trip would
+    // re-record the same confirmation on the Dev screen and re-relay it until the Rust SDK's
+    // hop cap (MAX_TX_RELAY_HOPS = 5) finally rejected it. Bounded LRU; oldest evicted on overflow.
+    private val seenConfirmationTxIds = object : LinkedHashSet<String>() {
+        private val max = 200
+        override fun add(element: String): Boolean {
+            val added = super.add(element)
+            if (added && size > max) {
+                val it = iterator()
+                if (it.hasNext()) { it.next(); it.remove() }
+            }
+            return added
+        }
+    }
+
     // Reassembly buffer for fragmented confirmations (frame type 0x0C). Confirmations sometimes
     // exceed the ATT notify cap (MTU-3) — particularly Failed confirmations with long error
     // messages. We chunk them across multiple packets and rebuild here on the receiver.
@@ -1635,14 +1651,23 @@ class BleService : Service() {
         try {
             appendLog("📨 ===== PROCESSING RECEIVED CONFIRMATION =====")
             appendLog("📨 Confirmation size: ${data.size} bytes")
-            
+
             // Deserialize confirmation from JSON
             val confirmationStr = String(data, Charsets.UTF_8)
             val confirmation = json.decodeFromString<Confirmation>(confirmationStr)
-            
+
             appendLog("✅ Confirmation deserialized for tx: ${confirmation.txId.take(8)}...")
             appendLog("   Relay count: ${confirmation.relayCount}")
-            
+
+            // Echo-loop guard: confirmations bounce back and forth between paired devices in
+            // small meshes. Without this, every round trip would re-record this confirmation
+            // on the Dev screen and re-relay it until the Rust SDK's hop cap finally rejects.
+            // First receive wins; subsequent receives of the same txId are silently dropped.
+            if (!seenConfirmationTxIds.add(confirmation.txId)) {
+                appendLog("⏭️ Confirmation for ${confirmation.txId.take(8)}… already processed — skipping (echo)")
+                return
+            }
+
             val txShort = confirmation.txId.take(8)
             when (confirmation.status) {
                 is ConfirmationStatus.Success -> {
