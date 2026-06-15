@@ -9,6 +9,33 @@ use serde::{Deserialize, Serialize};
 pub const FFI_VERSION: u32 = 1;
 
 // ============================================================================
+// Transport selection
+// ============================================================================
+
+/// Tag identifying which radio/transport a handle is bound to.
+///
+/// The host-driven transport engine is transport-agnostic; this tag lets the FFI
+/// registry hold heterogeneous transports behind a single `Arc<dyn HostTransport>`
+/// without scattering `if wifi { .. }` checks through the core. Future transports
+/// (LoRa, satellite, internet) extend this enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransportKind {
+    #[serde(rename = "BLE")]
+    Ble,
+    #[serde(rename = "WIFI_DIRECT")]
+    WifiDirect,
+}
+
+impl TransportKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TransportKind::Ble => "BLE",
+            TransportKind::WifiDirect => "WIFI_DIRECT",
+        }
+    }
+}
+
+// ============================================================================
 // Result envelope
 // ============================================================================
 

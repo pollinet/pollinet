@@ -16,7 +16,14 @@
     <!-- Foreground service for BLE operations -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    
+
+    <!-- Wi-Fi Direct (Wi-Fi P2P) transport -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Android 13+ nearby Wi-Fi devices (replaces fine-location for P2P discovery) -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
     <!-- Internet for RPC calls (optional) -->
     <uses-permission android:name="android.permission.INTERNET" />
     
@@ -24,5 +31,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
     
 </manifest>

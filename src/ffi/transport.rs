@@ -1221,6 +1221,59 @@ impl HostBleTransport {
     }
 }
 
+/// `HostBleTransport` is the canonical implementation of the radio-agnostic
+/// [`HostTransport`] contract. Every method here forwards to the inherent method of the
+/// same name — this impl adds the trait seam with **zero behavior change** so the FFI
+/// registry can treat BLE and Wi-Fi Direct uniformly via `Arc<dyn HostTransport>`.
+impl crate::ffi::host_transport::HostTransport for HostBleTransport {
+    fn push_inbound(&self, data: Vec<u8>) -> Result<(), String> {
+        HostBleTransport::push_inbound(self, data)
+    }
+    fn next_outbound(&self, max_len: usize) -> Option<Vec<u8>> {
+        HostBleTransport::next_outbound(self, max_len)
+    }
+    fn queue_transaction(
+        &self,
+        tx_bytes: Vec<u8>,
+        max_payload: Option<usize>,
+    ) -> Result<Vec<Fragment>, String> {
+        HostBleTransport::queue_transaction(self, tx_bytes, max_payload)
+    }
+    fn queue_fragments(&self, fragments: &[TransactionFragment]) -> Result<(), String> {
+        HostBleTransport::queue_fragments(self, fragments)
+    }
+    fn pop_completed(&self) -> Option<(String, Vec<u8>)> {
+        HostBleTransport::pop_completed(self)
+    }
+    fn push_received_transaction(&self, tx_bytes: Vec<u8>) -> bool {
+        HostBleTransport::push_received_transaction(self, tx_bytes)
+    }
+    fn next_received_transaction(&self) -> Option<(String, Vec<u8>, u64)> {
+        HostBleTransport::next_received_transaction(self)
+    }
+    fn received_queue_size(&self) -> usize {
+        HostBleTransport::received_queue_size(self)
+    }
+    fn tick(&self, now_ms: u64) -> Vec<Vec<u8>> {
+        HostBleTransport::tick(self, now_ms)
+    }
+    fn metrics(&self) -> MetricsSnapshot {
+        HostBleTransport::metrics(self)
+    }
+    fn clear_transaction(&self, tx_id: &str) {
+        HostBleTransport::clear_transaction(self, tx_id)
+    }
+    fn clear_outbound_for_tx(&self, tx_id: &str) -> usize {
+        HostBleTransport::clear_outbound_for_tx(self, tx_id)
+    }
+    fn kind(&self) -> crate::ffi::types::TransportKind {
+        crate::ffi::types::TransportKind::Ble
+    }
+    fn default_max_payload(&self) -> usize {
+        crate::ble::mesh::MAX_FRAGMENT_DATA
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,8 @@
 package xyz.pollinet.sdk
 
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import kotlinx.coroutines.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -40,9 +43,71 @@ class PolliNetSDK private constructor(
         }
         
         /**
+         * Initialize a standalone Wi-Fi Direct SDK instance (own transport engine).
+         *
+         * Same config schema as [initialize]; the returned instance exposes the shared
+         * transport API (push/next/metrics/received-queue) but not BLE-specific builders.
+         * Start the radio with [startWifiDirectService].
+         */
+        suspend fun initializeWifiDirect(config: SdkConfig): Result<PolliNetSDK> =
+            withContext(Dispatchers.IO) {
+                try {
+                    val configJson = Json.encodeToString(config)
+                    val handle = PolliNetFFI.initWifiDirect(configJson.toByteArray())
+                    if (handle < 0) {
+                        Result.failure(Exception("Failed to initialize Wi-Fi Direct: invalid handle"))
+                    } else {
+                        Result.success(PolliNetSDK(handle))
+                    }
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+        /**
          * Get the SDK version
          */
         fun version(): String = PolliNetFFI.version()
+    }
+
+    /** The native transport handle (needed to start a transport service). */
+    val transportHandle: Long get() = handle
+
+    /** Which radio this handle drives: "BLE" | "WIFI_DIRECT". */
+    fun transportKind(): String = PolliNetFFI.transportKind(handle)
+
+    /**
+     * Create a Wi-Fi Direct handle that SHARES this instance's engine, so a transaction
+     * seen over BLE *and* Wi-Fi is reassembled/submitted exactly once. Returns the new
+     * handle (use it to start [WifiDirectService]), or -1 on failure.
+     *
+     * Only valid on a BLE-backed instance (from [initialize]).
+     */
+    fun createSharedWifiDirectHandle(): Long = PolliNetFFI.initWifiDirectSharing(handle)
+
+    /**
+     * Start the Wi-Fi Direct foreground service bound to [serviceHandle] (defaults to this
+     * instance's handle — correct for a [initializeWifiDirect] instance; for dual-radio
+     * use a handle from [createSharedWifiDirectHandle]).
+     */
+    fun startWifiDirectService(context: Context, serviceHandle: Long = handle) {
+        val intent = Intent(context, WifiDirectService::class.java).apply {
+            action = WifiDirectService.ACTION_START
+            putExtra(WifiDirectService.EXTRA_HANDLE, serviceHandle)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    /** Stop the Wi-Fi Direct foreground service. */
+    fun stopWifiDirectService(context: Context) {
+        val intent = Intent(context, WifiDirectService::class.java).apply {
+            action = WifiDirectService.ACTION_STOP
+        }
+        context.startService(intent)
     }
 
     /**

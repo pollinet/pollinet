@@ -201,6 +201,34 @@ cargo run --example create_unsigned_transaction
 cargo run --example m1_demo_50_transactions
 ```
 
+## Wi-Fi Direct Transport
+
+The Wi-Fi Direct transport is an **adapter** over the same host-driven engine as BLE
+(see [Wi-Fi Direct Protocol](docs/WIFI_DIRECT_PROTOCOL.md) and
+[Transport Plan](docs/WIFI_DIRECT_TRANSPORT_PLAN.md)). Its Rust logic lives in the `ffi`
+module, which is `android`-gated, so its tests run under the `android` feature:
+
+```bash
+# Wi-Fi transport unit tests (loopback, larger-MTU fragments, dedup, shared-engine dedup, metrics)
+cargo test --features android --lib wifi
+
+# Full lib suite under the android feature (BLE regression + Wi-Fi)
+cargo test --features android --lib        # expect: 81 passed
+
+# Multi-node in-process mesh simulator: dedup, TTL bound, packet loss,
+# partition + heal (store-and-forward), and node churn at 10/50/100 nodes
+cargo test --features android --test mesh_simulation   # expect: 5 passed
+```
+
+Default `cargo test` (no feature) still runs the 73 platform-agnostic tests unchanged —
+the Wi-Fi work is additive and does not alter BLE behavior.
+
+On-device (manual): start the Wi-Fi service via
+`PolliNetSDK.startWifiDirectService(context)` (standalone) or
+`createSharedWifiDirectHandle()` + `startWifiDirectService(context, handle)` (dual-radio
+with cross-transport dedup). Requires the `NEARBY_WIFI_DEVICES` / Wi-Fi P2P permissions
+declared in the SDK manifest.
+
 ## Continuous Integration
 
 For CI/CD pipelines:
@@ -211,6 +239,9 @@ For CI/CD pipelines:
 
 # Full validation
 ./scripts/test_pollinet.sh --full
+
+# Transport adapter regression (BLE + Wi-Fi Direct + mesh simulator)
+cargo test --features android
 ```
 
 ## Related Documentation

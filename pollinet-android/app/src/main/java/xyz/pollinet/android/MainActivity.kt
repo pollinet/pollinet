@@ -42,6 +42,7 @@ import xyz.pollinet.android.BuildConfig
 import xyz.pollinet.sdk.BleService
 import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.SdkConfig
+import xyz.pollinet.sdk.WifiDirectService
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
                         encryptionKey = BuildConfig.POLLINET_ENCRYPTION_KEY,
                     )
                 )?.onFailure { e -> Log.e(TAG, "BLE Service SDK init failed: ${e.message}", e) }
+                    ?.onSuccess { startWifiDirectAuto() }
             }
         }
 
@@ -95,12 +97,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestBlePermissions() {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_ADVERTISE)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
+        val permissions = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+                add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            } else {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            // Wi-Fi Direct (P2P) discovery: NEARBY_WIFI_DEVICES on API 33+, else fine location.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            } else {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+        }.distinct().toTypedArray()
         if (permissions.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
             startBleService()
             requestBatteryOptimizationExemption()
@@ -130,6 +141,25 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start BLE service", e)
         }
+    }
+
+    /**
+     * Auto-start Wi-Fi Direct alongside BLE, sharing the BLE engine (so a tx seen over both
+     * radios is processed once). ROLE_AUTO = discover-then-elect + latch: the device finds an
+     * existing owner and joins it, or becomes the owner itself if none is found.
+     */
+    private fun startWifiDirectAuto() {
+        val sdk = bleService?.sdk ?: run {
+            Log.w(TAG, "Wi-Fi Direct auto-start skipped: BLE SDK not ready")
+            return
+        }
+        val wifiHandle = sdk.createSharedWifiDirectHandle()
+        if (wifiHandle < 0) {
+            Log.e(TAG, "Wi-Fi Direct auto-start: shared handle creation failed")
+            return
+        }
+        sdk.startWifiDirectService(this, wifiHandle, WifiDirectService.ROLE_AUTO)
+        Log.i(TAG, "Wi-Fi Direct auto-started (shared handle=$wifiHandle, ROLE_AUTO)")
     }
 
     override fun onDestroy() {

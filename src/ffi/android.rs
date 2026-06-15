@@ -22,6 +22,10 @@ use std::sync::Arc;
 use super::runtime;
 use super::transport::HostBleTransport;
 use super::types::*;
+#[cfg(feature = "android")]
+use super::host_transport::HostTransport;
+#[cfg(feature = "android")]
+use super::wifi_direct_transport::HostWifiDirectTransport;
 
 #[cfg(feature = "android")]
 use solana_sdk::pubkey::Pubkey;
@@ -36,10 +40,24 @@ use std::sync::Once;
 #[cfg(feature = "android")]
 static ANDROID_LOGGER_INIT: Once = Once::new();
 
-// Global state for transport instances
+/// One registered transport instance, tagged by which radio it drives.
+///
+/// `core` is the radio-agnostic [`HostTransport`] used by the byte-level FFI contract
+/// (pushInbound/nextOutbound/metrics/…) so a single set of JNI functions serves BLE and
+/// Wi-Fi Direct alike — no `if wifi { .. }` scattered through the core. `ble` is the
+/// concrete BLE engine, present only for BLE handles, so the rich BLE-specific FFI
+/// surface (queue manager, health, intent building) keeps working unchanged.
+#[cfg(feature = "android")]
+struct TransportEntry {
+    kind: TransportKind,
+    core: Arc<dyn HostTransport>,
+    ble: Option<Arc<HostBleTransport>>,
+}
+
+// Global state for transport instances (single tagged registry; handle == index).
 #[cfg(feature = "android")]
 lazy_static::lazy_static! {
-    static ref TRANSPORTS: Arc<Mutex<Vec<Option<Arc<HostBleTransport>>>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref TRANSPORTS: Arc<Mutex<Vec<Option<TransportEntry>>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
 // =============================================================================
@@ -157,8 +175,13 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
         info!("Step 6: Storing transport...");
 
         let transport_arc = Arc::new(transport);
+        let core: Arc<dyn HostTransport> = transport_arc.clone();
         let mut transports = TRANSPORTS.lock();
-        transports.push(Some(transport_arc));
+        transports.push(Some(TransportEntry {
+            kind: TransportKind::Ble,
+            core,
+            ble: Some(transport_arc),
+        }));
         let handle = (transports.len() - 1) as jlong;
 
         info!(
@@ -179,6 +202,174 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
             -1 // Error handle
         }
     }
+}
+
+/// Initialize a Wi-Fi Direct transport handle.
+///
+/// Mirrors [`init`] but creates a [`HostWifiDirectTransport`] (which composes the same
+/// engine, only with a larger default MTU). Returns a handle usable with the same
+/// byte-level FFI contract (pushInbound/nextOutbound/metrics/…). BLE-specific FFI calls
+/// will reject this handle by design — Wi-Fi exposes the shared transport contract.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_initWifiDirect(
+    env: JNIEnv,
+    _class: JClass,
+    config_bytes: JByteArray,
+) -> jlong {
+    ANDROID_LOGGER_INIT.call_once(|| {
+        #[cfg(feature = "android_logger")]
+        {
+            android_logger::init_once(
+                android_logger::Config::default()
+                    .with_max_level(log::LevelFilter::Off)
+                    .with_tag("PolliNet-Rust"),
+            );
+        }
+    });
+
+    let result: Result<jlong, String> = (|| {
+        let config_data: Vec<u8> = env
+            .convert_byte_array(&config_bytes)
+            .map_err(|e| format!("Failed to read config bytes: {}", e))?;
+        let config: SdkConfig = serde_json::from_slice(&config_data)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+        if config.enable_logging {
+            let tracing_level = parse_log_level(config.log_level.as_deref());
+            let log_level = match tracing_level {
+                tracing::Level::ERROR => log::LevelFilter::Error,
+                tracing::Level::WARN => log::LevelFilter::Warn,
+                tracing::Level::INFO => log::LevelFilter::Info,
+                tracing::Level::DEBUG => log::LevelFilter::Debug,
+                tracing::Level::TRACE => log::LevelFilter::Trace,
+            };
+            log::set_max_level(log_level);
+            let _ = tracing_subscriber::fmt().with_max_level(tracing_level).try_init();
+        } else {
+            log::set_max_level(log::LevelFilter::Off);
+        }
+
+        info!("📶 FFI initWifiDirect — RPC: {:?}", config.rpc_url);
+
+        match runtime::init_runtime() {
+            Ok(_) => {}
+            Err(e) if e.contains("already initialized") => {}
+            Err(e) => return Err(format!("Failed to initialize runtime: {}", e)),
+        }
+
+        // Create and configure the engine identically to the BLE path (shared state),
+        // then wrap it in the Wi-Fi Direct adapter.
+        let mut engine = runtime::block_on(async {
+            if let Some(rpc_url) = &config.rpc_url {
+                HostBleTransport::new_with_rpc(rpc_url).await
+            } else {
+                HostBleTransport::new().await
+            }
+        })
+        .map_err(|e| {
+            error!("❌ Wi-Fi Direct transport creation failed: {}", e);
+            e
+        })?;
+
+        if let Some(storage_dir) = &config.storage_directory {
+            engine
+                .set_secure_storage(storage_dir, config.encryption_key.clone())
+                .map_err(|e| {
+                    error!("❌ Failed to set secure storage: {}", e);
+                    e
+                })?;
+            let queue_storage_dir = format!("{}/queues", storage_dir);
+            engine.set_queue_storage_dir(queue_storage_dir);
+        }
+        if let Some(url) = option_env!("POLLICORE_URL") {
+            engine.set_pollicore_url(Some(url.to_string()));
+        }
+        if let Some(ref addr) = config.wallet_address {
+            engine.set_wallet_address(Some(addr.clone()));
+        }
+
+        let transport = HostWifiDirectTransport::from_engine(Arc::new(engine));
+        let transport_arc = Arc::new(transport);
+        let core: Arc<dyn HostTransport> = transport_arc.clone();
+        let mut transports = TRANSPORTS.lock();
+        transports.push(Some(TransportEntry {
+            kind: TransportKind::WifiDirect,
+            core,
+            ble: None,
+        }));
+        let handle = (transports.len() - 1) as jlong;
+        info!("✅ Wi-Fi Direct transport initialized with handle {}", handle);
+        Ok(handle)
+    })();
+
+    match result {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("💥 Wi-Fi Direct init failed: {}", e);
+            -1
+        }
+    }
+}
+
+/// Initialize a Wi-Fi Direct handle that **shares the engine** of an existing BLE handle.
+///
+/// Use this when a single device runs BLE and Wi-Fi Direct simultaneously: both handles
+/// then share one deduplication set, outbound queue, and received queue, so a transaction
+/// arriving over both radios is reassembled and submitted exactly once (rule 4 / C3.4).
+/// Returns a new handle, or -1 if `ble_handle` is invalid or not a BLE handle.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_initWifiDirectSharing(
+    _env: JNIEnv,
+    _class: JClass,
+    ble_handle: jlong,
+) -> jlong {
+    let result: Result<jlong, String> = (|| {
+        let engine = get_transport(ble_handle)?; // Arc<HostBleTransport>, shared
+        let transport = Arc::new(HostWifiDirectTransport::from_engine(engine));
+        let core: Arc<dyn HostTransport> = transport;
+        let mut transports = TRANSPORTS.lock();
+        transports.push(Some(TransportEntry {
+            kind: TransportKind::WifiDirect,
+            core,
+            ble: None,
+        }));
+        let handle = (transports.len() - 1) as jlong;
+        info!(
+            "✅ Wi-Fi Direct handle {} sharing engine of BLE handle {}",
+            handle, ble_handle
+        );
+        Ok(handle)
+    })();
+    match result {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("💥 initWifiDirectSharing failed: {}", e);
+            -1
+        }
+    }
+}
+
+/// Return the transport kind for a handle ("BLE" | "WIFI_DIRECT"), or "" if invalid.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_transportKind(
+    env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let kind = {
+        let transports = TRANSPORTS.lock();
+        transports
+            .get(handle as usize)
+            .and_then(|t| t.as_ref())
+            .map(|e| e.kind.as_str())
+            .unwrap_or("")
+    };
+    env.new_string(kind)
+        .expect("Failed to create Java string")
+        .into_raw()
 }
 
 /// Get SDK version
@@ -265,7 +456,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushInbound(
     data: JByteArray,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let data_vec: Vec<u8> = env
             .convert_byte_array(&data)
             .map_err(|e| format!("Failed to read data: {}", e))?;
@@ -291,7 +482,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_nextOutbound(
     max_len: jlong,
 ) -> jbyteArray {
     let result: Result<Option<Vec<u8>>, String> = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         Ok(transport.next_outbound(max_len as usize))
     })();
 
@@ -318,7 +509,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_tick(
     now_ms: jlong,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let frames = transport.tick(now_ms as u64);
 
         // Encode frames as JSON array of base64 strings
@@ -341,7 +532,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_metrics(
     handle: jlong,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let metrics = transport.metrics();
 
         let response: FfiResult<MetricsSnapshot> = FfiResult::success(metrics);
@@ -361,7 +552,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearTransaction(
     tx_id: JString,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let tx_id_str: String = env
             .get_string(&tx_id)
             .map_err(|e| format!("Failed to read tx_id: {}", e))?
@@ -389,7 +580,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearOutboundTransaction(
     tx_id: JString,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let tx_id_str: String = env
             .get_string(&tx_id)
             .map_err(|e| format!("Failed to read tx_id: {}", e))?
@@ -450,14 +641,34 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
 // Helper functions
 // =============================================================================
 
+/// Resolve a handle to the concrete BLE engine. Used by BLE-specific FFI functions
+/// (queue manager, health, intent building). Returns an error for non-BLE handles.
 #[cfg(feature = "android")]
 fn get_transport(handle: jlong) -> Result<Arc<HostBleTransport>, String> {
     let transports = TRANSPORTS.lock();
     if handle < 0 || handle as usize >= transports.len() {
         return Err(format!("Invalid handle: {}", handle));
     }
-    transports[handle as usize]
+    let entry = transports[handle as usize]
+        .as_ref()
+        .ok_or_else(|| format!("Handle {} has been shut down", handle))?;
+    entry
+        .ble
         .clone()
+        .ok_or_else(|| format!("Handle {} is a {} transport (no BLE-specific surface)", handle, entry.kind.as_str()))
+}
+
+/// Resolve a handle to the radio-agnostic transport contract. Works for BLE and Wi-Fi
+/// Direct alike — used by the byte-level FFI functions (pushInbound/nextOutbound/…).
+#[cfg(feature = "android")]
+fn get_core(handle: jlong) -> Result<Arc<dyn HostTransport>, String> {
+    let transports = TRANSPORTS.lock();
+    if handle < 0 || handle as usize >= transports.len() {
+        return Err(format!("Invalid handle: {}", handle));
+    }
+    transports[handle as usize]
+        .as_ref()
+        .map(|e| e.core.clone())
         .ok_or_else(|| format!("Handle {} has been shut down", handle))
 }
 
@@ -857,7 +1068,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushReceivedTransaction(
             .convert_byte_array(&transaction_bytes)
             .map_err(|e| format!("Failed to read transaction bytes: {}", e))?;
 
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         log::info!("📥 pushReceivedTransaction handle={} bytes={}", handle, tx_bytes.len());
 
         let added = transport.push_received_transaction(tx_bytes);
@@ -895,7 +1106,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_nextReceivedTransaction(
             "🔍 FFI nextReceivedTransaction called with handle: {}",
             handle
         );
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         match transport.next_received_transaction() {
             Some((tx_id, tx_bytes, received_at)) => {
                 log::debug!(
@@ -950,7 +1161,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getReceivedQueueSize(
 ) -> jstring {
     let result: Result<String, String> = (|| {
         log::debug!("🔍 FFI getReceivedQueueSize called with handle: {}", handle);
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         log::debug!("✅ Got transport instance for handle {}", handle);
 
         let queue_size = transport.received_queue_size();
@@ -2282,11 +2493,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_submitIntent(
     use crate::submission::{SubmitIntentRequest, SubmitIntentResponse};
 
     let result: Result<String, String> = (|| {
-        let transports = TRANSPORTS.lock();
-        let transport = transports
-            .get(handle as usize)
-            .and_then(|t| t.as_ref())
-            .ok_or_else(|| format!("Invalid handle: {}", handle))?;
+        let transport = get_transport(handle)?;
 
         let pollicore_url = transport
             .get_pollicore_url()
