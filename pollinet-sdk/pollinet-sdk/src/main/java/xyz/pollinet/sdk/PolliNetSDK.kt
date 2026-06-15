@@ -33,6 +33,13 @@ class PolliNetSDK private constructor(
 
     companion object {
         /**
+         * Micro take-rate (basis points) charged on each intent to reimburse the gateway
+         * that pays the SOL network fee. Paid in the transferred token, out of the user's
+         * delegated allowance. 10 bps = 0.10%. Tune centrally here.
+         */
+        const val GAS_FEE_TAKE_RATE_BPS = 10L
+
+        /**
          * Initialize a new PolliNet SDK instance
          */
         suspend fun initialize(config: SdkConfig): Result<PolliNetSDK> = withContext(Dispatchers.IO) {
@@ -1036,18 +1043,26 @@ class PolliNetSDK private constructor(
      * Builds the canonical 169-byte borsh-encoded Intent and returns it as base64.
      * A random 16-byte nonce is generated automatically unless you supply [nonceHex].
      *
+     * The gateway gas fee is handled **internally** — callers no longer pass it:
+     *  - The gateway's fee token account is auto-filled from [getGatewayWallet] (its ATA for
+     *    [tokenMint]). The result is cached so repeated calls don't re-hit pollicore.
+     *  - The fee is a **micro take-rate** of [amount] ([GAS_FEE_TAKE_RATE_BPS] basis points),
+     *    paid in the same token, reimbursing the gateway that pays the SOL network fee.
+     *  - **Offline fallback:** if the gateway is unreachable, the fee is 0 and the payee falls
+     *    back to the sender's own token account (the executor skips the transfer when fee == 0).
+     *
      * After this call:
      *  1. Sign [IntentBytesResponse.intentBytes] (decoded from base64) with the `from` wallet key.
      *  2. Submit via [submitIntent] or directly to pollicore `POST /sdk/intents/submit`.
      *
-     * @param from          Source wallet public key (base58).
-     * @param to            Destination wallet or token account (base58).
-     * @param tokenMint     Token mint address (base58).
-     * @param amount        Transfer amount in the token's smallest unit.
-     * @param expiresAt     Unix timestamp (seconds) after which the intent is invalid.
-     * @param gasFeeAmount  Amount paid to the gateway as a gas fee.
-     * @param gasFeepayee   Gateway fee-recipient address (base58).
-     * @param nonceHex      Optional 32-char lowercase hex nonce (16 bytes). Random if null.
+     * NOTE: the delegate approval ([createApproveTransaction]) must cover `amount + fee`.
+     *
+     * @param from        Source wallet public key (base58).
+     * @param to          Destination token account (base58 — use [deriveAssociatedTokenAccount]).
+     * @param tokenMint   Token mint address (base58).
+     * @param amount      Transfer amount in the token's smallest unit.
+     * @param expiresAt   Unix timestamp (seconds) after which the intent is invalid.
+     * @param nonceHex    Optional 32-char lowercase hex nonce (16 bytes). Random if null.
      */
     suspend fun createIntentBytes(
         from: String,
@@ -1055,11 +1070,20 @@ class PolliNetSDK private constructor(
         tokenMint: String,
         amount: Long,
         expiresAt: Long,
-        gasFeeAmount: Long,
-        gasFeepayee: String,
         nonceHex: String? = null,
     ): Result<IntentBytesResponse> = withContext(Dispatchers.IO) {
         try {
+            // Resolve the gateway fee account + micro take-rate fee internally.
+            val gatewayWallet = resolveGatewayWallet()
+            val gatewayFeeAccount = gatewayWallet
+                ?.let { deriveAssociatedTokenAccount(it, tokenMint).getOrNull() }
+            val (gasFeepayee, gasFeeAmount) = if (gatewayFeeAccount != null) {
+                gatewayFeeAccount to (amount * GAS_FEE_TAKE_RATE_BPS / 10_000L)
+            } else {
+                // Offline / gateway unreachable: no fee, payee = sender's own token account.
+                deriveAssociatedTokenAccount(from, tokenMint).getOrThrow() to 0L
+            }
+
             val req = CreateIntentBytesRequest(
                 from = from,
                 to = to,
@@ -1077,6 +1101,15 @@ class PolliNetSDK private constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /** Cached gateway wallet (fetched from pollicore on first intent, reused thereafter). */
+    @Volatile private var cachedGatewayWallet: String? = null
+
+    /** Gateway wallet, cached after the first successful fetch. Null if unreachable. */
+    private suspend fun resolveGatewayWallet(): String? {
+        cachedGatewayWallet?.let { return it }
+        return getGatewayWallet().getOrNull()?.also { cachedGatewayWallet = it }
     }
 
     /**
