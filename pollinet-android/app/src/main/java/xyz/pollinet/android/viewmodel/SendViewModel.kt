@@ -101,14 +101,14 @@ class SendViewModel : ViewModel() {
             val rawAmount = WalletViewModel.parseUiAmount(s.amountText, token.decimals)
             if (rawAmount <= 0) return@launch setError("Enter a valid amount")
 
-            val gasFee = s.gasFeeText.trim().toLongOrNull() ?: 1000L
             val expiresAt = System.currentTimeMillis() / 1000L + (s.expiresInMinutes * 60L)
 
-            log("createIntent: from=$from recipient=$recipient mint=${token.mint} amount=$rawAmount gasFee=$gasFee expiresAt=$expiresAt")
+            log("createIntent: from=$from recipient=$recipient mint=${token.mint} amount=$rawAmount expiresAt=$expiresAt")
             step(SendStep.CREATING_INTENT, "Deriving token accounts…")
 
-            // The executor program requires token accounts (not wallet addresses) for both
-            // to_token_account and gateway_fee_account. Derive ATAs deterministically.
+            // The executor requires the recipient's token account (not their wallet address)
+            // for to_token_account. The gateway fee account + micro take-rate fee are now
+            // resolved inside createIntentBytes — the caller no longer passes them.
             val recipientTokenAccount = try {
                 sdk.deriveAssociatedTokenAccount(recipient, token.mint).getOrThrow()
             } catch (e: Exception) {
@@ -117,29 +117,7 @@ class SendViewModel : ViewModel() {
             }
             log("createIntent: recipientTokenAccount=$recipientTokenAccount")
 
-            // Resolve the gateway's token account for the gas fee.
-            // If gas_fee_amount = 0 and the gateway wallet is unreachable, fall back to
-            // the user's own token account (Anchor skips the transfer when amount == 0).
-            val (resolvedGasFeepayee, resolvedGasFee) = run {
-                val gatewayWallet = sdk.getGatewayWallet().getOrNull()
-                log("createIntent: gatewayWallet=$gatewayWallet")
-                if (gatewayWallet != null) {
-                    val gatewayAta = sdk.deriveAssociatedTokenAccount(gatewayWallet, token.mint).getOrNull()
-                    log("createIntent: gatewayAta=$gatewayAta")
-                    if (gatewayAta != null) {
-                        gatewayAta to gasFee
-                    } else {
-                        log("createIntent: gateway ATA derivation failed — skipping fee")
-                        token.pubkey to 0L
-                    }
-                } else {
-                    log("createIntent: gateway unreachable (offline) — skipping fee")
-                    token.pubkey to 0L
-                }
-            }
-
             step(SendStep.CREATING_INTENT, "Building intent…")
-            log("createIntent: building intent bytes to=$recipientTokenAccount gasFeepayee=$resolvedGasFeepayee resolvedGasFee=$resolvedGasFee")
             val intentPayload = try {
                 sdk.createIntentBytes(
                     from = from,
@@ -147,8 +125,6 @@ class SendViewModel : ViewModel() {
                     tokenMint = token.mint,
                     amount = rawAmount,
                     expiresAt = expiresAt,
-                    gasFeeAmount = resolvedGasFee,
-                    gasFeepayee = resolvedGasFeepayee,
                 ).getOrThrow()
             } catch (e: Exception) {
                 logE("createIntent: createIntentBytes failed", e)
