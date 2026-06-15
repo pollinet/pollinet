@@ -8,6 +8,15 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Instant;
 
+/// Upper bound on per-fragment data size when an MTU-aware payload is supplied.
+///
+/// BLE negotiates MTUs up to ~517, so its effective `max_data` is always well under
+/// 512 and this ceiling never binds for BLE (its output is byte-identical regardless
+/// of this value). Larger-MTU transports such as Wi-Fi Direct (TCP inside the P2P
+/// group) legitimately produce bigger fragments; this ceiling lets them do so while
+/// still capping any single fragment to a sane size.
+pub const MAX_FRAGMENT_PAYLOAD_CEILING: usize = 8192;
+
 /// Fragment a signed Solana transaction for BLE transmission
 ///
 /// Takes a complete signed transaction and splits it into fragments
@@ -86,8 +95,10 @@ pub fn fragment_transaction_with_max_payload(
     let bincode_overhead = 50; // Increased from 40 to account for actual measured overhead
     let max_data = max_payload.saturating_sub(bincode_overhead);
 
-    // Ensure minimum fragment size (but allow much larger with good MTU)
-    let max_data = max_data.clamp(20, 512); // 20 bytes min, 512 bytes max
+    // Ensure minimum fragment size (but allow much larger with good MTU).
+    // Ceiling is shared across transports; BLE never reaches it (see constant docs),
+    // larger-MTU transports like Wi-Fi Direct use it to send fewer, bigger fragments.
+    let max_data = max_data.clamp(20, MAX_FRAGMENT_PAYLOAD_CEILING);
 
     // Calculate number of fragments needed using the same max_data that we'll use for chunking
     // CRITICAL FIX: Use max_data instead of MAX_FRAGMENT_DATA to match actual chunking

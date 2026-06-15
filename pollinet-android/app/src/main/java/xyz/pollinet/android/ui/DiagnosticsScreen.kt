@@ -32,6 +32,7 @@ import xyz.pollinet.sdk.BleService
 import xyz.pollinet.sdk.MetricsSnapshot
 import xyz.pollinet.sdk.PolliNetSDK
 import xyz.pollinet.sdk.SdkConfig
+import xyz.pollinet.sdk.WifiDirectService
 
 @Composable
 fun DiagnosticsScreen(
@@ -76,6 +77,10 @@ fun DiagnosticsScreen(
     var sdkVersion by remember { mutableStateOf("Unknown") }
     var testLogs by remember { mutableStateOf(listOf<String>()) }
     var isTestingSdk by remember { mutableStateOf(false) }
+    var wifiActive by rememberSaveable { mutableStateOf(false) }
+    var wifiHandle by rememberSaveable { mutableStateOf(-1L) }
+    val wifiLinkStatus by WifiDirectService.linkStatus.collectAsStateWithLifecycle()
+    val wifiPeerCount by WifiDirectService.connectedPeers.collectAsStateWithLifecycle()
     
     fun addLog(message: String) {
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
@@ -294,6 +299,24 @@ fun DiagnosticsScreen(
             }
         )
 
+        // Wi-Fi Direct (P2P) manual session — independent of Bluetooth
+        StatusCard(
+            title = "Wi-Fi Direct (P2P)",
+            content = {
+                WifiDirectTestContent(
+                    bleService = bleService,
+                    context = context,
+                    wifiActive = wifiActive,
+                    wifiHandle = wifiHandle,
+                    linkStatus = wifiLinkStatus,
+                    peerCount = wifiPeerCount,
+                    onWifiStarted = { h -> wifiHandle = h; wifiActive = true },
+                    onWifiStopped = { wifiActive = false; wifiHandle = -1L },
+                    onLog = { addLog(it) },
+                )
+            }
+        )
+
         // FFI Tests
         StatusCard(
             title = "FFI Tests",
@@ -327,6 +350,116 @@ fun DiagnosticsScreen(
         )
     }
     } // Scaffold
+}
+
+@Composable
+private fun WifiDirectTestContent(
+    bleService: BleService?,
+    context: Context,
+    wifiActive: Boolean,
+    wifiHandle: Long,
+    linkStatus: WifiDirectService.Companion.LinkStatus,
+    peerCount: Int,
+    onWifiStarted: (Long) -> Unit,
+    onWifiStopped: () -> Unit,
+    onLog: (String) -> Unit,
+) {
+    val connected = linkStatus == WifiDirectService.Companion.LinkStatus.CONNECTED && peerCount > 0
+    // Derive UI state from the live service StateFlow, not just Dev-page-local `wifiActive`,
+    // so the controls are correct even when Wi-Fi was auto-started alongside BLE.
+    val running = linkStatus != WifiDirectService.Companion.LinkStatus.IDLE
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Standalone Wi-Fi Direct session. Bluetooth is NOT required — only Wi-Fi " +
+                "must be ON on both phones. Dummy transactions are queued into the shared " +
+                "engine and sent over Wi-Fi P2P sockets.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        StatusRow(
+            label = "Session",
+            value = if (wifiActive) "ACTIVE (handle=$wifiHandle)" else "Stopped",
+            isGood = if (wifiActive) true else null,
+        )
+        StatusRow(
+            label = "Link",
+            value = when (linkStatus) {
+                WifiDirectService.Companion.LinkStatus.IDLE -> "Idle"
+                WifiDirectService.Companion.LinkStatus.DISCOVERING -> "Discovering…"
+                WifiDirectService.Companion.LinkStatus.OWNER_WAITING -> "Owner — waiting for client"
+                WifiDirectService.Companion.LinkStatus.CONNECTED -> "CONNECTED ($peerCount peer${if (peerCount == 1) "" else "s"})"
+            },
+            isGood = if (connected) true else null,
+        )
+
+        Text(
+            text = "Tap “Group Owner” on ONE phone and “Client” on the other (deterministic " +
+                "pairing — avoids the connect race).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        fun startWifi(role: Int, roleLabel: String) {
+            val sdk = bleService?.sdk
+            if (sdk == null) {
+                onLog("⚠️ Engine not ready — wait for SDK init")
+                return
+            }
+            val h = sdk.createSharedWifiDirectHandle()
+            if (h < 0) {
+                onLog("❌ Wi-Fi Direct handle creation failed")
+                return
+            }
+            sdk.startWifiDirectService(context, h, role)
+            onWifiStarted(h)
+            onLog("📶 Wi-Fi Direct started as $roleLabel (handle=$h)")
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { startWifi(WifiDirectService.ROLE_OWNER, "GROUP OWNER") },
+                enabled = !running,
+                modifier = Modifier.weight(1f),
+            ) { Text("Group Owner") }
+
+            Button(
+                onClick = { startWifi(WifiDirectService.ROLE_CLIENT, "CLIENT") },
+                enabled = !running,
+                modifier = Modifier.weight(1f),
+            ) { Text("Client") }
+
+            OutlinedButton(
+                onClick = {
+                    bleService?.sdk?.stopWifiDirectService(context)
+                    onWifiStopped()
+                    onLog("🛑 Wi-Fi Direct stopped")
+                },
+                enabled = running,
+                modifier = Modifier.weight(1f),
+            ) { Text("Stop") }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    bleService?.queueSampleTransaction()
+                    onLog("🧪 Queued 1 KB dummy tx → sends over Wi-Fi Direct")
+                },
+                enabled = connected,
+                modifier = Modifier.weight(1f),
+            ) { Text("Send 1 KB") }
+
+            Button(
+                onClick = {
+                    bleService?.queueSampleTransaction(byteSize = 2048)
+                    onLog("🧪 Queued 2 KB dummy tx → sends over Wi-Fi Direct")
+                },
+                enabled = connected,
+                modifier = Modifier.weight(1f),
+            ) { Text("Send 2 KB") }
+        }
+    }
 }
 
 @Composable
