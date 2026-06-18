@@ -48,3 +48,5 @@ pollinet-android/app/src/main/jniLibs/
 
 docs/
 .env
+# Machine-specific Android NDK cross-compile config (absolute local paths — do not commit)
+.cargo/config.toml
