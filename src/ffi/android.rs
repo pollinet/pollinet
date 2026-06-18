@@ -19,9 +19,13 @@ use std::str::FromStr;
 #[cfg(feature = "android")]
 use std::sync::Arc;
 
+#[cfg(feature = "android")]
+use super::host_transport::HostTransport;
 use super::runtime;
 use super::transport::HostBleTransport;
 use super::types::*;
+#[cfg(feature = "android")]
+use super::wifi_direct_transport::HostWifiDirectTransport;
 
 #[cfg(feature = "android")]
 use solana_sdk::pubkey::Pubkey;
@@ -36,10 +40,24 @@ use std::sync::Once;
 #[cfg(feature = "android")]
 static ANDROID_LOGGER_INIT: Once = Once::new();
 
-// Global state for transport instances
+/// One registered transport instance, tagged by which radio it drives.
+///
+/// `core` is the radio-agnostic [`HostTransport`] used by the byte-level FFI contract
+/// (pushInbound/nextOutbound/metrics/…) so a single set of JNI functions serves BLE and
+/// Wi-Fi Direct alike — no `if wifi { .. }` scattered through the core. `ble` is the
+/// concrete BLE engine, present only for BLE handles, so the rich BLE-specific FFI
+/// surface (queue manager, health, intent building) keeps working unchanged.
+#[cfg(feature = "android")]
+struct TransportEntry {
+    kind: TransportKind,
+    core: Arc<dyn HostTransport>,
+    ble: Option<Arc<HostBleTransport>>,
+}
+
+// Global state for transport instances (single tagged registry; handle == index).
 #[cfg(feature = "android")]
 lazy_static::lazy_static! {
-    static ref TRANSPORTS: Arc<Mutex<Vec<Option<Arc<HostBleTransport>>>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref TRANSPORTS: Arc<Mutex<Vec<Option<TransportEntry>>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
 // =============================================================================
@@ -55,67 +73,58 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
     _class: JClass,
     config_bytes: JByteArray,
 ) -> jlong {
-    // Initialize Android logger (only once)
+    // Initialize Android logger once — starts silent (Off); level is set after config is parsed.
     ANDROID_LOGGER_INIT.call_once(|| {
         #[cfg(feature = "android_logger")]
         {
             android_logger::init_once(
                 android_logger::Config::default()
-                    .with_max_level(log::LevelFilter::Debug)
+                    .with_max_level(log::LevelFilter::Off)
                     .with_tag("PolliNet-Rust"),
             );
-            info!("🔧 Android logger initialized");
         }
     });
 
-    info!("📱 FFI init called");
-
     let result: Result<jlong, String> = (|| {
-        info!("Step 1: Initializing runtime...");
+        // Parse config before touching any logging so the enable_logging flag controls everything.
+        let config_data: Vec<u8> = env
+            .convert_byte_array(&config_bytes)
+            .map_err(|e| format!("Failed to read config bytes: {}", e))?;
+
+        let config: SdkConfig = serde_json::from_slice(&config_data)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+        // Apply log level — Off when enableLogging is false, desired level otherwise.
+        // log::set_max_level is the global filter gate; setting it to Off prevents all
+        // log!/tracing! calls from reaching logcat even if a subscriber is registered.
+        if config.enable_logging {
+            let tracing_level = parse_log_level(config.log_level.as_deref());
+            let log_level = match tracing_level {
+                tracing::Level::ERROR => log::LevelFilter::Error,
+                tracing::Level::WARN => log::LevelFilter::Warn,
+                tracing::Level::INFO => log::LevelFilter::Info,
+                tracing::Level::DEBUG => log::LevelFilter::Debug,
+                tracing::Level::TRACE => log::LevelFilter::Trace,
+            };
+            log::set_max_level(log_level);
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing_level)
+                .try_init();
+            info!(
+                "🔧 PolliNet-Rust logging enabled (level: {:?})",
+                tracing_level
+            );
+        } else {
+            log::set_max_level(log::LevelFilter::Off);
+        }
+
+        info!("📱 FFI init — RPC: {:?}", config.rpc_url);
 
         // Initialize runtime if needed
         match runtime::init_runtime() {
-            Ok(_) => {
-                info!("✅ Runtime initialized successfully");
-            }
-            Err(e) if e.contains("already initialized") => {
-                info!("ℹ️  Runtime already initialized");
-            }
-            Err(e) => {
-                error!("❌ Runtime init failed: {}", e);
-                return Err(format!("Failed to initialize runtime: {}", e));
-            }
-        }
-
-        info!("Step 2: Parsing config...");
-
-        // Parse config
-        let config_data: Vec<u8> = env.convert_byte_array(&config_bytes).map_err(|e| {
-            error!("❌ Failed to read config bytes: {}", e);
-            format!("Failed to read config bytes: {}", e)
-        })?;
-
-        info!(
-            "Step 3: Deserializing config ({} bytes)...",
-            config_data.len()
-        );
-
-        let config: SdkConfig = serde_json::from_slice(&config_data).map_err(|e| {
-            error!("❌ Failed to parse config: {}", e);
-            format!("Failed to parse config: {}", e)
-        })?;
-
-        info!(
-            "Step 4: Config parsed - RPC: {:?}, logging: {}",
-            config.rpc_url, config.enable_logging
-        );
-
-        // Initialize logging if requested
-        if config.enable_logging {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(parse_log_level(config.log_level.as_deref()))
-                .try_init();
-            info!("✅ Tracing subscriber initialized");
+            Ok(_) => info!("✅ Runtime initialized"),
+            Err(e) if e.contains("already initialized") => {}
+            Err(e) => return Err(format!("Failed to initialize runtime: {}", e)),
         }
 
         info!("Step 5: Creating transport...");
@@ -138,10 +147,12 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
         // Set secure storage if directory provided
         if let Some(storage_dir) = &config.storage_directory {
             info!("Step 5b: Setting up secure storage at: {}", storage_dir);
-            transport.set_secure_storage(storage_dir).map_err(|e| {
-                error!("❌ Failed to set secure storage: {}", e);
-                e
-            })?;
+            transport
+                .set_secure_storage(storage_dir, config.encryption_key.clone())
+                .map_err(|e| {
+                    error!("❌ Failed to set secure storage: {}", e);
+                    e
+                })?;
             info!("✅ Secure storage configured");
 
             // Phase 5: Set queue storage directory (stored on transport, no env var mutation)
@@ -152,11 +163,35 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
             info!("ℹ️  No storage directory provided - bundle persistence disabled");
         }
 
+        // Resolve pollicore URL: baked-in at compile time from .env / POLLICORE_URL env var
+        let pollicore_url: Option<&str> = option_env!("POLLICORE_URL");
+        if let Some(url) = pollicore_url {
+            transport.set_pollicore_url(Some(url.to_string()));
+            info!("✅ Pollicore URL (compile-time): {}", url);
+        } else {
+            info!("⚠️  POLLICORE_URL not set at compile time — submitIntent will fail");
+        }
+
+        // Store wallet address if provided in config
+        if let Some(ref addr) = config.wallet_address {
+            transport.set_wallet_address(Some(addr.clone()));
+            info!("✅ Wallet address set: {}", addr);
+        } else {
+            info!(
+                "ℹ️  No wallet address provided — rewards will not be attributed until one is set"
+            );
+        }
+
         info!("Step 6: Storing transport...");
 
         let transport_arc = Arc::new(transport);
+        let core: Arc<dyn HostTransport> = transport_arc.clone();
         let mut transports = TRANSPORTS.lock();
-        transports.push(Some(transport_arc));
+        transports.push(Some(TransportEntry {
+            kind: TransportKind::Ble,
+            core,
+            ble: Some(transport_arc),
+        }));
         let handle = (transports.len() - 1) as jlong;
 
         info!(
@@ -179,6 +214,179 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_init(
     }
 }
 
+/// Initialize a Wi-Fi Direct transport handle.
+///
+/// Mirrors [`init`] but creates a [`HostWifiDirectTransport`] (which composes the same
+/// engine, only with a larger default MTU). Returns a handle usable with the same
+/// byte-level FFI contract (pushInbound/nextOutbound/metrics/…). BLE-specific FFI calls
+/// will reject this handle by design — Wi-Fi exposes the shared transport contract.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_initWifiDirect(
+    env: JNIEnv,
+    _class: JClass,
+    config_bytes: JByteArray,
+) -> jlong {
+    ANDROID_LOGGER_INIT.call_once(|| {
+        #[cfg(feature = "android_logger")]
+        {
+            android_logger::init_once(
+                android_logger::Config::default()
+                    .with_max_level(log::LevelFilter::Off)
+                    .with_tag("PolliNet-Rust"),
+            );
+        }
+    });
+
+    let result: Result<jlong, String> = (|| {
+        let config_data: Vec<u8> = env
+            .convert_byte_array(&config_bytes)
+            .map_err(|e| format!("Failed to read config bytes: {}", e))?;
+        let config: SdkConfig = serde_json::from_slice(&config_data)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+        if config.enable_logging {
+            let tracing_level = parse_log_level(config.log_level.as_deref());
+            let log_level = match tracing_level {
+                tracing::Level::ERROR => log::LevelFilter::Error,
+                tracing::Level::WARN => log::LevelFilter::Warn,
+                tracing::Level::INFO => log::LevelFilter::Info,
+                tracing::Level::DEBUG => log::LevelFilter::Debug,
+                tracing::Level::TRACE => log::LevelFilter::Trace,
+            };
+            log::set_max_level(log_level);
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing_level)
+                .try_init();
+        } else {
+            log::set_max_level(log::LevelFilter::Off);
+        }
+
+        info!("📶 FFI initWifiDirect — RPC: {:?}", config.rpc_url);
+
+        match runtime::init_runtime() {
+            Ok(_) => {}
+            Err(e) if e.contains("already initialized") => {}
+            Err(e) => return Err(format!("Failed to initialize runtime: {}", e)),
+        }
+
+        // Create and configure the engine identically to the BLE path (shared state),
+        // then wrap it in the Wi-Fi Direct adapter.
+        let mut engine = runtime::block_on(async {
+            if let Some(rpc_url) = &config.rpc_url {
+                HostBleTransport::new_with_rpc(rpc_url).await
+            } else {
+                HostBleTransport::new().await
+            }
+        })
+        .map_err(|e| {
+            error!("❌ Wi-Fi Direct transport creation failed: {}", e);
+            e
+        })?;
+
+        if let Some(storage_dir) = &config.storage_directory {
+            engine
+                .set_secure_storage(storage_dir, config.encryption_key.clone())
+                .map_err(|e| {
+                    error!("❌ Failed to set secure storage: {}", e);
+                    e
+                })?;
+            let queue_storage_dir = format!("{}/queues", storage_dir);
+            engine.set_queue_storage_dir(queue_storage_dir);
+        }
+        if let Some(url) = option_env!("POLLICORE_URL") {
+            engine.set_pollicore_url(Some(url.to_string()));
+        }
+        if let Some(ref addr) = config.wallet_address {
+            engine.set_wallet_address(Some(addr.clone()));
+        }
+
+        let transport = HostWifiDirectTransport::from_engine(Arc::new(engine));
+        let transport_arc = Arc::new(transport);
+        let core: Arc<dyn HostTransport> = transport_arc.clone();
+        let mut transports = TRANSPORTS.lock();
+        transports.push(Some(TransportEntry {
+            kind: TransportKind::WifiDirect,
+            core,
+            ble: None,
+        }));
+        let handle = (transports.len() - 1) as jlong;
+        info!(
+            "✅ Wi-Fi Direct transport initialized with handle {}",
+            handle
+        );
+        Ok(handle)
+    })();
+
+    match result {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("💥 Wi-Fi Direct init failed: {}", e);
+            -1
+        }
+    }
+}
+
+/// Initialize a Wi-Fi Direct handle that **shares the engine** of an existing BLE handle.
+///
+/// Use this when a single device runs BLE and Wi-Fi Direct simultaneously: both handles
+/// then share one deduplication set, outbound queue, and received queue, so a transaction
+/// arriving over both radios is reassembled and submitted exactly once (rule 4 / C3.4).
+/// Returns a new handle, or -1 if `ble_handle` is invalid or not a BLE handle.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_initWifiDirectSharing(
+    _env: JNIEnv,
+    _class: JClass,
+    ble_handle: jlong,
+) -> jlong {
+    let result: Result<jlong, String> = (|| {
+        let engine = get_transport(ble_handle)?; // Arc<HostBleTransport>, shared
+        let transport = Arc::new(HostWifiDirectTransport::from_engine(engine));
+        let core: Arc<dyn HostTransport> = transport;
+        let mut transports = TRANSPORTS.lock();
+        transports.push(Some(TransportEntry {
+            kind: TransportKind::WifiDirect,
+            core,
+            ble: None,
+        }));
+        let handle = (transports.len() - 1) as jlong;
+        info!(
+            "✅ Wi-Fi Direct handle {} sharing engine of BLE handle {}",
+            handle, ble_handle
+        );
+        Ok(handle)
+    })();
+    match result {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("💥 initWifiDirectSharing failed: {}", e);
+            -1
+        }
+    }
+}
+
+/// Return the transport kind for a handle ("BLE" | "WIFI_DIRECT"), or "" if invalid.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_transportKind(
+    env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let kind = {
+        let transports = TRANSPORTS.lock();
+        transports
+            .get(handle as usize)
+            .and_then(|t| t.as_ref())
+            .map(|e| e.kind.as_str())
+            .unwrap_or("")
+    };
+    env.new_string(kind)
+        .expect("Failed to create Java string")
+        .into_raw()
+}
+
 /// Get SDK version
 #[cfg(feature = "android")]
 #[no_mangle]
@@ -188,6 +396,50 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_version(
 ) -> jstring {
     let version = env!("CARGO_PKG_VERSION");
     env.new_string(version)
+        .expect("Failed to create Java string")
+        .into_raw()
+}
+
+/// Return the pollicore base URL baked in at compile time from POLLICORE_URL env var.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getPolliCoreUrl(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let url = option_env!("POLLICORE_URL").unwrap_or("");
+    env.new_string(url)
+        .expect("Failed to create Java string")
+        .into_raw()
+}
+
+/// Derive the Associated Token Account (ATA) address for a given owner wallet and token mint.
+/// Stateless — no SDK handle required.
+/// Returns the base58 ATA address, or an empty string on invalid input.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_deriveAssociatedTokenAccount(
+    mut env: JNIEnv,
+    _class: JClass,
+    owner_j: JString,
+    mint_j: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let owner_str: String = env.get_string(&owner_j).map_err(|e| e.to_string())?.into();
+        let mint_str: String = env.get_string(&mint_j).map_err(|e| e.to_string())?.into();
+        let owner = Pubkey::from_str(&owner_str).map_err(|e| format!("Invalid owner: {}", e))?;
+        let mint = Pubkey::from_str(&mint_str).map_err(|e| format!("Invalid mint: {}", e))?;
+        let ata = spl_associated_token_account::get_associated_token_address(&owner, &mint);
+        Ok(ata.to_string())
+    })();
+    let s = match result {
+        Ok(addr) => addr,
+        Err(e) => {
+            error!("❌ deriveAssociatedTokenAccount error: {}", e);
+            String::new()
+        }
+    };
+    env.new_string(s)
         .expect("Failed to create Java string")
         .into_raw()
 }
@@ -221,12 +473,14 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushInbound(
     data: JByteArray,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let data_vec: Vec<u8> = env
             .convert_byte_array(&data)
             .map_err(|e| format!("Failed to read data: {}", e))?;
 
+        log::debug!("📡 pushInbound handle={} bytes={}", handle, data_vec.len());
         transport.push_inbound(data_vec)?;
+        log::debug!("✅ pushInbound queued successfully");
 
         let response: FfiResult<()> = FfiResult::success(());
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
@@ -245,7 +499,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_nextOutbound(
     max_len: jlong,
 ) -> jbyteArray {
     let result: Result<Option<Vec<u8>>, String> = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         Ok(transport.next_outbound(max_len as usize))
     })();
 
@@ -272,7 +526,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_tick(
     now_ms: jlong,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let frames = transport.tick(now_ms as u64);
 
         // Encode frames as JSON array of base64 strings
@@ -295,7 +549,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_metrics(
     handle: jlong,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let metrics = transport.metrics();
 
         let response: FfiResult<MetricsSnapshot> = FfiResult::success(metrics);
@@ -315,7 +569,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearTransaction(
     tx_id: JString,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         let tx_id_str: String = env
             .get_string(&tx_id)
             .map_err(|e| format!("Failed to read tx_id: {}", e))?
@@ -330,365 +584,32 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearTransaction(
     create_result_string(&mut env, result)
 }
 
-// =============================================================================
-// Transaction builders (M4)
-// =============================================================================
-
-/// Create unsigned SOL transfer transaction
+/// Remove all outbound queue fragments that belong to `tx_id`.
+/// Must be called when a BLE confirmation arrives (success or failure) so the
+/// originating device stops re-broadcasting a transaction already handled by a
+/// relay peer.
 #[cfg(feature = "android")]
 #[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedTransaction(
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearOutboundTransaction(
     mut env: JNIEnv,
     _class: JClass,
     handle: jlong,
-    request_json: JByteArray,
+    tx_id: JString,
 ) -> jstring {
     let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: CreateUnsignedTransactionRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        // Convert optional nonce data from FFI type to transaction type
-        let nonce_data_opt =
-            request
-                .nonce_data
-                .as_ref()
-                .map(|ffi_nonce| crate::transaction::CachedNonceData {
-                    nonce_account: ffi_nonce.nonce_account.clone(),
-                    authority: ffi_nonce.authority.clone(),
-                    blockhash: ffi_nonce.blockhash.clone(),
-                    lamports_per_signature: ffi_nonce.lamports_per_signature,
-                    cached_at: ffi_nonce.cached_at,
-                    used: ffi_nonce.used,
-                });
-
-        // Build unsigned transaction
-        let base64_tx = runtime::block_on(async {
-            transport
-                .transaction_service()
-                .create_unsigned_transaction(
-                    &request.sender,
-                    &request.recipient,
-                    &request.fee_payer,
-                    request.amount,
-                    request.nonce_account.as_deref(),
-                    nonce_data_opt.as_ref(),
-                )
-                .await
-        })
-        .map_err(|e| format!("Failed to create transaction: {}", e))?;
-
-        tracing::info!(
-            "✅ Created unsigned transaction (base64 length: {})",
-            base64_tx.len()
-        );
-
-        let response: FfiResult<String> = FfiResult::success(base64_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Create unsigned SPL token transfer transaction
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedSplTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: CreateUnsignedSplTransactionRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        // Convert optional nonce data from FFI type to transaction type
-        let nonce_data_opt =
-            request
-                .nonce_data
-                .as_ref()
-                .map(|ffi_nonce| crate::transaction::CachedNonceData {
-                    nonce_account: ffi_nonce.nonce_account.clone(),
-                    authority: ffi_nonce.authority.clone(),
-                    blockhash: ffi_nonce.blockhash.clone(),
-                    lamports_per_signature: ffi_nonce.lamports_per_signature,
-                    cached_at: ffi_nonce.cached_at,
-                    used: ffi_nonce.used,
-                });
-
-        // Build unsigned SPL transaction
-        let base64_tx = runtime::block_on(async {
-            transport
-                .transaction_service()
-                .create_unsigned_spl_transaction(
-                    &request.sender_wallet,
-                    &request.recipient_wallet,
-                    &request.fee_payer,
-                    &request.mint_address,
-                    request.amount,
-                    request.nonce_account.as_deref(),
-                    nonce_data_opt.as_ref(),
-                )
-                .await
-        })
-        .map_err(|e| format!("Failed to create SPL transaction: {}", e))?;
-
-        tracing::info!(
-            "✅ Created unsigned SPL transaction (base64 length: {})",
-            base64_tx.len()
-        );
-
-        let response: FfiResult<String> = FfiResult::success(base64_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Create unsigned governance vote transaction with durable nonce (online)
-/// Returns base64-encoded unsigned transaction (MWA-compatible)
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_castUnsignedVote(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: CastUnsignedVoteRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!("🗳️ Creating unsigned governance vote transaction");
-        tracing::info!("   Voter: {}", request.voter);
-        tracing::info!("   Proposal: {}", request.proposal_id);
-        tracing::info!("   Vote account: {}", request.vote_account);
-        tracing::info!("   Choice: {}", request.choice);
-        if let Some(ref _nonce_data) = request.nonce_data {
-            tracing::info!("   Using cached nonce data (no RPC call)");
-        } else if let Some(ref nonce_account) = request.nonce_account {
-            tracing::info!("   Fetching nonce data from blockchain: {}", nonce_account);
-        }
-
-        // Build unsigned vote transaction (uses cached nonce data if provided, otherwise fetches from RPC)
-        // Convert optional nonce data from FFI type to transaction type
-        let nonce_data_opt =
-            request
-                .nonce_data
-                .as_ref()
-                .map(|ffi_nonce| crate::transaction::CachedNonceData {
-                    nonce_account: ffi_nonce.nonce_account.clone(),
-                    authority: ffi_nonce.authority.clone(),
-                    blockhash: ffi_nonce.blockhash.clone(),
-                    lamports_per_signature: ffi_nonce.lamports_per_signature,
-                    cached_at: ffi_nonce.cached_at,
-                    used: ffi_nonce.used,
-                });
-
-        let base64_tx = runtime::block_on(async {
-            transport
-                .transaction_service()
-                .cast_unsigned_vote(
-                    &request.voter,
-                    &request.proposal_id,
-                    &request.vote_account,
-                    request.choice,
-                    &request.fee_payer,
-                    request.nonce_account.as_deref(),
-                    nonce_data_opt.as_ref(),
-                )
-                .await
-        })
-        .map_err(|e| format!("Failed to create unsigned vote transaction: {}", e))?;
-
-        tracing::info!(
-            "✅ Created unsigned vote transaction (base64 length: {})",
-            base64_tx.len()
-        );
-
-        let response: FfiResult<String> = FfiResult::success(base64_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-// =============================================================================
-// Signature helpers (M5)
-// =============================================================================
-
-/// Prepare sign payload - Extract message bytes that need to be signed
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareSignPayload(
-    mut env: JNIEnv,
-    _class: JClass,
-    _handle: jlong,
-    base64_tx: JString,
-) -> jbyteArray {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-    let result: Result<Vec<u8>, String> = (|| {
-        let tx_str: String = env
-            .get_string(&base64_tx)
-            .map_err(|e| format!("Failed to read base64 tx: {}", e))?
+        let transport = get_core(handle)?;
+        let tx_id_str: String = env
+            .get_string(&tx_id)
+            .map_err(|e| format!("Failed to read tx_id: {}", e))?
             .into();
 
-        // Decode from base64
-        let tx_bytes = BASE64
-            .decode(&tx_str)
-            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+        let removed = transport.clear_outbound_for_tx(&tx_id_str);
 
-        // Deserialize transaction
-        let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)
-            .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
-
-        // Serialize the message (this is what needs to be signed)
-        let message_bytes = bincode1::serialize(&tx.message)
-            .map_err(|e| format!("Failed to serialize message: {}", e))?;
-
-        tracing::info!("✅ Prepared sign payload: {} bytes", message_bytes.len());
-        Ok(message_bytes)
-    })();
-
-    match result {
-        Ok(payload) => env
-            .byte_array_from_slice(&payload)
-            .expect("Failed to create byte array")
-            .into_raw(),
-        Err(e) => {
-            tracing::error!("prepareSignPayload error: {}", e);
-            std::ptr::null_mut()
+        #[derive(serde::Serialize)]
+        struct Out {
+            removed: usize,
         }
-    }
-}
-
-/// Apply signature to unsigned transaction
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_applySignature(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    base64_tx: JString,
-    signer_pubkey: JString,
-    signature_bytes: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-
-        let tx_str: String = env
-            .get_string(&base64_tx)
-            .map_err(|e| format!("Failed to read base64 tx: {}", e))?
-            .into();
-
-        let pubkey_str: String = env
-            .get_string(&signer_pubkey)
-            .map_err(|e| format!("Failed to read signer pubkey: {}", e))?
-            .into();
-
-        let sig_bytes: Vec<u8> = env
-            .convert_byte_array(&signature_bytes)
-            .map_err(|e| format!("Failed to read signature bytes: {}", e))?;
-
-        // Parse pubkey
-        let pubkey =
-            Pubkey::from_str(&pubkey_str).map_err(|e| format!("Invalid signer pubkey: {}", e))?;
-
-        // Convert signature bytes to Solana signature
-        if sig_bytes.len() != 64 {
-            return Err(format!(
-                "Invalid signature length: expected 64, got {}",
-                sig_bytes.len()
-            ));
-        }
-        let mut sig_array = [0u8; 64];
-        sig_array.copy_from_slice(&sig_bytes);
-        let signature = solana_sdk::signature::Signature::from(sig_array);
-
-        // Apply signature
-        let updated_tx = transport
-            .transaction_service()
-            .add_signature(&tx_str, &pubkey, &signature)
-            .map_err(|e| format!("Failed to apply signature: {}", e))?;
-
-        tracing::info!("✅ Applied signature for {}", pubkey_str);
-
-        let response: FfiResult<String> = FfiResult::success(updated_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Verify and serialize transaction for submission
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_verifyAndSerialize(
-    mut env: JNIEnv,
-    _class: JClass,
-    _handle: jlong,
-    base64_tx: JString,
-) -> jstring {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-    let result = (|| {
-        let tx_str: String = env
-            .get_string(&base64_tx)
-            .map_err(|e| format!("Failed to read base64 tx: {}", e))?
-            .into();
-
-        // Decode from base64
-        let tx_bytes = BASE64
-            .decode(&tx_str)
-            .map_err(|e| format!("Failed to decode base64: {}", e))?;
-
-        // Deserialize transaction
-        let tx: solana_sdk::transaction::Transaction = bincode1::deserialize(&tx_bytes)
-            .map_err(|e| format!("Failed to deserialize transaction: {}", e))?;
-
-        // Verify transaction has valid signatures
-        let valid_sigs = tx
-            .signatures
-            .iter()
-            .filter(|sig| *sig != &solana_sdk::signature::Signature::default())
-            .count();
-
-        if valid_sigs == 0 {
-            return Err("Transaction has no valid signatures".to_string());
-        }
-
-        tracing::info!(
-            "✅ Transaction verified: {}/{} valid signatures",
-            valid_sigs,
-            tx.signatures.len()
-        );
-
-        // Serialize for submission (bincode1 format)
-        let wire_tx = bincode1::serialize(&tx)
-            .map_err(|e| format!("Failed to serialize transaction: {}", e))?;
-
-        // Return as base64 for consistency
-        let wire_tx_base64 = BASE64.encode(&wire_tx);
-
-        tracing::info!("Transaction ready for submission: {} bytes", wire_tx.len());
-
-        let response: FfiResult<String> = FfiResult::success(wire_tx_base64);
+        let response: FfiResult<Out> = FfiResult::success(Out { removed });
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
 
@@ -709,7 +630,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
     _class: JClass,
     handle: jlong,
     tx_bytes: JByteArray,
-    _max_payload: jlong,
+    max_payload: jlong,
 ) -> jstring {
     let result = (|| {
         let transport = get_transport(handle)?;
@@ -717,7 +638,26 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
             .convert_byte_array(&tx_bytes)
             .map_err(|e| format!("Failed to read tx bytes: {}", e))?;
 
-        let fragments = transport.queue_transaction(tx_data, None)?;
+        let max_payload_opt = if max_payload > 0 {
+            Some(max_payload as usize)
+        } else {
+            None
+        };
+        log::info!(
+            "✂️  fragment handle={} input_bytes={} max_payload={:?}",
+            handle,
+            tx_data.len(),
+            max_payload_opt
+        );
+
+        let fragments = transport.queue_transaction(tx_data, max_payload_opt)?;
+
+        let total_fragment_bytes: usize = fragments.iter().map(|f| f.data.len()).sum();
+        log::info!(
+            "✅ fragment → {} fragments, {} total payload bytes",
+            fragments.len(),
+            total_fragment_bytes
+        );
 
         let fragment_list = FragmentList { fragments };
         let response: FfiResult<FragmentList> = FfiResult::success(fragment_list);
@@ -731,14 +671,37 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragment(
 // Helper functions
 // =============================================================================
 
+/// Resolve a handle to the concrete BLE engine. Used by BLE-specific FFI functions
+/// (queue manager, health, intent building). Returns an error for non-BLE handles.
 #[cfg(feature = "android")]
 fn get_transport(handle: jlong) -> Result<Arc<HostBleTransport>, String> {
     let transports = TRANSPORTS.lock();
     if handle < 0 || handle as usize >= transports.len() {
         return Err(format!("Invalid handle: {}", handle));
     }
+    let entry = transports[handle as usize]
+        .as_ref()
+        .ok_or_else(|| format!("Handle {} has been shut down", handle))?;
+    entry.ble.clone().ok_or_else(|| {
+        format!(
+            "Handle {} is a {} transport (no BLE-specific surface)",
+            handle,
+            entry.kind.as_str()
+        )
+    })
+}
+
+/// Resolve a handle to the radio-agnostic transport contract. Works for BLE and Wi-Fi
+/// Direct alike — used by the byte-level FFI functions (pushInbound/nextOutbound/…).
+#[cfg(feature = "android")]
+fn get_core(handle: jlong) -> Result<Arc<dyn HostTransport>, String> {
+    let transports = TRANSPORTS.lock();
+    if handle < 0 || handle as usize >= transports.len() {
+        return Err(format!("Invalid handle: {}", handle));
+    }
     transports[handle as usize]
-        .clone()
+        .as_ref()
+        .map(|e| e.core.clone())
         .ok_or_else(|| format!("Handle {} has been shut down", handle))
 }
 
@@ -750,6 +713,7 @@ fn create_result_string(env: &mut JNIEnv, result: Result<String, String>) -> jst
             .expect("Failed to create Java string")
             .into_raw(),
         Err(e) => {
+            log::error!("❌ FFI error: {}", e);
             let error_response: FfiResult<()> = FfiResult::error("ERR_INTERNAL", e);
             let error_json = serde_json::to_string(&error_response).unwrap_or_else(|_| {
                 r#"{"ok":false,"code":"ERR_FATAL","message":"Serialization failed"}"#.to_string()
@@ -770,1018 +734,6 @@ fn parse_log_level(level: Option<&str>) -> tracing::Level {
         Some("error") => tracing::Level::ERROR,
         _ => tracing::Level::INFO,
     }
-}
-
-// =============================================================================
-// Offline Bundle Management (M7) - Core PolliNet Features
-// =============================================================================
-
-/// Prepare offline bundle for creating transactions without internet
-/// This is a CORE PolliNet feature for offline/mesh transaction creation
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_prepareOfflineBundle(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-    sender_keypair_bytes: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: PrepareOfflineBundleRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        // Parse sender keypair from raw bytes (never passes through JSON)
-        let keypair_bytes: Vec<u8> = env
-            .convert_byte_array(&sender_keypair_bytes)
-            .map_err(|e| format!("Failed to read sender keypair bytes: {}", e))?;
-        let sender_keypair = solana_sdk::signature::Keypair::try_from(keypair_bytes.as_slice())
-            .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
-
-        tracing::info!(
-            "📦 Preparing offline bundle for {} transactions",
-            request.count
-        );
-
-        // Use secure storage if available
-        let bundle = if let Some(storage) = transport.secure_storage() {
-            tracing::info!("🔒 Using secure storage for bundle persistence");
-
-            // Load existing bundle if it exists
-            let existing_bundle = storage
-                .load_bundle()
-                .map_err(|e| format!("Failed to load existing bundle: {}", e))?;
-
-            if let Some(ref existing) = existing_bundle {
-                tracing::info!(
-                    "📂 Found existing bundle with {} nonces (available: {}, used: {})",
-                    existing.nonce_caches.len(),
-                    existing.available_nonces(),
-                    existing.used_nonces()
-                );
-            } else {
-                tracing::info!("📂 No existing bundle found - will create new one");
-            }
-
-            // Save to temp file so prepare_offline_bundle can load it
-            let temp_path = std::env::temp_dir().join("pollinet_temp_bundle.json");
-            if let Some(existing) = &existing_bundle {
-                existing
-                    .save_to_file(temp_path.to_str().unwrap())
-                    .map_err(|e| format!("Failed to save temp bundle: {}", e))?;
-                tracing::info!("💾 Saved existing bundle to temp file for processing");
-            }
-
-            // Prepare bundle (will refresh used nonces or create new ones)
-            let bundle = runtime::block_on(async {
-                transport
-                    .transaction_service()
-                    .prepare_offline_bundle(
-                        request.count,
-                        &sender_keypair,
-                        if existing_bundle.is_some() {
-                            temp_path.to_str()
-                        } else {
-                            None
-                        },
-                    )
-                    .await
-            })
-            .map_err(|e| format!("Failed to prepare bundle: {}", e))?;
-
-            // Clean up temp file
-            if temp_path.exists() {
-                let _ = std::fs::remove_file(&temp_path);
-            }
-
-            // Save updated bundle to secure storage
-            storage
-                .save_bundle(&bundle)
-                .map_err(|e| format!("Failed to save bundle: {}", e))?;
-
-            tracing::info!("💾 Bundle saved to secure storage");
-            tracing::info!(
-                "   Total nonces: {}, Available: {}, Used: {}",
-                bundle.nonce_caches.len(),
-                bundle.available_nonces(),
-                bundle.used_nonces()
-            );
-            bundle
-        } else {
-            tracing::warn!("⚠️  No secure storage configured - bundle will not persist");
-
-            // Fallback to traditional file-based approach
-            runtime::block_on(async {
-                transport
-                    .transaction_service()
-                    .prepare_offline_bundle(
-                        request.count,
-                        &sender_keypair,
-                        request.bundle_file.as_deref(),
-                    )
-                    .await
-            })
-            .map_err(|e| format!("Failed to prepare bundle: {}", e))?
-        };
-
-        tracing::info!(
-            "✅ Bundle prepared with {} total nonces ({} available)",
-            bundle.nonce_caches.len(),
-            bundle.available_nonces()
-        );
-
-        // Convert to FFI bundle type (with proper camelCase serialization)
-        let ffi_bundle =
-            crate::ffi::types::OfflineTransactionBundle::from_transaction_bundle(&bundle);
-
-        // Serialize bundle to JSON
-        let bundle_json = serde_json::to_string(&ffi_bundle)
-            .map_err(|e| format!("Failed to serialize bundle: {}", e))?;
-
-        let response: FfiResult<String> = FfiResult::success(bundle_json);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Create offline transaction using cached nonce data
-/// NO internet required - core PolliNet offline feature
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createOfflineTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-    sender_keypair_bytes: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: CreateOfflineTransactionRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        // Parse sender keypair from raw bytes (never passes through JSON).
-        // The sender is also the nonce authority (set at nonce account creation time).
-        let keypair_bytes: Vec<u8> = env
-            .convert_byte_array(&sender_keypair_bytes)
-            .map_err(|e| format!("Failed to read sender keypair bytes: {}", e))?;
-        let sender_keypair = solana_sdk::signature::Keypair::try_from(keypair_bytes.as_slice())
-            .map_err(|e| format!("Invalid sender keypair bytes: {}", e))?;
-        // Authority is always the sender (enforced at nonce account creation)
-        let authority_keypair = solana_sdk::signature::Keypair::try_from(keypair_bytes.as_slice())
-            .map_err(|e| format!("Invalid authority keypair bytes: {}", e))?;
-
-        tracing::info!("📴 Creating OFFLINE transaction (no internet required)");
-
-        // Load bundle from secure storage
-        let storage = transport
-            .secure_storage()
-            .ok_or_else(|| "Secure storage not configured".to_string())?;
-
-        let mut bundle = storage
-            .load_bundle()
-            .map_err(|e| format!("Failed to load bundle: {}", e))?
-            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
-
-        tracing::info!(
-            "📂 Loaded bundle: {} total nonces, {} available",
-            bundle.nonce_caches.len(),
-            bundle.available_nonces()
-        );
-
-        // Find first available (unused) nonce
-        let nonce_to_use = bundle
-            .nonce_caches
-            .iter_mut()
-            .find(|n| !n.used)
-            .ok_or_else(|| {
-                "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
-                    .to_string()
-            })?;
-
-        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
-        tracing::info!("   Blockhash: {}", nonce_to_use.blockhash);
-
-        // Clone the nonce data before marking as used (for transaction creation)
-        let cached_nonce = nonce_to_use.clone();
-
-        // Mark nonce as used BEFORE creating transaction
-        nonce_to_use.used = true;
-        tracing::info!("✅ Marked nonce as used");
-
-        // Save updated bundle immediately
-        storage
-            .save_bundle(&bundle)
-            .map_err(|e| format!("Failed to save bundle: {}", e))?;
-        tracing::info!("💾 Bundle saved with updated nonce status");
-        tracing::info!(
-            "   Available nonces remaining: {}",
-            bundle.available_nonces()
-        );
-
-        // Create transaction offline using the selected nonce
-        let compressed_tx = transport
-            .transaction_service()
-            .create_offline_transaction(
-                &sender_keypair,
-                &request.recipient,
-                request.amount,
-                &authority_keypair,
-                &cached_nonce,
-            )
-            .map_err(|e| format!("Failed to create offline transaction: {}", e))?;
-
-        tracing::info!(
-            "✅ Offline transaction created: {} bytes",
-            compressed_tx.len()
-        );
-
-        // Encode to base64
-        let tx_base64 = base64::encode(&compressed_tx);
-
-        let response: FfiResult<String> = FfiResult::success(tx_base64);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Submit offline-created transaction to blockchain
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_submitOfflineTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: SubmitOfflineTransactionRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        // Decode transaction from base64
-        let tx_bytes = base64::decode(&request.transaction_base64)
-            .map_err(|e| format!("Invalid transaction base64: {}", e))?;
-
-        tracing::info!("Submitting offline transaction to blockchain");
-
-        // Submit transaction
-        let signature = runtime::block_on(async {
-            transport
-                .transaction_service()
-                .submit_offline_transaction(&tx_bytes, request.verify_nonce)
-                .await
-        })
-        .map_err(|e| format!("Failed to submit transaction: {}", e))?;
-
-        tracing::info!("✅ Transaction submitted: {}", signature);
-
-        let response: FfiResult<String> = FfiResult::success(signature);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-// =============================================================================
-// MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
-// =============================================================================
-
-/// Create UNSIGNED offline transaction for MWA signing
-/// Takes PUBLIC KEYS only (no private keys) - MWA-compatible
-/// Returns unsigned transaction that MWA/Seed Vault can sign
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedOfflineTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: CreateUnsignedOfflineTransactionRequest =
-            serde_json::from_slice(&request_data)
-                .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!("🔓 Creating UNSIGNED offline transaction for MWA");
-        tracing::info!("   Sender pubkey: {}", request.sender_pubkey);
-        tracing::info!("   NO private keys involved - MWA will sign");
-
-        // Load bundle from secure storage
-        let storage = transport
-            .secure_storage()
-            .ok_or_else(|| "Secure storage not configured".to_string())?;
-
-        let mut bundle = storage
-            .load_bundle()
-            .map_err(|e| format!("Failed to load bundle: {}", e))?
-            .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
-
-        tracing::info!(
-            "📂 Loaded bundle: {} total nonces, {} available",
-            bundle.nonce_caches.len(),
-            bundle.available_nonces()
-        );
-
-        // Find first available (unused) nonce
-        let nonce_to_use = bundle
-            .nonce_caches
-            .iter_mut()
-            .find(|n| !n.used)
-            .ok_or_else(|| {
-                "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
-                    .to_string()
-            })?;
-
-        tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
-
-        // Clone the nonce data before marking as used
-        let cached_nonce = nonce_to_use.clone();
-
-        // Mark nonce as used BEFORE creating transaction
-        nonce_to_use.used = true;
-        tracing::info!("✅ Marked nonce as used");
-
-        // Save updated bundle immediately
-        storage
-            .save_bundle(&bundle)
-            .map_err(|e| format!("Failed to save bundle: {}", e))?;
-        tracing::info!("💾 Bundle saved with updated nonce status");
-        tracing::info!(
-            "   Available nonces remaining: {}",
-            bundle.available_nonces()
-        );
-
-        // Create UNSIGNED transaction
-        let unsigned_tx = transport
-            .transaction_service()
-            .create_unsigned_offline_transaction(
-                &request.sender_pubkey,
-                &request.recipient,
-                request.amount,
-                &request.nonce_authority_pubkey,
-                &cached_nonce,
-            )
-            .map_err(|e| format!("Failed to create unsigned transaction: {}", e))?;
-
-        tracing::info!("✅ Unsigned transaction created for MWA signing");
-        tracing::info!("   Transaction ready for Seed Vault signature");
-
-        let response: FfiResult<String> = FfiResult::success(unsigned_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing
-/// Uses cached nonce data from the offline bundle (no RPC required).
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedOfflineSplTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result: Result<String, String> = (|| {
-        let transport = get_transport(handle)?;
-
-        // Parse request
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: CreateUnsignedOfflineSplTransactionRequest =
-            serde_json::from_slice(&request_data)
-                .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!("🔓 Creating UNSIGNED offline SPL transaction for MWA");
-        tracing::info!("   Sender wallet: {}", request.sender_wallet);
-        tracing::info!("   Recipient wallet: {}", request.recipient_wallet);
-
-        // Get nonce data: use provided cached data, or get from bundle
-        let cached_nonce = if let Some(ref ffi_nonce) = request.nonce_data {
-            // Use provided nonce data
-            tracing::info!("Using provided cached nonce data");
-            crate::transaction::CachedNonceData {
-                nonce_account: ffi_nonce.nonce_account.clone(),
-                authority: ffi_nonce.authority.clone(),
-                blockhash: ffi_nonce.blockhash.clone(),
-                lamports_per_signature: ffi_nonce.lamports_per_signature,
-                cached_at: ffi_nonce.cached_at,
-                used: ffi_nonce.used,
-            }
-        } else {
-            // Load bundle from secure storage and get available nonce
-            let storage = transport
-                .secure_storage()
-                .ok_or_else(|| "Secure storage not configured".to_string())?;
-
-            let mut bundle = storage
-                .load_bundle()
-                .map_err(|e| format!("Failed to load bundle: {}", e))?
-                .ok_or_else(|| "No bundle found - call prepareOfflineBundle first".to_string())?;
-
-            tracing::info!(
-                "📂 Loaded bundle: {} total nonces, {} available",
-                bundle.nonce_caches.len(),
-                bundle.available_nonces()
-            );
-
-            // Find first available (unused) nonce
-            let nonce_to_use = bundle
-                .nonce_caches
-                .iter_mut()
-                .find(|n| !n.used)
-                .ok_or_else(|| {
-                    "No available nonces - all have been used. Call prepareOfflineBundle to refresh."
-                        .to_string()
-                })?;
-
-            tracing::info!("📌 Using nonce account: {}", nonce_to_use.nonce_account);
-
-            // Clone the nonce data
-            let cached_nonce = nonce_to_use.clone();
-
-            // Mark as used and save bundle
-            nonce_to_use.used = true;
-            storage
-                .save_bundle(&bundle)
-                .map_err(|e| format!("Failed to save bundle: {}", e))?;
-
-            tracing::info!(
-                "💾 Bundle saved (available nonces remaining: {})",
-                bundle.available_nonces()
-            );
-
-            cached_nonce
-        };
-
-        // Create UNSIGNED offline SPL transaction
-        let unsigned_tx = transport
-            .transaction_service()
-            .create_unsigned_offline_spl_transaction(
-                &request.sender_wallet,
-                &request.recipient_wallet,
-                &request.fee_payer,
-                &request.mint_address,
-                request.amount,
-                &cached_nonce,
-            )
-            .map_err(|e| format!("Failed to create unsigned offline SPL transaction: {}", e))?;
-
-        tracing::info!("✅ Unsigned offline SPL transaction created for MWA signing");
-
-        let response: FfiResult<String> = FfiResult::success(unsigned_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Get the message bytes that need to be signed by MWA
-/// Extracts the raw message from unsigned transaction for MWA/Seed Vault
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getTransactionMessageToSign(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: GetMessageToSignRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!("📝 Extracting message to sign for MWA");
-
-        // Get message bytes
-        let message_bytes = transport
-            .transaction_service()
-            .get_transaction_message_to_sign(&request.unsigned_transaction_base64)
-            .map_err(|e| format!("Failed to extract message: {}", e))?;
-
-        // Encode to base64 for transport
-        let message_base64 = base64::encode(&message_bytes);
-
-        tracing::info!("✅ Message extracted: {} bytes", message_bytes.len());
-
-        let response: FfiResult<String> = FfiResult::success(message_base64);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Get list of public keys that need to sign this transaction
-/// Returns array of public key strings in signing order
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getRequiredSigners(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| {
-        let transport = get_transport(handle)?;
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        let request: GetRequiredSignersRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!("👥 Getting required signers for transaction");
-
-        // Get signers
-        let signers = transport
-            .transaction_service()
-            .get_required_signers(&request.unsigned_transaction_base64)
-            .map_err(|e| format!("Failed to get signers: {}", e))?;
-
-        tracing::info!("✅ Found {} required signers", signers.len());
-
-        let response: FfiResult<Vec<String>> = FfiResult::success(signers);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Create unsigned nonce account creation transactions for MWA signing
-///
-/// This creates N nonce account creation transactions that can be signed by MWA.
-/// Each transaction includes:
-/// 1. Instructions to create a nonce account
-/// 2. The ephemeral nonce keypair (to be signed locally before MWA)
-///
-/// Request JSON: {"count": 5, "payerPubkey": "base58_pubkey"}
-/// Response JSON: [{"unsignedTransactionBase64": "...", "nonceKeypairBase64": "...", "noncePubkey": "..."}]
-#[no_mangle]
-#[cfg(feature = "android")]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createUnsignedNonceTransactions(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| -> Result<String, String> {
-        tracing::info!(
-            "🎯 FFI createUnsignedNonceTransactions called with handle={}",
-            handle
-        );
-
-        // Convert request
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        tracing::debug!("📥 Request data size: {} bytes", request_data.len());
-
-        // Get transport
-        let transport = get_transport(handle)?;
-
-        // Parse request
-        let request: CreateUnsignedNonceTransactionsRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!(
-            "Creating {} unsigned nonce transactions for payer: {}",
-            request.count,
-            request.payer_pubkey
-        );
-
-        // Call the transaction service
-        let transactions = runtime::block_on(async {
-            transport
-                .transaction_service()
-                .create_unsigned_nonce_transactions(request.count, &request.payer_pubkey)
-                .await
-                .map_err(|e| format!("Failed to create nonce transactions: {}", e))
-        })?;
-
-        tracing::info!(
-            "✅ Created {} unsigned nonce transactions",
-            transactions.len()
-        );
-
-        let response: FfiResult<Vec<UnsignedNonceTransaction>> = FfiResult::success(transactions);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Cache nonce data from existing on-chain nonce accounts
-///
-/// This fetches nonce data from the blockchain and adds it to secure storage.
-/// Useful after creating nonce accounts via MWA - call this to cache the newly created nonces.
-///
-/// Request JSON: {"nonceAccounts": ["pubkey1", "pubkey2", ...]}
-/// Response JSON: {"cachedCount": 5}
-#[no_mangle]
-#[cfg(feature = "android")]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cacheNonceAccounts(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    request_json: JByteArray,
-) -> jstring {
-    let result = (|| -> Result<String, String> {
-        tracing::info!("🗄️  FFI cacheNonceAccounts called with handle={}", handle);
-
-        // Convert request
-        let request_data: Vec<u8> = env
-            .convert_byte_array(&request_json)
-            .map_err(|e| format!("Failed to read request: {}", e))?;
-
-        // Get transport
-        let transport = get_transport(handle)?;
-
-        // Parse request
-        let request: CacheNonceAccountsRequest = serde_json::from_slice(&request_data)
-            .map_err(|e| format!("Failed to parse request: {}", e))?;
-
-        tracing::info!("Caching {} nonce accounts", request.nonce_accounts.len());
-
-        // Fetch and save nonce data to secure storage
-        let cached_count = runtime::block_on(async {
-            if let Some(secure_storage) = transport.secure_storage() {
-                use crate::transaction::OfflineTransactionBundle;
-
-                // Load existing bundle or create new one
-                let mut bundle = match secure_storage.load_bundle() {
-                    Ok(Some(existing)) => existing,
-                    Ok(None) | Err(_) => {
-                        // Create new bundle if none exists
-                        tracing::info!("Creating new bundle");
-                        OfflineTransactionBundle::new()
-                    }
-                };
-
-                let mut count = 0;
-                // Fetch and add the new nonce data
-                for nonce_account in &request.nonce_accounts {
-                    match transport
-                        .transaction_service()
-                        .prepare_offline_nonce_data(nonce_account)
-                        .await
-                    {
-                        Ok(cached_nonce) => {
-                            bundle.add_nonce(cached_nonce);
-                            count += 1;
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to fetch nonce data for {}: {}",
-                                nonce_account,
-                                e
-                            );
-                        }
-                    }
-                }
-
-                // Save the updated bundle
-                secure_storage
-                    .save_bundle(&bundle)
-                    .map_err(|e| format!("Failed to save bundle: {}", e))?;
-
-                tracing::info!(
-                    "✅ Saved bundle with {} new nonces to secure storage",
-                    count
-                );
-                Ok::<usize, String>(count)
-            } else {
-                Err("Secure storage not initialized".to_string())
-            }
-        })?;
-
-        #[derive(serde::Serialize)]
-        struct CacheResponse {
-            #[serde(rename = "cachedCount")]
-            cached_count: usize,
-        }
-
-        let response_data = CacheResponse { cached_count };
-        let response: FfiResult<CacheResponse> = FfiResult::success(response_data);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Refresh all cached nonce data in the offline bundle
-///
-/// This:
-/// - Loads the existing OfflineTransactionBundle from secure storage
-/// - For each nonce account, fetches the latest on-chain nonce state
-/// - Updates blockhash / fee data and marks all nonces as available (used = false)
-/// - Saves the refreshed bundle back to secure storage
-///
-/// Response JSON: FfiResult<{ \"refreshedCount\": N }>
-#[no_mangle]
-#[cfg(feature = "android")]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_refreshOfflineBundle(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-) -> jstring {
-    let result: Result<String, String> = (|| {
-        tracing::info!("♻️  FFI refreshOfflineBundle called with handle={}", handle);
-
-        let transport = get_transport(handle)?;
-
-        let refreshed_count = runtime::block_on(async {
-            if let Some(secure_storage) = transport.secure_storage() {
-                // Load existing bundle
-                let mut bundle = match secure_storage.load_bundle() {
-                    Ok(Some(existing)) => existing,
-                    Ok(None) => {
-                        tracing::info!("📂 No existing bundle to refresh");
-                        return Ok::<usize, String>(0);
-                    }
-                    Err(e) => {
-                        return Err(format!("Failed to load bundle: {}", e));
-                    }
-                };
-
-                if bundle.nonce_caches.is_empty() {
-                    tracing::info!("📂 Bundle is empty - nothing to refresh");
-                    return Ok(0);
-                }
-
-                tracing::info!(
-                    "📂 Refreshing bundle: {} total nonces ({} available, {} used)",
-                    bundle.total_nonces(),
-                    bundle.available_nonces(),
-                    bundle.used_nonces()
-                );
-
-                let mut refreshed = 0usize;
-
-                for nonce in bundle.nonce_caches.iter_mut() {
-                    let account = nonce.nonce_account.clone();
-                    match transport
-                        .transaction_service()
-                        .prepare_offline_nonce_data(&account)
-                        .await
-                    {
-                        Ok(fresh) => {
-                            nonce.authority = fresh.authority;
-                            nonce.blockhash = fresh.blockhash;
-                            nonce.lamports_per_signature = fresh.lamports_per_signature;
-                            nonce.cached_at = fresh.cached_at;
-                            nonce.used = false; // Make available again
-                            refreshed += 1;
-                            tracing::info!("   ✅ Refreshed nonce {}", account);
-                        }
-                        Err(e) => {
-                            tracing::warn!("   ⚠️  Failed to refresh nonce {}: {}", account, e);
-                        }
-                    }
-                }
-
-                // Save updated bundle
-                secure_storage
-                    .save_bundle(&bundle)
-                    .map_err(|e| format!("Failed to save refreshed bundle: {}", e))?;
-
-                tracing::info!(
-                    "✅ Refreshed {} nonce accounts (bundle now has {} available)",
-                    refreshed,
-                    bundle.available_nonces()
-                );
-
-                Ok::<usize, String>(refreshed)
-            } else {
-                tracing::info!("ℹ️  Secure storage not initialized - cannot refresh bundle");
-                Ok(0)
-            }
-        })?;
-
-        #[derive(serde::Serialize)]
-        struct RefreshResponse {
-            #[serde(rename = "refreshedCount")]
-            refreshed_count: usize,
-        }
-
-        let response: FfiResult<RefreshResponse> =
-            FfiResult::success(RefreshResponse { refreshed_count });
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Get an available nonce account from cached bundle
-///
-/// Loads the bundle from secure storage and returns the first available
-/// (unused) nonce account data. This allows users to either manage their
-/// own nonce accounts or let PolliNet manage them automatically.
-///
-/// Returns None if:
-/// - Secure storage not configured
-/// - Bundle doesn't exist
-/// - Bundle has no available nonces (all are used)
-///
-/// Response JSON: {"nonceAccount": "...", "authority": "...", ...} or null
-#[no_mangle]
-#[cfg(feature = "android")]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getAvailableNonce(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-) -> jstring {
-    let result = (|| -> Result<String, String> {
-        tracing::info!("🔍 FFI getAvailableNonce called with handle={}", handle);
-
-        // Get transport
-        let transport = get_transport(handle)?;
-
-        // Get secure storage
-        let storage = transport
-            .secure_storage()
-            .ok_or_else(|| "Secure storage not configured".to_string())?;
-
-        // Load bundle from secure storage
-        let bundle = storage
-            .load_bundle()
-            .map_err(|e| format!("Failed to load bundle: {}", e))?
-            .ok_or_else(|| {
-                "No bundle found - call prepareOfflineBundle or cacheNonceAccounts first"
-                    .to_string()
-            })?;
-
-        tracing::info!(
-            "📂 Loaded bundle: {} total nonces, {} available",
-            bundle.nonce_caches.len(),
-            bundle.available_nonces()
-        );
-
-        // Get next available nonce
-        let available_nonce = bundle.get_available_nonce();
-
-        // Convert to FFI type and return as Option
-        let ffi_nonce = available_nonce.map(|nonce| {
-            tracing::info!("✅ Found available nonce account: {}", nonce.nonce_account);
-            crate::ffi::types::CachedNonceData {
-                version: 1,
-                nonce_account: nonce.nonce_account.clone(),
-                authority: nonce.authority.clone(),
-                blockhash: nonce.blockhash.clone(),
-                lamports_per_signature: nonce.lamports_per_signature,
-                cached_at: nonce.cached_at,
-                used: nonce.used,
-            }
-        });
-
-        if ffi_nonce.is_none() {
-            tracing::warn!("⚠️  No available nonces in bundle (all are used)");
-        }
-
-        let response: FfiResult<Option<crate::ffi::types::CachedNonceData>> =
-            FfiResult::success(ffi_nonce);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-/// Refresh blockhash in an unsigned transaction
-///
-/// Use this right before sending an unsigned transaction to MWA for signing
-/// to ensure the blockhash is fresh and won't expire during the signing process.
-#[cfg(feature = "android")]
-#[no_mangle]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_refreshBlockhashInUnsignedTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    unsigned_tx_base64: JString,
-) -> jstring {
-    let result = (|| -> Result<String, String> {
-        tracing::info!(
-            "🔄 FFI refreshBlockhashInUnsignedTransaction called with handle={}",
-            handle
-        );
-
-        let transport = get_transport(handle)?;
-
-        // Get the base64 string from JNI
-        let tx_base64_str: String = env
-            .get_string(&unsigned_tx_base64)
-            .map_err(|e| format!("Failed to read unsigned transaction string: {:?}", e))?
-            .into();
-
-        tracing::debug!(
-            "📥 Unsigned transaction size: {} chars (base64)",
-            tx_base64_str.len()
-        );
-
-        // Refresh blockhash
-        let refreshed_tx = runtime::block_on(async {
-            transport
-                .transaction_service()
-                .refresh_blockhash_in_unsigned_transaction(&tx_base64_str)
-                .await
-        })
-        .map_err(|e| format!("Failed to refresh blockhash: {}", e))?;
-
-        tracing::info!("✅ Blockhash refreshed successfully");
-        tracing::debug!(
-            "   Refreshed transaction size: {} chars (base64)",
-            refreshed_tx.len()
-        );
-
-        let response: FfiResult<String> = FfiResult::success(refreshed_tx);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
-}
-
-// =============================================================================
-// BLE Mesh Operations
-// =============================================================================
-
-/// Fragment a signed transaction for BLE transmission
-/// Returns JSON with array of fragment bytes (base64 encoded)
-#[no_mangle]
-#[cfg(feature = "android")]
-pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_fragmentTransaction(
-    mut env: JNIEnv,
-    _class: JClass,
-    transaction_bytes: JByteArray,
-) -> jstring {
-    let result = (|| -> Result<String, String> {
-        tracing::info!("🔄 FFI fragmentTransaction called");
-
-        let tx_bytes: Vec<u8> = env
-            .convert_byte_array(&transaction_bytes)
-            .map_err(|e| format!("Failed to read transaction: {}", e))?;
-
-        tracing::info!("Fragmenting transaction of {} bytes", tx_bytes.len());
-
-        // Fragment the transaction
-        let fragments = crate::ble::fragment_transaction(&tx_bytes);
-
-        // Convert fragments to FFI-friendly format
-        #[derive(serde::Serialize)]
-        struct FragmentData {
-            #[serde(rename = "transactionId")]
-            transaction_id: String,
-            #[serde(rename = "fragmentIndex")]
-            fragment_index: u16,
-            #[serde(rename = "totalFragments")]
-            total_fragments: u16,
-            #[serde(rename = "dataBase64")]
-            data_base64: String,
-        }
-
-        let fragment_data: Vec<FragmentData> = fragments
-            .iter()
-            .map(|f| FragmentData {
-                transaction_id: hex::encode(f.transaction_id),
-                fragment_index: f.fragment_index,
-                total_fragments: f.total_fragments,
-                data_base64: base64::encode(&f.data),
-            })
-            .collect();
-
-        tracing::info!("✅ Created {} fragments", fragment_data.len());
-
-        let response: FfiResult<Vec<FragmentData>> = FfiResult::success(fragment_data);
-        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
-    })();
-
-    create_result_string(&mut env, result)
 }
 
 /// Reconstruct a transaction from fragments
@@ -2148,7 +1100,13 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushReceivedTransaction(
             .convert_byte_array(&transaction_bytes)
             .map_err(|e| format!("Failed to read transaction bytes: {}", e))?;
 
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
+        log::info!(
+            "📥 pushReceivedTransaction handle={} bytes={}",
+            handle,
+            tx_bytes.len()
+        );
+
         let added = transport.push_received_transaction(tx_bytes);
 
         #[derive(serde::Serialize)]
@@ -2158,6 +1116,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushReceivedTransaction(
         }
 
         let queue_size = transport.received_queue_size();
+        if added {
+            log::info!(
+                "✅ pushReceivedTransaction accepted — queue_size={}",
+                queue_size
+            );
+        } else {
+            log::info!(
+                "⚠️  pushReceivedTransaction duplicate/full — queue_size={}",
+                queue_size
+            );
+        }
+
         let response: FfiResult<PushResponse> =
             FfiResult::success(PushResponse { added, queue_size });
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
@@ -2178,7 +1148,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_nextReceivedTransaction(
             "🔍 FFI nextReceivedTransaction called with handle: {}",
             handle
         );
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         match transport.next_received_transaction() {
             Some((tx_id, tx_bytes, received_at)) => {
                 log::debug!(
@@ -2233,7 +1203,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getReceivedQueueSize(
 ) -> jstring {
     let result: Result<String, String> = (|| {
         log::debug!("🔍 FFI getReceivedQueueSize called with handle: {}", handle);
-        let transport = get_transport(handle)?;
+        let transport = get_core(handle)?;
         log::debug!("✅ Got transport instance for handle {}", handle);
 
         let queue_size = transport.received_queue_size();
@@ -2295,6 +1265,18 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_markTransactionSubmitted(
             .map_err(|e| format!("Failed to read transaction bytes: {}", e))?;
 
         let transport = get_transport(handle)?;
+        // Log SHA-256 prefix for dedup tracing without logging the full tx
+        let hash_prefix = {
+            use sha2::{Digest, Sha256};
+            let h = Sha256::digest(&tx_bytes);
+            hex::encode(&h[..4])
+        };
+        log::info!(
+            "🔖 markTransactionSubmitted handle={} sha256_prefix={} bytes={}",
+            handle,
+            hash_prefix,
+            tx_bytes.len()
+        );
         transport.mark_transaction_submitted(&tx_bytes);
 
         #[derive(serde::Serialize)]
@@ -2516,6 +1498,14 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushOutboundTransaction(
         let request: PushOutboundRequest = serde_json::from_str(&request_str)
             .map_err(|e| format!("Failed to parse request: {}", e))?;
 
+        log::info!(
+            "📤 pushOutboundTransaction handle={} tx_id={} fragments={} priority={:?}",
+            handle,
+            &request.tx_id[..8.min(request.tx_id.len())],
+            request.fragments.len(),
+            request.priority
+        );
+
         // Convert FFI fragments to mesh fragments
         let fragments: Result<Vec<crate::ble::mesh::TransactionFragment>, String> = request
             .fragments
@@ -2565,6 +1555,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_pushOutboundTransaction(
             Ok::<(), String>(())
         })?;
 
+        log::info!("✅ pushOutboundTransaction enqueued");
         let response: FfiResult<SuccessResponse> =
             FfiResult::success(SuccessResponse { success: true });
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
@@ -2678,6 +1669,12 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popOutboundTransaction(
         });
 
         if let Some(tx) = tx_opt {
+            log::info!(
+                "📦 popOutboundTransaction → tx_id={} fragments={} priority={:?}",
+                &tx.tx_id[..8.min(tx.tx_id.len())],
+                tx.fragments.len(),
+                tx.priority
+            );
             let tx_ffi = OutboundTransactionFFI {
                 tx_id: tx.tx_id,
                 original_bytes: base64::encode(&tx.original_bytes),
@@ -2695,6 +1692,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_popOutboundTransaction(
                 FfiResult::success(Some(tx_ffi));
             serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
         } else {
+            log::debug!("📭 popOutboundTransaction — queue empty");
             let response: FfiResult<Option<OutboundTransactionFFI>> = FfiResult::success(None);
             serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
         }
@@ -2725,6 +1723,13 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addToRetryQueue(
         let tx_bytes = base64::decode(&request.tx_bytes)
             .map_err(|e| format!("Invalid transaction bytes: {}", e))?;
 
+        log::info!(
+            "🔁 addToRetryQueue handle={} tx_id={} error={:?}",
+            handle,
+            &request.tx_id[..8.min(request.tx_id.len())],
+            request.error
+        );
+
         let retry_item = crate::queue::RetryItem::new(tx_bytes, request.tx_id, request.error);
 
         runtime::block_on(async {
@@ -2735,6 +1740,7 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addToRetryQueue(
             Ok::<(), String>(())
         })?;
 
+        log::info!("✅ addToRetryQueue enqueued");
         let response: FfiResult<SuccessResponse> =
             FfiResult::success(SuccessResponse { success: true });
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
@@ -2845,6 +1851,117 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_cleanupExpired(
         serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
     })();
 
+    create_result_string(&mut env, result)
+}
+
+/// Confirm that all fragments for `tx_id` were delivered to the current peer.
+/// Decrements the transaction's relevance counter by 1. Evicts the transaction and
+/// returns { removed: true } when relevance hits 0 (fan-out exhausted).
+/// Returns { removed: false } when the transaction is retained for future peers.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_confirmDelivered(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id_j: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let tx_id: String = env.get_string(&tx_id_j).map_err(|e| e.to_string())?.into();
+
+        let removed = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.confirm_delivered(&tx_id)
+        });
+
+        #[derive(serde::Serialize)]
+        struct ConfirmDeliveredResponse {
+            removed: bool,
+        }
+        let response: FfiResult<ConfirmDeliveredResponse> =
+            FfiResult::success(ConfirmDeliveredResponse { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Peek at the highest-relevance transaction in the outbound queue and load its
+/// fragments into the transport's BLE frame buffer so the sending loop can deliver
+/// them to the current peer. Returns the tx_id, current relevance, and fragment count,
+/// or null data if the queue is empty.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_loadForSending(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        // Peek under a read lock — clone the data we need so we don't hold the lock
+        // while calling queue_fragments (which takes an unrelated mutex).
+        let tx_info = runtime::block_on(async {
+            let queue = transport.sdk.queue_manager().outbound.read().await;
+            queue
+                .peek_highest_relevance()
+                .map(|tx| (tx.tx_id.clone(), tx.fragments.clone(), tx.relevance))
+        });
+
+        #[derive(serde::Serialize)]
+        struct LoadResponse {
+            tx_id: String,
+            relevance: u8,
+            fragment_count: usize,
+        }
+
+        if let Some((tx_id, fragments, relevance)) = tx_info {
+            transport
+                .queue_fragments(&fragments)
+                .map_err(|e| format!("Failed to load fragments into transport: {}", e))?;
+
+            let response: FfiResult<Option<LoadResponse>> =
+                FfiResult::success(Some(LoadResponse {
+                    tx_id,
+                    relevance,
+                    fragment_count: fragments.len(),
+                }));
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        } else {
+            let response: FfiResult<Option<LoadResponse>> = FfiResult::success(None);
+            serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+        }
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Purge outbound transactions older than max_age_secs from all priority queues.
+/// Call this at connection-start so stale relayed data is not forwarded.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_purgeStaleOutbound(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    max_age_secs: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let max_age = max_age_secs.max(0) as u64;
+
+        let removed = runtime::block_on(async {
+            let mut outbound = transport.sdk.queue_manager().outbound.write().await;
+            outbound.cleanup_stale(max_age)
+        });
+
+        #[derive(serde::Serialize)]
+        struct PurgeResponse {
+            removed: usize,
+        }
+        let response: FfiResult<PurgeResponse> = FfiResult::success(PurgeResponse { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
     create_result_string(&mut env, result)
 }
 
@@ -3140,4 +2257,806 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_clearAllQueues(
     })();
 
     create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Wallet address — reward attribution
+// =============================================================================
+
+/// Set the wallet address for this node session.
+/// Pass an empty string to clear a previously-set address.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_setWalletAddress(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    address: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        let addr: String = env
+            .get_string(&address)
+            .map_err(|e| format!("Failed to read address string: {}", e))?
+            .into();
+
+        let addr_opt = if addr.is_empty() {
+            None
+        } else {
+            Some(addr.clone())
+        };
+        transport.set_wallet_address(addr_opt);
+
+        info!(
+            "✅ Wallet address updated: {}",
+            if addr.is_empty() { "<cleared>" } else { &addr }
+        );
+
+        let response: FfiResult<SuccessResponse> =
+            FfiResult::success(SuccessResponse { success: true });
+
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+/// Get the wallet address currently set for this node session.
+/// Returns an empty address field if none has been set.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getWalletAddress(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        let addr = transport.get_wallet_address().unwrap_or_default();
+
+        #[derive(serde::Serialize)]
+        struct WalletAddressResponse {
+            address: String,
+        }
+
+        let response: FfiResult<WalletAddressResponse> =
+            FfiResult::success(WalletAddressResponse { address: addr });
+
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Intent protocol — stateless helpers (no SDK transport handle needed)
+// =============================================================================
+
+/// Returns the executor PDA address for the pollinet-executor Anchor program.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getExecutorPda(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let (pda, bump) = crate::intent::executor_pda();
+    log::info!("🏦 getExecutorPda → pda={} bump={}", pda, bump);
+    let response: FfiResult<ExecutorPdaResponse> = FfiResult::success(ExecutorPdaResponse {
+        pda: pda.to_string(),
+        bump,
+    });
+    let result: Result<String, String> =
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e));
+    create_result_string(&mut env, result)
+}
+
+/// Builds a single unsigned transaction containing one `approve_checked` instruction
+/// per entry in the request. The `owner_wallet` must sign the returned transaction
+/// before it can be submitted to Solana.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createApproveTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    request_json: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let bytes: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request bytes: {}", e))?;
+
+        let req: CreateApproveTransactionRequest = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        log::info!(
+            "🔐 createApproveTransaction owner={} fee_payer={} blockhash={} tokens={}",
+            req.owner_wallet,
+            req.fee_payer,
+            &req.recent_blockhash[..8],
+            req.tokens.len()
+        );
+        for t in &req.tokens {
+            log::info!(
+                "   token: mint={} account={} amount={} decimals={}",
+                t.mint_address,
+                t.token_account,
+                t.amount,
+                t.decimals
+            );
+        }
+
+        let owner: solana_sdk::pubkey::Pubkey = std::str::FromStr::from_str(&req.owner_wallet)
+            .map_err(|e| format!("Invalid owner_wallet: {}", e))?;
+        let fee_payer: solana_sdk::pubkey::Pubkey = std::str::FromStr::from_str(&req.fee_payer)
+            .map_err(|e| format!("Invalid fee_payer: {}", e))?;
+
+        let blockhash_bytes = bs58::decode(&req.recent_blockhash)
+            .into_vec()
+            .map_err(|e| format!("Invalid recent_blockhash: {}", e))?;
+        let blockhash_arr: [u8; 32] = blockhash_bytes
+            .try_into()
+            .map_err(|_| "recent_blockhash must decode to 32 bytes".to_string())?;
+        let recent_blockhash = solana_sdk::hash::Hash::new_from_array(blockhash_arr);
+
+        let approvals: Vec<crate::intent::TokenApprovalInput> = req
+            .tokens
+            .into_iter()
+            .map(|t| crate::intent::TokenApprovalInput {
+                mint_address: t.mint_address,
+                amount: t.amount,
+                decimals: t.decimals,
+                token_account: t.token_account,
+                token_program: t.token_program,
+            })
+            .collect();
+
+        let (executor_pda_key, _) = crate::intent::executor_pda();
+
+        let tx_base64 = crate::intent::build_approve_transaction(
+            &owner,
+            &fee_payer,
+            recent_blockhash,
+            &approvals,
+        )?;
+
+        log::info!(
+            "✅ createApproveTransaction → executor_pda={} tx_base64_len={}",
+            executor_pda_key,
+            tx_base64.len()
+        );
+        let response: FfiResult<ApproveTransactionResponse> =
+            FfiResult::success(ApproveTransactionResponse {
+                transaction: tx_base64,
+                executor_pda: executor_pda_key.to_string(),
+            });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Builds a single unsigned transaction with one `revoke` instruction per token account,
+/// clearing the executor PDA's delegate authority.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createRevokeTransaction(
+    mut env: JNIEnv,
+    _class: JClass,
+    request_json: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let bytes: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request bytes: {}", e))?;
+
+        let req: CreateRevokeTransactionRequest = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        log::info!(
+            "🔓 createRevokeTransaction owner={} fee_payer={} accounts={} program={}",
+            req.owner_wallet,
+            req.fee_payer,
+            req.token_accounts.len(),
+            req.token_program
+        );
+
+        let owner: solana_sdk::pubkey::Pubkey = std::str::FromStr::from_str(&req.owner_wallet)
+            .map_err(|e| format!("Invalid owner_wallet: {}", e))?;
+        let fee_payer: solana_sdk::pubkey::Pubkey = std::str::FromStr::from_str(&req.fee_payer)
+            .map_err(|e| format!("Invalid fee_payer: {}", e))?;
+
+        let blockhash_bytes = bs58::decode(&req.recent_blockhash)
+            .into_vec()
+            .map_err(|e| format!("Invalid recent_blockhash: {}", e))?;
+        let blockhash_arr: [u8; 32] = blockhash_bytes
+            .try_into()
+            .map_err(|_| "recent_blockhash must decode to 32 bytes".to_string())?;
+        let recent_blockhash = solana_sdk::hash::Hash::new_from_array(blockhash_arr);
+
+        let tx_base64 = crate::intent::build_revoke_transaction(
+            &owner,
+            &fee_payer,
+            recent_blockhash,
+            &req.token_accounts,
+            &req.token_program,
+        )?;
+
+        log::info!(
+            "✅ createRevokeTransaction → tx_base64_len={}",
+            tx_base64.len()
+        );
+        let response: FfiResult<RevokeTransactionResponse> =
+            FfiResult::success(RevokeTransactionResponse {
+                transaction: tx_base64,
+            });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Serializes an Intent into the canonical 169-byte borsh layout and returns it as
+/// base64. Generates a random 16-byte nonce unless `nonce_hex` is supplied.
+/// Sign the returned `intent_bytes` with Ed25519 before submitting via pollicore.
+#[no_mangle]
+#[cfg(feature = "android")]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_createIntentBytes(
+    mut env: JNIEnv,
+    _class: JClass,
+    request_json: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let bytes: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request bytes: {}", e))?;
+
+        let req: CreateIntentBytesRequest = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Failed to parse request: {}", e))?;
+
+        log::info!("🎯 createIntentBytes");
+        log::info!("   from={}", req.from);
+        log::info!("   to={}", req.to);
+        log::info!("   token_mint={}", req.token_mint);
+        log::info!("   amount={}", req.amount);
+        log::info!("   expires_at={}", req.expires_at);
+        log::info!("   gas_fee_amount={}", req.gas_fee_amount);
+        log::info!("   gas_fee_payee={}", req.gas_fee_payee);
+
+        let pubkey_bytes = |s: &str, field: &str| -> Result<[u8; 32], String> {
+            let pk: solana_sdk::pubkey::Pubkey =
+                std::str::FromStr::from_str(s).map_err(|e| format!("Invalid {}: {}", field, e))?;
+            Ok(pk.to_bytes())
+        };
+
+        let from = pubkey_bytes(&req.from, "from")?;
+        let to = pubkey_bytes(&req.to, "to")?;
+        let token_mint = pubkey_bytes(&req.token_mint, "token_mint")?;
+        let gas_fee_payee = pubkey_bytes(&req.gas_fee_payee, "gas_fee_payee")?;
+
+        let nonce: [u8; 16] = if let Some(hex_str) = &req.nonce_hex {
+            let decoded = hex::decode(hex_str).map_err(|e| format!("Invalid nonce_hex: {}", e))?;
+            decoded.try_into().map_err(|_| {
+                "nonce_hex must decode to exactly 16 bytes (32 hex chars)".to_string()
+            })?
+        } else {
+            crate::intent::random_nonce()
+        };
+
+        let intent_bytes = crate::intent::serialize_intent(
+            1,
+            &from,
+            &to,
+            &token_mint,
+            req.amount,
+            &nonce,
+            req.expires_at,
+            req.gas_fee_amount,
+            &gas_fee_payee,
+        );
+
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let encoded = STANDARD.encode(intent_bytes);
+        log::info!(
+            "✅ createIntentBytes → {} bytes (base64_len={}) nonce={}",
+            169,
+            encoded.len(),
+            hex::encode(nonce)
+        );
+        let response: FfiResult<IntentBytesResponse> = FfiResult::success(IntentBytesResponse {
+            intent_bytes: encoded,
+            nonce_hex: hex::encode(nonce),
+        });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Intent submission — delegates to crate::submission
+// =============================================================================
+
+/// Submit a signed intent to pollicore.
+///
+/// The pollicore URL is baked in at compile time from `POLLICORE_URL` in `.env`.
+/// All submission logic (HTTP client, logging, error handling) lives in
+/// `crate::submission` so that censorship-hardening transports can be added there
+/// without touching the FFI glue.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_submitIntent(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    request_json: JByteArray,
+) -> jstring {
+    use crate::submission::{SubmitIntentRequest, SubmitIntentResponse};
+
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+
+        let pollicore_url = transport.get_pollicore_url().ok_or_else(|| {
+            "POLLICORE_URL not configured — set it in .env before building".to_string()
+        })?;
+
+        let req_bytes: Vec<u8> = env
+            .convert_byte_array(&request_json)
+            .map_err(|e| format!("Failed to read request bytes: {}", e))?;
+        let req: SubmitIntentRequest = serde_json::from_slice(&req_bytes)
+            .map_err(|e| format!("Failed to parse SubmitIntentRequest: {}", e))?;
+
+        let resp: SubmitIntentResponse =
+            crate::submission::submit_intent(&pollicore_url, &req).map_err(|e| e.to_string())?;
+
+        let response: FfiResult<SubmitIntentResponse> = FfiResult::success(resp);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Subsystem 1 — Density-adaptive rotation
+// =============================================================================
+
+/// Record a scan observation for density estimation.
+/// Call on every `onScanResult` with the remote device address.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_recordScanResult(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_str: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("peer_id: {}", e))?
+            .into();
+        transport.density_estimator.lock().record(&peer_str);
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Recompute and return adaptive BLE session/cooldown parameters.
+/// Call every 10 seconds from Kotlin.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getAdaptiveParams(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let params = transport.density_estimator.lock().compute_params();
+        let response: FfiResult<crate::ble::AdaptiveParams> = FfiResult::success(params);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Add `peer_id` to the cooldown list for `cooldown_ms` milliseconds.
+/// Call after every session ends (both mutual-drain and force-close paths).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_addPeerToCooldown(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+    cooldown_ms: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_str: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("peer_id: {}", e))?
+            .into();
+        transport
+            .cooldown_list
+            .lock()
+            .add(&peer_str, cooldown_ms as u64);
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Returns true if `peer_id` is currently in cooldown (should not be connected to).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_isPeerInCooldown(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_str: String = env
+            .get_string(&peer_id)
+            .map_err(|e| format!("peer_id: {}", e))?
+            .into();
+        let cooling = transport.cooldown_list.lock().is_cooling(&peer_str);
+        let response: FfiResult<bool> = FfiResult::success(cooling);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Sparse-network safety net: expire the oldest cooldown entry early.
+/// Call when idle_ms > 2 * session_target_ms AND all eligible peers are in cooldown.
+/// Returns the peer_id that was released, or null if the cooldown list was empty.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_expireOldestCooldown(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let expired = transport.cooldown_list.lock().expire_oldest();
+        let response: FfiResult<Option<String>> = FfiResult::success(expired);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Log a session telemetry record. Stored locally; future versions will relay to Pollicore.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_logSessionTelemetry(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    telemetry_json: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let _transport = get_transport(handle)?;
+        let json_str: String = env
+            .get_string(&telemetry_json)
+            .map_err(|e| format!("telemetry_json: {}", e))?
+            .into();
+        // Parse to validate the structure before logging.
+        let _record: crate::ble::SessionTelemetry = serde_json::from_str(&json_str)
+            .map_err(|e| format!("Invalid telemetry JSON: {}", e))?;
+        log::info!("[SESSION_TELEMETRY] {}", json_str);
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Subsystem 2 — Per-peer materialized queue
+// =============================================================================
+
+/// Returns the list of tx_ids that should be sent to `peer_id` (4-byte hex compact ID).
+/// Filters by deliveredTo exclusion, TTL, and relevance > 0.
+/// Sorted by: is_confirmation desc, priority desc, relevance desc, age asc.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_outboundForPeer(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    peer_id_hex: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let peer_hex: String = env
+            .get_string(&peer_id_hex)
+            .map_err(|e| format!("peer_id_hex: {}", e))?
+            .into();
+        let peer_bytes =
+            hex::decode(&peer_hex).map_err(|e| format!("Invalid peer_id_hex: {}", e))?;
+        let peer_id: [u8; 4] = peer_bytes
+            .try_into()
+            .map_err(|_| "peer_id must be 4 bytes (8 hex chars)".to_string())?;
+
+        let tx_ids = runtime::block_on(async {
+            let queue = transport.sdk.queue_manager().outbound.read().await;
+            queue
+                .outbound_for_peer(&peer_id)
+                .iter()
+                .map(|tx| tx.tx_id.clone())
+                .collect::<Vec<_>>()
+        });
+
+        let response: FfiResult<Vec<String>> = FfiResult::success(tx_ids);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Drain-conditional delivery confirmation (Subsystem 2).
+/// Call ONLY on mutual drain. Adds `peer_id` to deliveredTo, decrements relevance.
+/// Returns `{ removed: bool }` — true if the entry was evicted (relevance reached 0).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_confirmDeliveredByPeer(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id: JString,
+    peer_id_hex: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let tx_id_str: String = env
+            .get_string(&tx_id)
+            .map_err(|e| format!("tx_id: {}", e))?
+            .into();
+        let peer_hex: String = env
+            .get_string(&peer_id_hex)
+            .map_err(|e| format!("peer_id_hex: {}", e))?
+            .into();
+        let peer_bytes =
+            hex::decode(&peer_hex).map_err(|e| format!("Invalid peer_id_hex: {}", e))?;
+        let peer_id: [u8; 4] = peer_bytes
+            .try_into()
+            .map_err(|_| "peer_id must be 4 bytes".to_string())?;
+
+        let removed = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.confirm_delivered_by_peer(&tx_id_str, &peer_id)
+        });
+
+        #[derive(serde::Serialize)]
+        struct RemovedResponse {
+            removed: bool,
+        }
+        let response: FfiResult<RemovedResponse> = FfiResult::success(RemovedResponse { removed });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Subsystem 3 — Confirmation-driven purge
+// =============================================================================
+
+/// Ingest a received (or locally generated) confirmation.
+///
+/// Verifies the Ed25519 signature against the bundled Pollicore public key.
+/// On success:
+///   - purges any matching entry from the outbound carrier set
+///   - discards the inbound reassembly buffer for this txId (if present)
+///   - creates a tombstone
+///   - queues the confirmation for re-propagation at HIGH priority
+///
+/// Returns `{ purged: bool, added_to_carrier: bool }`.
+/// Silently drops tampered/unverifiable confirmations (returns success with both false).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_ingestConfirmation(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    confirmation_bytes: JByteArray,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let raw: Vec<u8> = env
+            .convert_byte_array(&confirmation_bytes)
+            .map_err(|e| format!("confirmation_bytes: {}", e))?;
+
+        let conf = crate::ble::MeshConfirmation::from_frame_bytes(&raw)
+            .map_err(|e| format!("Deserialize confirmation: {}", e))?;
+
+        // Verify signature — POLLICORE_PUBKEY_BYTES is the 32-byte Ed25519 verifying key
+        // bundled at compile time. If not set, skip verification (dev mode only).
+        let valid = if let Some(pk) = get_pollicore_pubkey() {
+            conf.verify(&pk)
+        } else {
+            log::warn!(
+                "POLLICORE_PUBKEY not configured — skipping signature verification (dev mode)"
+            );
+            true
+        };
+
+        #[derive(serde::Serialize)]
+        struct IngestResult {
+            purged: bool,
+            added_to_carrier: bool,
+        }
+
+        if !valid {
+            log::warn!(
+                "Dropped tampered confirmation for tx_id_hash={}",
+                hex::encode(conf.tx_id_hash)
+            );
+            let response: FfiResult<IngestResult> = FfiResult::success(IngestResult {
+                purged: false,
+                added_to_carrier: false,
+            });
+            return serde_json::to_string(&response)
+                .map_err(|e| format!("Serialization error: {}", e));
+        }
+
+        let tx_id_hash_hex = hex::encode(conf.tx_id_hash);
+
+        // Purge matching entry from outbound carrier set
+        let purged = runtime::block_on(async {
+            let mut queue = transport.sdk.queue_manager().outbound.write().await;
+            queue.purge_by_tx_id(&tx_id_hash_hex)
+        });
+
+        // Discard inbound reassembly buffer for this txId
+        {
+            let mut bufs = transport.inbound_buffers.lock();
+            bufs.remove(&tx_id_hash_hex);
+        }
+
+        // Create tombstone (valid for 2 × confirmation TTL)
+        {
+            let tomb =
+                crate::ble::Tombstone::new(conf.tx_id_hash, crate::ble::CONFIRMATION_TTL_SECS / 2);
+            transport
+                .tombstones
+                .lock()
+                .insert(tx_id_hash_hex.clone(), tomb);
+        }
+
+        // Expire cooldown overrides so peers learn about this purge quickly
+        {
+            transport
+                .cooldown_list
+                .lock()
+                .expire_not_delivered(&conf.delivered_to);
+        }
+
+        // Wrap confirmation as an outbound entry and push to HIGH priority
+        let added_to_carrier = if conf.is_alive() {
+            let conf_bytes = conf.to_frame_bytes()?;
+            let fragments = crate::ble::fragment_transaction(&conf_bytes);
+            let tx = crate::queue::OutboundTransaction {
+                tx_id: tx_id_hash_hex.clone(),
+                original_bytes: conf_bytes,
+                fragments,
+                priority: crate::queue::Priority::High,
+                created_at: conf.added_at,
+                retry_count: 0,
+                max_retries: 3,
+                relevance: conf.relevance,
+                delivered_to: conf.delivered_to,
+                ttl_secs: crate::ble::CONFIRMATION_TTL_SECS,
+                hop_count: conf.hop_count,
+                is_confirmation: true,
+            };
+            let pushed = runtime::block_on(async {
+                let mut queue = transport.sdk.queue_manager().outbound.write().await;
+                queue.push(tx).is_ok()
+            });
+            pushed
+        } else {
+            false
+        };
+
+        log::info!(
+            "ingestConfirmation txId={} purged={} added_to_carrier={}",
+            tx_id_hash_hex,
+            purged,
+            added_to_carrier
+        );
+
+        let response: FfiResult<IngestResult> = FfiResult::success(IngestResult {
+            purged,
+            added_to_carrier,
+        });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Check if a tx_id_hash (hex) has an active tombstone.
+/// Returns `{ tombstoned: bool }`. Call before buffering inbound fragments.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_isTombstoned(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    tx_id_hash_hex: JString,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let hash_hex: String = env
+            .get_string(&tx_id_hash_hex)
+            .map_err(|e| format!("tx_id_hash_hex: {}", e))?
+            .into();
+        let tombstoned = transport
+            .tombstones
+            .lock()
+            .get(&hash_hex)
+            .map(|t| t.is_valid())
+            .unwrap_or(false);
+        #[derive(serde::Serialize)]
+        struct TombResponse {
+            tombstoned: bool,
+        }
+        let response: FfiResult<TombResponse> = FfiResult::success(TombResponse { tombstoned });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Evict expired tombstones and expired cooldowns. Call in the periodic 10s tick.
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_periodicMaintenance(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        // Evict expired tombstones
+        transport.tombstones.lock().retain(|_, t| t.is_valid());
+        // Evict expired cooldowns
+        transport.cooldown_list.lock().evict_expired();
+        let response: FfiResult<bool> = FfiResult::success(true);
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+/// Get the number of active tombstones (diagnostic only).
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_getTombstoneCount(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let transport = get_transport(handle)?;
+        let count = transport.tombstones.lock().len();
+        #[derive(serde::Serialize)]
+        struct CountResponse {
+            count: usize,
+        }
+        let response: FfiResult<CountResponse> = FfiResult::success(CountResponse { count });
+        serde_json::to_string(&response).map_err(|e| format!("Serialization error: {}", e))
+    })();
+    create_result_string(&mut env, result)
+}
+
+// =============================================================================
+// Pollicore public key resolution
+// =============================================================================
+
+/// Returns the bundled Pollicore Ed25519 public key (32 bytes), or None in dev mode.
+/// The key is embedded at compile time via the POLLICORE_PUBKEY env var (64-char hex).
+fn get_pollicore_pubkey() -> Option<[u8; 32]> {
+    let hex_str = option_env!("POLLICORE_PUBKEY")?;
+    if hex_str.is_empty() {
+        return None;
+    }
+    let bytes = hex::decode(hex_str).ok()?;
+    bytes.try_into().ok()
 }

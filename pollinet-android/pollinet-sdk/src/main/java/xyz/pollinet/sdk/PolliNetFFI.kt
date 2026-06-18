@@ -32,6 +32,31 @@ object PolliNetFFI {
      */
     external fun shutdown(handle: Long)
 
+    /**
+     * Initialize a Wi-Fi Direct transport handle (own engine).
+     *
+     * Returns a handle that works with the same byte-level transport API
+     * ([pushInbound]/[nextOutbound]/[metrics]/[tick]/…). BLE-specific calls
+     * (transaction builders, queue manager, health) reject this handle by design.
+     * @param configBytes JSON-encoded SdkConfig (same schema as [init])
+     * @return Handle, or -1 on error
+     */
+    external fun initWifiDirect(configBytes: ByteArray): Long
+
+    /**
+     * Initialize a Wi-Fi Direct handle that SHARES the engine of an existing BLE handle.
+     * Use when running BLE and Wi-Fi Direct at once so a transaction seen over both
+     * radios is reassembled/submitted exactly once (cross-transport dedup).
+     * @param bleHandle an existing BLE handle from [init]
+     * @return Handle, or -1 if bleHandle is invalid
+     */
+    external fun initWifiDirectSharing(bleHandle: Long): Long
+
+    /**
+     * Report which radio a handle drives: "BLE" | "WIFI_DIRECT" ("" if invalid).
+     */
+    external fun transportKind(handle: Long): String
+
     // =========================================================================
     // Host-driven transport API
     // =========================================================================
@@ -66,6 +91,12 @@ object PolliNetFFI {
      * Clear a transaction from reassembly buffers
      */
     external fun clearTransaction(handle: Long, txId: String): String
+
+    /**
+     * Remove all outbound queue fragments for a confirmed transaction.
+     * Call on any BLE confirmation (success or failure) to stop re-broadcasting.
+     */
+    external fun clearOutboundTransaction(handle: Long, txId: String): String
 
     // =========================================================================
     // Transaction builders

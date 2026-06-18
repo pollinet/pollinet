@@ -8,9 +8,13 @@
 //! - Metrics and diagnostics
 
 pub mod android;
+pub mod host_transport;
 pub mod runtime;
 pub mod transport;
 pub mod types;
+pub mod wifi_direct_transport;
 
 pub use android::*;
+pub use host_transport::HostTransport;
 pub use types::*;
+pub use wifi_direct_transport::HostWifiDirectTransport;

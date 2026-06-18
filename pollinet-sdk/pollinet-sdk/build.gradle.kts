@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -58,7 +60,12 @@ android {
     publishing {
         singleVariant("release") {
             withSourcesJar()
-            withJavadocJar()
+            // Dokka javadoc-jar generation only when explicitly requested (Maven Central
+            // requires it). Skipped by default so JitPack — where javaDocReleaseGeneration
+            // fails — publishes the AAR + sources cleanly. Enable with: -PwithJavadoc=true
+            if (project.findProperty("withJavadoc") == "true") {
+                withJavadocJar()
+            }
         }
     }
 }
@@ -86,21 +93,60 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 }
 
-// Task to build Rust library using cargo-ndk
+// Resolve ANDROID_NDK_HOME at configuration time:
+// 1. Use the env var if already set (CI / Android Studio)
+// 2. Otherwise derive it from sdk.dir in local.properties (any ancestor project)
+val resolvedNdkHome: String? = run {
+    val envNdk = System.getenv("ANDROID_NDK_HOME")
+    if (!envNdk.isNullOrBlank()) return@run envNdk
+
+    val candidateLocalProps = listOf(
+        file("../../local.properties"),      // pollinet repo root
+        file("../local.properties"),         // pollinet-sdk root
+        rootProject.file("local.properties") // consumer project root (e.g. Pollistem)
+    )
+    var sdkDir: String? = null
+    for (f in candidateLocalProps) {
+        if (f.exists()) {
+            val props = Properties()
+            f.inputStream().use { props.load(it) }
+            sdkDir = props.getProperty("sdk.dir")
+            if (sdkDir != null) break
+        }
+    }
+    if (sdkDir == null) return@run null
+
+    val ndkParent = File("$sdkDir/ndk")
+    if (!ndkParent.isDirectory) return@run null
+    // Pick the newest installed NDK version
+    ndkParent.listFiles()
+        ?.filter { it.isDirectory }
+        ?.maxByOrNull { it.name }
+        ?.absolutePath
+}
+
+// Task to build Rust library using cargo-ndk.
+// Skipped automatically when:
+//   - SKIP_RUST_BUILD=true is set (composite/incremental builds where .so files are pre-built), OR
+//   - libpollinet.so already exists for all three ABIs (avoids heavy Rust recompile on every build)
+// Run `./gradlew buildRustLib` explicitly to force a rebuild.
 tasks.register<Exec>("buildRustLib") {
     description = "Build Rust library for Android using cargo-ndk"
     group = "build"
-    
+
     workingDir = file("../../")
-    
-    // Use absolute path to cargo
+
     val cargoHome = System.getenv("CARGO_HOME") ?: "${System.getProperty("user.home")}/.cargo"
     val cargoPath = "$cargoHome/bin/cargo"
-    
+
+    if (resolvedNdkHome != null) {
+        environment("ANDROID_NDK_HOME", resolvedNdkHome)
+    }
+
     commandLine(
         cargoPath, "ndk",
         "-t", "arm64-v8a",
-        "-t", "armeabi-v7a", 
+        "-t", "armeabi-v7a",
         "-t", "x86_64",
         "-o", "pollinet-sdk/pollinet-sdk/src/main/jniLibs",
         "build",
@@ -108,6 +154,18 @@ tasks.register<Exec>("buildRustLib") {
         "--no-default-features",
         "--features", "android"
     )
+
+    // Skip if all pre-built .so files are already in place, or SKIP_RUST_BUILD=true.
+    // This keeps composite/incremental builds fast — run `./gradlew buildRustLib`
+    // explicitly whenever the Rust source changes.
+    onlyIf {
+        val skipEnv = System.getenv("SKIP_RUST_BUILD") == "true"
+        val arm64So   = file("pollinet-sdk/pollinet-sdk/src/main/jniLibs/arm64-v8a/libpollinet.so")
+        val armv7So   = file("pollinet-sdk/pollinet-sdk/src/main/jniLibs/armeabi-v7a/libpollinet.so")
+        val x86_64So  = file("pollinet-sdk/pollinet-sdk/src/main/jniLibs/x86_64/libpollinet.so")
+        val alreadyBuilt = arm64So.exists() && armv7So.exists() && x86_64So.exists()
+        !skipEnv && !alreadyBuilt
+    }
 }
 
 // Make preBuild depend on buildRustLib
@@ -189,22 +247,20 @@ publishing {
     }
 }
 
-// Signing configuration (required for Maven Central)
-signing {
-    val signingKeyId = project.findProperty("signing.keyId") as String? 
-        ?: project.findProperty("signingKeyId") as String?
-    val signingKey = project.findProperty("signingKey") as String?
-    val signingPassword = project.findProperty("signing.password") as String?
-        ?: project.findProperty("signingPassword") as String?
-    
-    // Try in-memory keys first (for CI/CD with exported key)
-    if (signingKeyId != null && signingKey != null && signingPassword != null) {
+// Signing configuration — only applied when keys are explicitly provided.
+// JitPack does not have a GPG keyring, so signing is skipped there.
+// Maven Central publishing requires signing; pass keys via gradle.properties or env vars.
+val signingKeyId  = project.findProperty("signing.keyId")   as String?
+    ?: project.findProperty("signingKeyId")                  as String?
+val signingKey      = project.findProperty("signingKey")      as String?
+val signingPassword = project.findProperty("signing.password") as String?
+    ?: project.findProperty("signingPassword")               as String?
+
+if (signingKeyId != null && signingKey != null && signingPassword != null) {
+    signing {
         useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
-        sign(publishing.publications["release"])
-    } else {
-        // Use GPG command (for local development with GPG keyring)
-        // This will use the default GPG keyring and gpg-agent
-        useGpgCmd()
         sign(publishing.publications["release"])
     }
 }
+// No else — if keys are absent (JitPack, forks, fresh checkouts) the AAR is
+// published unsigned. Signing is only required for Sonatype/Maven Central.

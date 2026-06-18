@@ -1,9 +1,15 @@
 package xyz.pollinet.sdk
 
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import kotlinx.coroutines.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 
@@ -15,12 +21,24 @@ import kotlinx.serialization.decodeFromString
  */
 class PolliNetSDK private constructor(
     private val handle: Long,
-    private val json: Json = Json { 
+    private val rpcUrl: String?,
+    private val json: Json = Json {
         ignoreUnknownKeys = true
         prettyPrint = false
+        encodeDefaults = true
     }
 ) {
+    // Cached executor PDA, populated on first listTokenAccounts call.
+    @Volatile private var cachedExecutorPda: String? = null
+
     companion object {
+        /**
+         * Micro take-rate (basis points) charged on each intent to reimburse the gateway
+         * that pays the SOL network fee. Paid in the transferred token, out of the user's
+         * delegated allowance. 10 bps = 0.10%. Tune centrally here.
+         */
+        const val GAS_FEE_TAKE_RATE_BPS = 10L
+
         /**
          * Initialize a new PolliNet SDK instance
          */
@@ -28,11 +46,11 @@ class PolliNetSDK private constructor(
             try {
                 val configJson = Json.encodeToString(config)
                 val handle = PolliNetFFI.init(configJson.toByteArray())
-                
+
                 if (handle < 0) {
                     Result.failure(Exception("Failed to initialize SDK: invalid handle"))
                 } else {
-                    Result.success(PolliNetSDK(handle))
+                    Result.success(PolliNetSDK(handle = handle, rpcUrl = config.rpcUrl))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -40,9 +58,76 @@ class PolliNetSDK private constructor(
         }
         
         /**
+         * Initialize a standalone Wi-Fi Direct SDK instance (own transport engine).
+         *
+         * Same config schema as [initialize]; the returned instance exposes the shared
+         * transport API (push/next/metrics/received-queue) but not BLE-specific builders.
+         * Start the radio with [startWifiDirectService].
+         */
+        suspend fun initializeWifiDirect(config: SdkConfig): Result<PolliNetSDK> =
+            withContext(Dispatchers.IO) {
+                try {
+                    val configJson = Json.encodeToString(config)
+                    val handle = PolliNetFFI.initWifiDirect(configJson.toByteArray())
+                    if (handle < 0) {
+                        Result.failure(Exception("Failed to initialize Wi-Fi Direct: invalid handle"))
+                    } else {
+                        Result.success(PolliNetSDK(handle = handle, rpcUrl = config.rpcUrl))
+                    }
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+        /**
          * Get the SDK version
          */
         fun version(): String = PolliNetFFI.version()
+    }
+
+    /** The native transport handle (needed to start a transport service). */
+    val transportHandle: Long get() = handle
+
+    /** Which radio this handle drives: "BLE" | "WIFI_DIRECT". */
+    fun transportKind(): String = PolliNetFFI.transportKind(handle)
+
+    /**
+     * Create a Wi-Fi Direct handle that SHARES this instance's engine, so a transaction
+     * seen over BLE *and* Wi-Fi is reassembled/submitted exactly once. Returns the new
+     * handle (use it to start [WifiDirectService]), or -1 on failure.
+     *
+     * Only valid on a BLE-backed instance (from [initialize]).
+     */
+    fun createSharedWifiDirectHandle(): Long = PolliNetFFI.initWifiDirectSharing(handle)
+
+    /**
+     * Start the Wi-Fi Direct foreground service bound to [serviceHandle] (defaults to this
+     * instance's handle — correct for a [initializeWifiDirect] instance; for dual-radio
+     * use a handle from [createSharedWifiDirectHandle]).
+     */
+    fun startWifiDirectService(
+        context: Context,
+        serviceHandle: Long = handle,
+        role: Int = WifiDirectService.ROLE_AUTO,
+    ) {
+        val intent = Intent(context, WifiDirectService::class.java).apply {
+            action = WifiDirectService.ACTION_START
+            putExtra(WifiDirectService.EXTRA_HANDLE, serviceHandle)
+            putExtra(WifiDirectService.EXTRA_ROLE, role)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    /** Stop the Wi-Fi Direct foreground service. */
+    fun stopWifiDirectService(context: Context) {
+        val intent = Intent(context, WifiDirectService::class.java).apply {
+            action = WifiDirectService.ACTION_STOP
+        }
+        context.startService(intent)
     }
 
     /**
@@ -113,138 +198,6 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
-    // Transaction builders
-    // =========================================================================
-
-    /**
-     * Create an unsigned SOL transfer transaction
-     */
-    suspend fun createUnsignedTransaction(
-        request: CreateUnsignedTransactionRequest
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val requestJson = json.encodeToString(request).toByteArray()
-            val resultJson = PolliNetFFI.createUnsignedTransaction(handle, requestJson)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Create an unsigned SOL transfer transaction (convenience method)
-     * 
-     * @param sender Sender wallet public key
-     * @param recipient Recipient wallet public key
-     * @param feePayer Fee payer wallet public key
-     * @param amount Amount in lamports
-     * @param nonceAccount Optional nonce account public key (fetches from blockchain if provided)
-     * @param nonceData Optional cached nonce data (uses directly, no RPC call)
-     */
-    suspend fun createUnsignedTransaction(
-        sender: String,
-        recipient: String,
-        feePayer: String,
-        amount: Long,
-        nonceAccount: String? = null,
-        nonceData: CachedNonceData? = null
-    ): Result<String> = createUnsignedTransaction(
-        CreateUnsignedTransactionRequest(
-            sender = sender,
-            recipient = recipient,
-            feePayer = feePayer,
-            amount = amount,
-            nonceAccount = nonceAccount,
-            nonceData = nonceData
-        )
-    )
-
-    /**
-     * Create an unsigned SPL token transfer transaction
-     */
-    suspend fun createUnsignedSplTransaction(
-        request: CreateUnsignedSplTransactionRequest
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val requestJson = json.encodeToString(request).toByteArray()
-            val resultJson = PolliNetFFI.createUnsignedSplTransaction(handle, requestJson)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Create an unsigned SPL token transfer transaction (convenience method)
-     * 
-     * @param senderWallet Sender wallet public key
-     * @param recipientWallet Recipient wallet public key
-     * @param feePayer Fee payer wallet public key
-     * @param mintAddress Token mint address
-     * @param amount Token amount (in token's smallest unit, e.g., lamports for SOL, or decimals for tokens)
-     * @param nonceAccount Optional nonce account public key (fetches from blockchain if provided)
-     * @param nonceData Optional cached nonce data (uses directly, no RPC call)
-     */
-    suspend fun createUnsignedSplTransaction(
-        senderWallet: String,
-        recipientWallet: String,
-        feePayer: String,
-        mintAddress: String,
-        amount: Long,
-        nonceAccount: String? = null,
-        nonceData: CachedNonceData? = null
-    ): Result<String> = createUnsignedSplTransaction(
-        CreateUnsignedSplTransactionRequest(
-            senderWallet = senderWallet,
-            recipientWallet = recipientWallet,
-            feePayer = feePayer,
-            mintAddress = mintAddress,
-            amount = amount,
-            nonceAccount = nonceAccount,
-            nonceData = nonceData
-        )
-    )
-
-    // =========================================================================
-    // Signature helpers
-    // =========================================================================
-
-    /**
-     * Prepare sign payload - Extract message bytes that need to be signed
-     */
-    suspend fun prepareSignPayload(base64Tx: String): ByteArray? = withContext(Dispatchers.IO) {
-        PolliNetFFI.prepareSignPayload(handle, base64Tx)
-    }
-
-    /**
-     * Apply signature to a transaction
-     */
-    suspend fun applySignature(
-        base64Tx: String,
-        signerPubkey: String,
-        signatureBytes: ByteArray
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.applySignature(handle, base64Tx, signerPubkey, signatureBytes)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Verify and serialize transaction for submission/fragmentation
-     */
-    suspend fun verifyAndSerialize(base64Tx: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.verifyAndSerialize(handle, base64Tx)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // =========================================================================
     // Fragmentation API
     // =========================================================================
 
@@ -264,537 +217,9 @@ class PolliNetSDK private constructor(
     }
 
     // =========================================================================
-    // Offline Bundle Management - Core PolliNet Features
-    // =========================================================================
-
-    /**
-     * Prepare offline bundle for creating transactions without internet
-     * This is a CORE PolliNet feature for offline/mesh transaction creation
-     * 
-     * Smart bundle management:
-     * - Refreshes used nonces (FREE!)
-     * - Only creates new nonce accounts if needed (~$0.20 each)
-     * - Reuses existing nonce accounts to save money
-     * 
-     * @param count Number of nonces to prepare
-     * @param senderKeypair Sender keypair as raw bytes (64 bytes)
-     * @param bundleFile Optional file path to load/save bundle
-     * @return OfflineTransactionBundle with available nonces
-     */
-    suspend fun prepareOfflineBundle(
-        count: Int,
-        senderKeypair: ByteArray,
-        bundleFile: String? = null
-    ): Result<OfflineTransactionBundle> = withContext(Dispatchers.IO) {
-        try {
-            val request = PrepareOfflineBundleRequest(
-                count = count,
-                bundleFile = bundleFile
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.prepareOfflineBundle(handle, requestJson, senderKeypair)
-            
-            // Parse the bundle JSON string from the result
-            val bundleJsonResult = parseResult<String>(resultJson)
-            bundleJsonResult.map { bundleJsonStr ->
-                json.decodeFromString<OfflineTransactionBundle>(bundleJsonStr)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Create transaction completely offline using cached nonce data
-     * NO internet required - core PolliNet offline feature
-     * 
-     * @param senderKeypair Sender keypair as raw bytes (64 bytes)
-     * @param nonceAuthorityKeypair Nonce authority keypair as raw bytes (64 bytes)
-     * @param recipient Recipient public key
-     * @param amount Amount in lamports
-     * @param cachedNonce Cached nonce data from bundle
-     * @return Base64-encoded compressed transaction ready for BLE
-     */
-    suspend fun createOfflineTransaction(
-        senderKeypair: ByteArray,
-        recipient: String,
-        amount: Long
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = CreateOfflineTransactionRequest(
-                recipient = recipient,
-                amount = amount
-                // Nonce is automatically picked from stored bundle
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.createOfflineTransaction(handle, requestJson, senderKeypair)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Submit offline-created transaction to blockchain
-     * 
-     * @param transactionBase64 Base64-encoded transaction from createOfflineTransaction
-     * @param verifyNonce Whether to verify nonce is still valid before submission
-     * @param onSuccess Optional callback invoked with transaction signature after successful submission
-     * @return Transaction signature if successful
-     */
-    suspend fun submitOfflineTransaction(
-        transactionBase64: String,
-        verifyNonce: Boolean = true,
-        onSuccess: ((String) -> Unit)? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = SubmitOfflineTransactionRequest(
-                transactionBase64 = transactionBase64,
-                verifyNonce = verifyNonce
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.submitOfflineTransaction(handle, requestJson)
-            val result = parseResult<String>(resultJson)
-            
-            // Invoke callback on success
-            result.onSuccess { signature ->
-                onSuccess?.invoke(signature)
-            }
-            
-            result
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-    
-    /**
-     * Submit a nonce account creation transaction and automatically cache the nonce accounts.
-     * 
-     * This is a convenience method that:
-     * 1. Submits the transaction to the blockchain
-     * 2. Automatically caches all nonce accounts in the offline bundle after successful submission
-     * 
-     * Use this when submitting nonce account creation transactions created via
-     * [createUnsignedNonceAccountsAndCache] to automatically cache them.
-     * 
-     * Note: Transactions can contain up to 5 nonce accounts (batched).
-     * 
-     * @param unsignedTransaction The unsigned nonce account transaction (may contain multiple nonce accounts)
-     * @param finalSignedTransactionBase64 The fully signed transaction (after MWA + nonce signatures)
-     * @return Transaction signature if successful, and all nonce accounts are automatically cached
-     */
-    suspend fun submitNonceAccountCreationAndCache(
-        unsignedTransaction: UnsignedNonceTransaction,
-        finalSignedTransactionBase64: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            // Submit the transaction
-            val submitResult = submitOfflineTransaction(
-                transactionBase64 = finalSignedTransactionBase64,
-                verifyNonce = false  // Don't verify for creation transactions
-            )
-            
-            // If successful, automatically cache all nonce accounts in this transaction
-            submitResult.onSuccess { signature ->
-                val cacheResult = cacheNonceAccounts(unsignedTransaction.noncePubkey)
-                cacheResult.onFailure { cacheError ->
-                    // Log but don't fail - submission was successful
-                    android.util.Log.w("PolliNetSDK", "Failed to auto-cache ${unsignedTransaction.noncePubkey.size} nonce accounts after submission: ${cacheError.message}")
-                }
-            }
-            
-            submitResult
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // =========================================================================
-    // MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
-    // =========================================================================
-
-    /**
-     * Create UNSIGNED offline transaction for MWA/Seed Vault signing
-     * Takes PUBLIC KEYS only (no private keys) - compatible with Solana Mobile Stack
-     * 
-     * This allows secure transaction signing where private keys never leave
-     * the Seed Vault hardware security module.
-     * 
-     * @param senderPubkey Sender's public key as base58 string
-     * @param nonceAuthorityPubkey Nonce authority's public key as base58 string
-     * @param recipient Recipient's public key as base58 string
-     * @param amount Amount in lamports
-     * @return Base64-encoded unsigned transaction ready for MWA signing
-     */
-    suspend fun createUnsignedOfflineTransaction(
-        senderPubkey: String,
-        nonceAuthorityPubkey: String,
-        recipient: String,
-        amount: Long,
-        nonceData: CachedNonceData? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = CreateUnsignedOfflineTransactionRequest(
-                senderPubkey = senderPubkey,
-                nonceAuthorityPubkey = nonceAuthorityPubkey,
-                recipient = recipient,
-                amount = amount,
-                nonceData = nonceData
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.createUnsignedOfflineTransaction(handle, requestJson)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Create UNSIGNED offline SPL token transfer for MWA/Seed Vault signing.
-     *
-     * This variant:
-     * - Takes only PUBLIC KEYS (no private keys)
-     * - Uses cached nonce data from the offline bundle (no network required)
-     * - Returns a base64-encoded unsigned SPL transaction that MWA will sign
-     */
-    suspend fun createUnsignedOfflineSplTransaction(
-        senderWallet: String,
-        recipientWallet: String,
-        mintAddress: String,
-        amount: Long,
-        feePayer: String,
-        nonceData: CachedNonceData? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = CreateUnsignedOfflineSplTransactionRequest(
-                senderWallet = senderWallet,
-                recipientWallet = recipientWallet,
-                mintAddress = mintAddress,
-                amount = amount,
-                feePayer = feePayer,
-                nonceData = nonceData
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.createUnsignedOfflineSplTransaction(handle, requestJson)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Get transaction message bytes that need to be signed by MWA
-     * 
-     * This extracts the raw message from an unsigned transaction so that
-     * MWA/Seed Vault can sign it securely.
-     * 
-     * @param unsignedTransactionBase64 Base64-encoded unsigned transaction
-     * @return Base64-encoded message bytes to sign
-     */
-    suspend fun getTransactionMessageToSign(
-        unsignedTransactionBase64: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = GetMessageToSignRequest(
-                unsignedTransactionBase64 = unsignedTransactionBase64
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.getTransactionMessageToSign(handle, requestJson)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Get list of public keys that need to sign this transaction
-     * 
-     * Returns the signers in the order required by Solana protocol.
-     * This is useful for MWA authorization requests.
-     * 
-     * @param unsignedTransactionBase64 Base64-encoded unsigned transaction
-     * @return List of public key strings (base58) that need to sign
-     */
-    suspend fun getRequiredSigners(
-        unsignedTransactionBase64: String
-    ): Result<List<String>> = withContext(Dispatchers.IO) {
-        try {
-            val request = GetRequiredSignersRequest(
-                unsignedTransactionBase64 = unsignedTransactionBase64
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.getRequiredSigners(handle, requestJson)
-            parseResult<List<String>>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Create an unsigned governance vote transaction (durable nonce, MWA-friendly).
-     *
-     * This method builds an unsigned vote transaction using a nonce account on-chain.
-     * The returned base64-encoded transaction can be:
-     * - Sent to MWA/Seed Vault for signing, or
-     * - Signed manually with local keys.
-     *
-     * NOTE: This is an online operation (uses RPC to fetch nonce data).
-     */
-    suspend fun createUnsignedVote(
-        voter: String,
-        proposalId: String,
-        voteAccount: String,
-        choice: Int,
-        feePayer: String,
-        nonceAccount: String? = null,
-        nonceData: CachedNonceData? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = CastUnsignedVoteRequest(
-                voter = voter,
-                proposalId = proposalId,
-                voteAccount = voteAccount,
-                choice = choice.toUByte(),
-                feePayer = feePayer,
-                nonceAccount = nonceAccount,
-                nonceData = nonceData
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.castUnsignedVote(handle, requestJson)
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Create unsigned nonce account creation transactions for MWA signing
-     * 
-     * This generates N unsigned transactions that create nonce accounts on-chain.
-     * Each transaction must be co-signed by:
-     * 1. The ephemeral nonce keypair (returned here, sign locally)
-     * 2. The payer (sign with MWA)
-     * 
-     * @param count Number of nonce accounts to create
-     * @param payerPubkey Public key of the account paying for nonce accounts (base58)
-     * @return Result containing list of unsigned transactions with nonce keypairs
-     */
-    suspend fun createUnsignedNonceTransactions(
-        count: Int,
-        payerPubkey: String
-    ): Result<List<UnsignedNonceTransaction>> = withContext(Dispatchers.IO) {
-        try {
-            val request = CreateUnsignedNonceTransactionsRequest(
-                count = count,
-                payerPubkey = payerPubkey
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.createUnsignedNonceTransactions(handle, requestJson)
-            parseResult<List<UnsignedNonceTransaction>>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Cache nonce account data from on-chain accounts
-     * 
-     * This fetches nonce data from the blockchain and saves it to secure storage
-     * for offline transaction creation. Call this after successfully creating
-     * nonce accounts via MWA.
-     * 
-     * @param nonceAccounts List of nonce account public keys (base58)
-     * @return Result containing the number of accounts cached
-     */
-    suspend fun cacheNonceAccounts(
-        nonceAccounts: List<String>
-    ): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            val request = CacheNonceAccountsRequest(
-                nonceAccounts = nonceAccounts
-            )
-            val requestJson = json.encodeToString(request).toByteArray(Charsets.UTF_8)
-            val resultJson = PolliNetFFI.cacheNonceAccounts(handle, requestJson)
-            val response = parseResult<CacheNonceAccountsResponse>(resultJson)
-            response.map { it.cachedCount }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Convenience helper: create unsigned nonce account transactions.
-     *
-     * ⚠️ IMPORTANT: This method does NOT cache nonce accounts because the accounts
-     * don't exist on-chain yet! You must:
-     * 1. Sign the transactions with MWA (payer signature)
-     * 2. Submit transactions using [submitOfflineTransaction] to create accounts on-chain — nonce signatures already embedded
-     * 3. THEN call [cacheNonceAccounts] to cache the newly created accounts
-     *
-     * Workflow:
-     * 1. Calls [createUnsignedNonceTransactions] to generate unsigned nonce account TXs.
-     * 2. Returns the list of [UnsignedNonceTransaction] objects ready for MWA signing.
-     *
-     * This method is suitable for both MWA (co-sign with payer) and non-MWA flows.
-     * 
-     * @param count Number of nonce accounts to create (1-10 recommended)
-     * @param payerPubkey Public key of the account that will pay for account creation
-     * @param onCreated Optional callback invoked with nonce pubkeys after transactions are created.
-     *                 Use this to automatically cache accounts after successful submission.
-     * @return List of unsigned nonce account transactions ready for signing
-     */
-    suspend fun createUnsignedNonceAccountsAndCache(
-        count: Int,
-        payerPubkey: String,
-        onCreated: ((List<String>) -> Unit)? = null
-    ): Result<List<UnsignedNonceTransaction>> = withContext(Dispatchers.IO) {
-        try {
-            // Create unsigned transactions
-            val result = createUnsignedNonceTransactions(count, payerPubkey)
-            
-            // Invoke callback with nonce pubkeys if provided (flatten all nonce pubkeys from all transactions)
-            result.onSuccess { transactions ->
-                val noncePubkeys = transactions.flatMap { it.noncePubkey }
-                onCreated?.invoke(noncePubkeys)
-            }
-            
-            result
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-    
-    /**
-     * Cache nonce accounts after successful submission.
-     * 
-     * Helper method that takes the unsigned transactions and a list of successful signatures,
-     * then automatically caches the corresponding nonce accounts.
-     * 
-     * Use this after submitting nonce account creation transactions to automatically
-     * cache them in the offline bundle.
-     * 
-     * @param transactions The original list of unsigned nonce transactions
-     * @param successfulSignatures List of transaction signatures that were successfully submitted.
-     *                            Must match the order of transactions.
-     * @return Result containing the number of accounts cached
-     */
-    suspend fun cacheNonceAccountsAfterSubmission(
-        transactions: List<UnsignedNonceTransaction>,
-        successfulSignatures: List<String>
-    ): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            if (transactions.size != successfulSignatures.size) {
-                return@withContext Result.failure(
-                    IllegalArgumentException(
-                        "Transaction count (${transactions.size}) doesn't match signature count (${successfulSignatures.size})"
-                    )
-                )
-            }
-            
-            // Extract and flatten all nonce pubkeys from successfully submitted transactions
-            val noncePubkeys = transactions.flatMap { it.noncePubkey }
-            
-            // Cache all nonce accounts
-            cacheNonceAccounts(noncePubkeys)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Get an available nonce account from cached bundle.
-     * 
-     * Loads the bundle from secure storage and returns the first available
-     * (unused) nonce account data. This allows users to either manage their
-     * own nonce accounts or let PolliNet manage them automatically.
-     * 
-     * Returns null if:
-     * - Secure storage not configured
-     * - Bundle doesn't exist
-     * - Bundle has no available nonces (all are used)
-     * 
-     * @return Result containing the available nonce data, or null if none available
-     */
-    suspend fun getAvailableNonce(): Result<CachedNonceData?> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.getAvailableNonce(handle)
-            val response = parseResult<CachedNonceData?>(resultJson)
-            response
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Refresh all cached nonce data in the offline bundle.
-     *
-     * This quietly:
-     * - Loads the existing OfflineTransactionBundle from secure storage
-     * - For each cached nonce account, fetches the latest on-chain nonce state
-     * - Updates blockhash / fee data and marks all nonces as available (used = false)
-     *
-     * Safe to call whenever internet connectivity is restored.
-     *
-     * @return Number of nonce entries refreshed (0 if none or no bundle)
-     */
-    /**
-     * Refresh the blockhash in an unsigned transaction.
-     * 
-     * Use this right before sending an unsigned transaction to MWA for signing
-     * to ensure the blockhash is fresh and won't expire during the signing process.
-     * 
-     * This is particularly useful for nonce account creation transactions, which
-     * may take time to be signed by the user, causing the original blockhash to expire.
-     * 
-     * @param unsignedTxBase64 Base64-encoded unsigned transaction
-     * @return Result containing the refreshed transaction (base64-encoded)
-     */
-    suspend fun refreshBlockhashInUnsignedTransaction(
-        unsignedTxBase64: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.refreshBlockhashInUnsignedTransaction(
-                handle,
-                unsignedTxBase64
-            )
-            parseResult<String>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-    
-    suspend fun refreshOfflineBundle(): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.refreshOfflineBundle(handle)
-            val response = parseResult<RefreshOfflineBundleResponse>(resultJson)
-            response.map { it.refreshedCount }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // =========================================================================
     // BLE Mesh Operations
     // =========================================================================
-    
-    /**
-     * Fragment a signed transaction for BLE transmission
-     * 
-     * Splits a complete signed transaction into smaller fragments that
-     * can be transmitted over BLE with MTU constraints.
-     * 
-     * @param transactionBytes Signed transaction bytes
-     * @return List of fragments ready for BLE transmission
-     */
-    suspend fun fragmentTransaction(transactionBytes: ByteArray): Result<List<FragmentData>> = withContext(Dispatchers.IO) {
-        try {
-            val resultJson = PolliNetFFI.fragmentTransaction(transactionBytes)
-            parseResult<List<FragmentData>>(resultJson)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-    
+
     /**
      * Reconstruct a transaction from BLE fragments
      * 
@@ -1089,9 +514,9 @@ class PolliNetSDK private constructor(
     suspend fun getRetryQueueSize(): Result<Int> = getQueueSize(PolliNetFFI::getRetryQueueSize)
     
     /**
-     * Queue confirmation for relay back to origin
-     * @param txId Transaction ID (hex string)
-     * @param signature Blockchain signature
+     * Queue a SUCCESS confirmation for relay back to origin.
+     * @param txId Transaction ID (hex string, SHA-256 of tx bytes)
+     * @param signature On-chain transaction signature
      */
     suspend fun queueConfirmation(txId: String, signature: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -1102,6 +527,28 @@ class PolliNetSDK private constructor(
             val requestJson = json.encodeToString(request)
             val resultJson = PolliNetFFI.queueConfirmation(handle, requestJson)
             parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Queue a FAILURE confirmation for relay back to origin.
+     * Call this when a transaction is permanently dropped (stale nonce, max retries
+     * exhausted, or any non-retryable error) so the originating node learns about it.
+     * @param txId Transaction ID (hex string, SHA-256 of tx bytes)
+     * @param error Human-readable reason for failure
+     */
+    suspend fun queueFailureConfirmation(txId: String, error: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val confirmation = Confirmation(
+                txId = txId,
+                status = ConfirmationStatus.Failed(error),
+                timestamp = System.currentTimeMillis(),
+                relayCount = 0
+            )
+            // relayConfirmation serialises to JSON and pushes into the Rust confirmation queue
+            relayConfirmation(confirmation)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1160,6 +607,184 @@ class PolliNetSDK private constructor(
     }
     
     /**
+     * Confirm that all fragments for [txId] were delivered to the current peer.
+     * Decrements the transaction's relevance counter. When relevance reaches 0 the
+     * transaction is evicted from the queue.
+     * @return true if the transaction was removed (fan-out exhausted), false if retained.
+     */
+    suspend fun confirmDelivered(txId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class ConfirmDeliveredResponse(val removed: Boolean)
+            parseResult<ConfirmDeliveredResponse>(PolliNetFFI.confirmDelivered(handle, txId))
+                .map { it.removed }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Peek at the highest-relevance transaction in the outbound queue and load its
+     * fragments into the transport BLE frame buffer ready for the sending loop.
+     * @return [LoadForSendingResult] with tx metadata, or null if the queue is empty.
+     */
+    suspend fun loadForSending(): Result<LoadForSendingResult?> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<LoadForSendingResult?>(PolliNetFFI.loadForSending(handle))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Purge outbound transactions older than [maxAgeSecs] from all priority queues.
+     * Call this at connection-start to drop stale relayed data before beginning transfer.
+     * @return Number of transactions removed.
+     */
+    suspend fun purgeStaleOutbound(maxAgeSecs: Long = 300L): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class PurgeResponse(val removed: Int)
+            parseResult<PurgeResponse>(PolliNetFFI.purgeStaleOutbound(handle, maxAgeSecs)).map { it.removed }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // Subsystem 1 — Density-adaptive rotation
+    // =========================================================================
+
+    /**
+     * Record a BLE scan observation for density estimation.
+     * Call on every onScanResult with the remote device address.
+     */
+    suspend fun recordScanResult(peerId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<Boolean>(PolliNetFFI.recordScanResult(handle, peerId)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Recompute and return adaptive BLE session/cooldown parameters.
+     * Call every 10 seconds from the mesh loop.
+     */
+    suspend fun getAdaptiveParams(): Result<AdaptiveParams> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.getAdaptiveParams(handle))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Add [peerId] to the cooldown list for [cooldownMs] ms.
+     * Call after every session ends.
+     */
+    suspend fun addPeerToCooldown(peerId: String, cooldownMs: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<Boolean>(PolliNetFFI.addPeerToCooldown(handle, peerId, cooldownMs)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Returns true if [peerId] is currently in cooldown.
+     */
+    suspend fun isPeerInCooldown(peerId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.isPeerInCooldown(handle, peerId))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Sparse-network safety net: expire the oldest cooldown entry early.
+     * Returns the peer_id that was released, or null if the list was empty.
+     */
+    suspend fun expireOldestCooldown(): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.expireOldestCooldown(handle))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Log a session telemetry record.
+     */
+    suspend fun logSessionTelemetry(record: SessionTelemetryRecord): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val json = kotlinx.serialization.json.Json.encodeToString(record)
+            parseResult<Boolean>(PolliNetFFI.logSessionTelemetry(handle, json)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // =========================================================================
+    // Subsystem 2 — Per-peer materialized queue
+    // =========================================================================
+
+    /**
+     * Get the tx_ids that should be sent to [peerIdHex] (8-char hex compact peer ID).
+     * Filters by deliveredTo exclusion, TTL, and relevance > 0.
+     */
+    suspend fun outboundForPeer(peerIdHex: String): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.outboundForPeer(handle, peerIdHex))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Drain-conditional delivery confirmation. Call ONLY on mutual drain.
+     * Adds [peerIdHex] to deliveredTo, decrements relevance.
+     * Returns true if the entry was evicted (relevance reached 0).
+     */
+    suspend fun confirmDeliveredByPeer(txId: String, peerIdHex: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class RemovedResponse(val removed: Boolean)
+            parseResult<RemovedResponse>(PolliNetFFI.confirmDeliveredByPeer(handle, txId, peerIdHex)).map { it.removed }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // =========================================================================
+    // Subsystem 3 — Confirmation-driven purge
+    // =========================================================================
+
+    /**
+     * Ingest a received Pollicore confirmation.
+     * Verifies signature, purges matching entry, creates tombstone, re-queues for relay.
+     * Silently drops tampered confirmations.
+     */
+    suspend fun ingestConfirmation(confirmationBytes: ByteArray): Result<IngestConfirmationResult> = withContext(Dispatchers.IO) {
+        try {
+            parseResult(PolliNetFFI.ingestConfirmation(handle, confirmationBytes))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Returns true if [txIdHashHex] has an active tombstone.
+     * Call before buffering inbound reassembly fragments.
+     */
+    suspend fun isTombstoned(txIdHashHex: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class TombResponse(val tombstoned: Boolean)
+            parseResult<TombResponse>(PolliNetFFI.isTombstoned(handle, txIdHashHex)).map { it.tombstoned }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Periodic maintenance: evict expired tombstones and cooldowns.
+     * Call from the 10-second adaptive params loop.
+     */
+    suspend fun periodicMaintenance(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<Boolean>(PolliNetFFI.periodicMaintenance(handle)).map { }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Diagnostic: get count of active tombstones.
+     */
+    suspend fun getTombstoneCount(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class CountResponse(val count: Int)
+            parseResult<CountResponse>(PolliNetFFI.getTombstoneCount(handle)).map { it.count }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
      * Cleanup expired confirmations and retry items
      * @return Pair of (confirmations cleaned, retries cleaned)
      */
@@ -1212,7 +837,6 @@ class PolliNetSDK private constructor(
     
     /**
      * Clear all queues (outbound, retry, confirmation, received) and reassembly buffers
-     * Note: This does NOT clear nonce data
      */
     suspend fun clearAllQueues(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -1236,6 +860,574 @@ class PolliNetSDK private constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    // =========================================================================
+    // Peer / mesh health monitoring
+    // =========================================================================
+
+    /**
+     * Get a full snapshot of all known peers and aggregate network health metrics.
+     * Peers are populated as [recordPeerHeartbeat] / [recordPeerRssi] are called.
+     */
+    suspend fun getHealthSnapshot(): Result<HealthSnapshot> = withContext(Dispatchers.IO) {
+        try {
+            @Serializable data class HealthSnapshotWrapper(val snapshot: HealthSnapshot)
+            parseResult<HealthSnapshotWrapper>(PolliNetFFI.getHealthSnapshot(handle)).map { it.snapshot }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Record a heartbeat for a BLE peer (marks it as Connected in the health monitor).
+     * Call on every successful GATT connection.
+     */
+    suspend fun recordPeerHeartbeat(peerId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<SuccessResponse>(PolliNetFFI.recordPeerHeartbeat(handle, peerId)).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Record an RSSI reading for a peer.  Call from [ScanCallback.onScanResult] and
+     * [BluetoothGattCallback.onReadRemoteRssi].
+     */
+    suspend fun recordPeerRssi(peerId: String, rssi: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<SuccessResponse>(PolliNetFFI.recordPeerRssi(handle, peerId, rssi)).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Record a round-trip latency measurement for a peer (in milliseconds).
+     */
+    suspend fun recordPeerLatency(peerId: String, latencyMs: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            parseResult<SuccessResponse>(PolliNetFFI.recordPeerLatency(handle, peerId, latencyMs)).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // Wallet address — reward attribution
+    // =========================================================================
+
+    /**
+     * Update the wallet address at runtime.
+     * Pass null or an empty string to clear a previously-set address.
+     */
+    suspend fun setWalletAddress(address: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.setWalletAddress(handle, address ?: "")
+            parseResult<SuccessResponse>(resultJson).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get the wallet address currently stored on the Rust transport.
+     * Returns null if no address has been set.
+     */
+    suspend fun getWalletAddress(): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getWalletAddress(handle)
+            parseResult<WalletAddressResponse>(resultJson).map { r ->
+                r.address.takeIf { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // Intent protocol
+    // =========================================================================
+
+    /**
+     * Fetches the gateway (pollicore) wallet public key.
+     * Use [deriveAssociatedTokenAccount] on this address + the token mint to get the
+     * correct [gasFeepayee] for [createIntentBytes].
+     */
+    suspend fun getGatewayWallet(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val url = pollicoreUrl() + "/sdk/intents/gateway"
+            val body = polliCoreGet(url)
+            val resp = json.decodeFromString<GatewayResponse>(body)
+            Result.success(resp.wallet)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Derives the Associated Token Account (ATA) address for a given wallet and mint.
+     * This is the account that must be used as the `to` field in [createIntentBytes]
+     * — the recipient's wallet address is NOT valid there; their token account is required.
+     *
+     * Stateless and offline-capable; the derivation is deterministic.
+     *
+     * @param ownerWallet Base58 wallet address of the recipient.
+     * @param tokenMint   Base58 mint address of the token.
+     * @return Base58 ATA address.
+     */
+    suspend fun deriveAssociatedTokenAccount(
+        ownerWallet: String,
+        tokenMint: String,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val ata = PolliNetFFI.deriveAssociatedTokenAccount(ownerWallet, tokenMint)
+            if (ata.isEmpty()) Result.failure(Exception("ATA derivation returned empty — check owner/mint are valid base58"))
+            else Result.success(ata)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Returns the executor PDA address for the pollinet-executor Anchor program.
+     * Store this address — users must call `approve` on each token account they want
+     * to delegate before submitting intents.
+     */
+    suspend fun getExecutorPda(): Result<ExecutorPdaResponse> = withContext(Dispatchers.IO) {
+        try {
+            val resultJson = PolliNetFFI.getExecutorPda()
+            parseResult<ExecutorPdaResponse>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Builds a single unsigned transaction that grants the executor PDA delegate
+     * authority over each token account in [tokens].
+     *
+     * The caller must sign and submit this transaction (via MWA or KeystoreManager)
+     * **before** creating any intents for those tokens.
+     *
+     * @param ownerWallet  Base58 public key of the wallet that owns the token accounts.
+     * @param tokens       List of token accounts to approve and the amounts to delegate.
+     * @param feePayer     Fee payer for the transaction (usually equals ownerWallet).
+     * @param recentBlockhash Latest blockhash from `connection.getLatestBlockhash()`.
+     * @return Base64-encoded unsigned transaction + the executor PDA address.
+     */
+    suspend fun createApproveTransaction(
+        ownerWallet: String,
+        tokens: List<TokenApprovalEntry>,
+        feePayer: String = ownerWallet,
+        recentBlockhash: String,
+    ): Result<ApproveTransactionResponse> = withContext(Dispatchers.IO) {
+        try {
+            val req = CreateApproveTransactionRequest(
+                ownerWallet = ownerWallet,
+                feePayer = feePayer,
+                recentBlockhash = recentBlockhash,
+                tokens = tokens,
+            )
+            val resultJson = PolliNetFFI.createApproveTransaction(
+                json.encodeToString(req).toByteArray()
+            )
+            parseResult<ApproveTransactionResponse>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Builds the canonical 169-byte borsh-encoded Intent and returns it as base64.
+     * A random 16-byte nonce is generated automatically unless you supply [nonceHex].
+     *
+     * The gateway gas fee is handled **internally** — callers no longer pass it:
+     *  - The gateway's fee token account is auto-filled from [getGatewayWallet] (its ATA for
+     *    [tokenMint]). The result is cached so repeated calls don't re-hit pollicore.
+     *  - The fee is a **micro take-rate** of [amount] ([GAS_FEE_TAKE_RATE_BPS] basis points),
+     *    paid in the same token, reimbursing the gateway that pays the SOL network fee.
+     *  - **Offline fallback:** if the gateway is unreachable, the fee is 0 and the payee falls
+     *    back to the sender's own token account (the executor skips the transfer when fee == 0).
+     *
+     * After this call:
+     *  1. Sign [IntentBytesResponse.intentBytes] (decoded from base64) with the `from` wallet key.
+     *  2. Submit via [submitIntent] or directly to pollicore `POST /sdk/intents/submit`.
+     *
+     * NOTE: the delegate approval ([createApproveTransaction]) must cover `amount + fee`.
+     *
+     * @param from        Source wallet public key (base58).
+     * @param to          Destination token account (base58 — use [deriveAssociatedTokenAccount]).
+     * @param tokenMint   Token mint address (base58).
+     * @param amount      Transfer amount in the token's smallest unit.
+     * @param expiresAt   Unix timestamp (seconds) after which the intent is invalid.
+     * @param nonceHex    Optional 32-char lowercase hex nonce (16 bytes). Random if null.
+     */
+    suspend fun createIntentBytes(
+        from: String,
+        to: String,
+        tokenMint: String,
+        amount: Long,
+        expiresAt: Long,
+        nonceHex: String? = null,
+    ): Result<IntentBytesResponse> = withContext(Dispatchers.IO) {
+        try {
+            // Resolve the gateway fee account + micro take-rate fee internally.
+            val gatewayWallet = resolveGatewayWallet()
+            val gatewayFeeAccount = gatewayWallet
+                ?.let { deriveAssociatedTokenAccount(it, tokenMint).getOrNull() }
+            val (gasFeepayee, gasFeeAmount) = if (gatewayFeeAccount != null) {
+                gatewayFeeAccount to (amount * GAS_FEE_TAKE_RATE_BPS / 10_000L)
+            } else {
+                // Offline / gateway unreachable: no fee, payee = sender's own token account.
+                deriveAssociatedTokenAccount(from, tokenMint).getOrThrow() to 0L
+            }
+
+            val req = CreateIntentBytesRequest(
+                from = from,
+                to = to,
+                tokenMint = tokenMint,
+                amount = amount,
+                expiresAt = expiresAt,
+                gasFeeAmount = gasFeeAmount,
+                gasFeepayee = gasFeepayee,
+                nonceHex = nonceHex,
+            )
+            val resultJson = PolliNetFFI.createIntentBytes(
+                json.encodeToString(req).toByteArray()
+            )
+            parseResult<IntentBytesResponse>(resultJson)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Cached gateway wallet (fetched from pollicore on first intent, reused thereafter). */
+    @Volatile private var cachedGatewayWallet: String? = null
+
+    /** Gateway wallet, cached after the first successful fetch. Null if unreachable. */
+    private suspend fun resolveGatewayWallet(): String? {
+        cachedGatewayWallet?.let { return it }
+        return getGatewayWallet().getOrNull()?.also { cachedGatewayWallet = it }
+    }
+
+    /**
+     * Builds a single unsigned transaction that revokes the executor PDA's delegate
+     * authority over each of the specified token accounts.
+     *
+     * Sign the returned transaction with [ownerWallet] before submitting.
+     *
+     * @param ownerWallet  Base58 public key of the wallet that owns the token accounts.
+     * @param tokenAccounts List of token account addresses to revoke.
+     * @param feePayer     Fee payer (usually equals ownerWallet).
+     * @param recentBlockhash Latest blockhash.
+     * @param tokenProgram "spl-token" (default) or "token-2022".
+     * @return Base64-encoded unsigned revoke transaction.
+     */
+    suspend fun createRevokeTransaction(
+        ownerWallet: String,
+        tokenAccounts: List<String>,
+        feePayer: String = ownerWallet,
+        recentBlockhash: String,
+        tokenProgram: String = "spl-token",
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val req = CreateRevokeTransactionRequest(
+                ownerWallet = ownerWallet,
+                feePayer = feePayer,
+                recentBlockhash = recentBlockhash,
+                tokenAccounts = tokenAccounts,
+                tokenProgram = tokenProgram,
+            )
+            val resultJson = PolliNetFFI.createRevokeTransaction(
+                json.encodeToString(req).toByteArray()
+            )
+            parseResult<RevokeTransactionResponse>(resultJson).map { it.transaction }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetch the most recent confirmed blockhash from the configured Solana RPC.
+     * Used as input to [createApproveTransaction] / [createRevokeTransaction]. Pure RPC call,
+     * no FFI hop. Throws if `SdkConfig.rpcUrl` was not set at SDK init.
+     */
+    suspend fun fetchRecentBlockhash(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val rpc = rpcUrl
+                ?: return@withContext Result.failure(Exception("rpcUrl not set on SdkConfig"))
+            val body = """{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[{"commitment":"confirmed"}]}"""
+            val response = rpcPost(rpc, body)
+            val root = json.parseToJsonElement(response).jsonObject
+            val blockhash = root["result"]?.jsonObject
+                ?.get("value")?.jsonObject
+                ?.get("blockhash")?.jsonPrimitive?.content
+                ?: return@withContext Result.failure(Exception("Could not parse blockhash from RPC response: $response"))
+            Result.success(blockhash)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Submit a fully-signed raw Solana transaction to the configured RPC's `sendTransaction`
+     * endpoint. The bytes must already be signed (e.g. by MWA on Android). Returns the resulting
+     * Solana transaction signature on success. Throws if `SdkConfig.rpcUrl` was not set at init.
+     */
+    suspend fun submitSignedTransaction(signedTxBytes: ByteArray): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val rpc = rpcUrl
+                ?: return@withContext Result.failure(Exception("rpcUrl not set on SdkConfig"))
+            val encoded = android.util.Base64.encodeToString(signedTxBytes, android.util.Base64.NO_WRAP)
+            val body = """{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["$encoded",{"encoding":"base64","preflightCommitment":"confirmed"}]}"""
+            val response = rpcPost(rpc, body)
+            val sigMatch = Regex(""""result"\s*:\s*"([^"]+)"""").find(response)
+            val errMatch = Regex(""""message"\s*:\s*"([^"]+)"""").find(response)
+            if (sigMatch != null) {
+                Result.success(sigMatch.groupValues[1])
+            } else {
+                Result.failure(Exception(errMatch?.groupValues?.get(1) ?: "sendTransaction failed: $response"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Internal helper for the two RPC methods above. Keeps a single HTTP code path. */
+    private fun rpcPost(url: String, body: String): String {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.doOutput = true
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 30_000
+        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        if (conn.responseCode !in 200..299) {
+            val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
+            throw Exception("RPC HTTP ${conn.responseCode}: $err")
+        }
+        return conn.inputStream.bufferedReader(Charsets.UTF_8).readText()
+    }
+
+    /**
+     * List all SPL token accounts owned by [walletAddress] together with their delegation
+     * status against the Pollinet executor PDA. This is the canonical "is this token
+     * Pollinet-ready?" query — `isExecutorDelegated == true && delegatedRawAmount > 0` means
+     * the token can be used for offline transfers without further setup.
+     *
+     * Uses the RPC URL from [SdkConfig.rpcUrl] (set at SDK init). Caches the executor PDA
+     * after the first call to avoid an extra FFI hop per refresh.
+     *
+     * @param walletAddress Base58 wallet address to query.
+     * @param tokenProgramId SPL token program ID (default: classic SPL token program).
+     * @return List of [DelegatedTokenAccount] with mint, balance, decimals, delegate, and
+     *         a precomputed `isExecutorDelegated` flag.
+     */
+    suspend fun listTokenAccounts(
+        walletAddress: String,
+        tokenProgramId: String = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    ): Result<List<DelegatedTokenAccount>> = withContext(Dispatchers.IO) {
+        try {
+            val rpc = rpcUrl
+                ?: return@withContext Result.failure(Exception("rpcUrl not set on SdkConfig"))
+
+            val executorPda = cachedExecutorPda ?: run {
+                val pda = getExecutorPda().getOrThrow().pda
+                cachedExecutorPda = pda
+                pda
+            }
+
+            val body = """{"jsonrpc":"2.0","id":1,"method":"getTokenAccountsByOwner","params":["$walletAddress",{"programId":"$tokenProgramId"},{"encoding":"jsonParsed","commitment":"confirmed"}]}"""
+            val conn = java.net.URL(rpc).openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 30_000
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val response = conn.inputStream.bufferedReader().readText()
+
+            val root = json.parseToJsonElement(response).jsonObject
+            val result = root["result"]?.jsonObject
+                ?: return@withContext Result.failure(Exception("RPC returned no result: $response"))
+            val valueArray = result["value"]?.jsonArray
+                ?: return@withContext Result.success(emptyList())
+
+            val tokens = valueArray.mapNotNull { elem ->
+                val obj = elem.jsonObject
+                val pubkey = obj["pubkey"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val info = obj["account"]?.jsonObject
+                    ?.get("data")?.jsonObject
+                    ?.get("parsed")?.jsonObject
+                    ?.get("info")?.jsonObject ?: return@mapNotNull null
+
+                val mint = info["mint"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val owner = info["owner"]?.jsonPrimitive?.content ?: walletAddress
+                val tokenAmountObj = info["tokenAmount"]?.jsonObject
+                val decimals = tokenAmountObj?.get("decimals")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val balance = tokenAmountObj?.get("amount")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+
+                val delegate = info["delegate"]?.jsonPrimitive?.content
+                val delegateAmountObj = info["delegatedAmount"]?.jsonObject
+                val delegatedRaw = delegateAmountObj?.get("amount")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                val isExecutorDelegated = delegate == executorPda && delegatedRaw > 0
+
+                DelegatedTokenAccount(
+                    pubkey = pubkey,
+                    mint = mint,
+                    owner = owner,
+                    decimals = decimals,
+                    rawBalance = balance,
+                    delegate = delegate,
+                    delegatedRawAmount = delegatedRaw,
+                    isExecutorDelegated = isExecutorDelegated,
+                )
+            }
+            Result.success(tokens)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Submits a signed intent to pollicore for on-chain execution.
+     *
+     * Prerequisites:
+     *  - [initializeIntentState] has been called and confirmed.
+     *  - The executor PDA has been granted delegate authority via [createApproveTransaction].
+     *
+     * @param intentBytesBase64   Base64-encoded 169-byte intent (from [createIntentBytes]).
+     * @param signatureBase64     Base64-encoded 64-byte Ed25519 signature over [intentBytesBase64].
+     * @param fromTokenAccount    SPL token account the tokens will be debited from.
+     * @param polliCoreBaseUrl    Base URL of pollicore.
+     * @param authToken           JWT access token.
+     * @param tokenProgram        "spl-token" (default) or "token-2022".
+     * @return The Solana transaction signature.
+     */
+    suspend fun submitIntent(
+        intentBytesBase64: String,
+        signatureBase64: String,
+        fromTokenAccount: String,
+        tokenProgram: String = "spl-token",
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val reqJson = json.encodeToString(
+                FfiSubmitIntentRequest(
+                    intentBytes = intentBytesBase64,
+                    signature = signatureBase64,
+                    fromTokenAccount = fromTokenAccount,
+                    tokenProgram = tokenProgram,
+                )
+            ).toByteArray(Charsets.UTF_8)
+            val resultJson = PolliNetFFI.submitIntent(handle, reqJson)
+            val result = parseResult<FfiSubmitIntentResponse>(resultJson)
+            Result.success(result.getOrThrow().txSignature)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Returns the on-chain intent state for the authenticated wallet.
+     * Use [IntentStateResponse.initialized] to decide whether [initializeIntentState]
+     * still needs to be called.
+     */
+    /** Check whether the intent state PDA is initialized for [wallet] (no JWT). */
+    suspend fun getIntentState(walletAddress: String): Result<IntentStateResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = pollicoreUrl() + "/sdk/intents/state?wallet=$walletAddress"
+                Result.success(json.decodeFromString<IntentStateResponse>(polliCoreGet(url)))
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
+    /**
+     * Fetch the partially-signed init transaction from pollicore.
+     * Sign the returned [InitTxResponse.tx] with the user's wallet, then call
+     * [initializeIntentState] to submit it and create the on-chain PDA.
+     */
+    suspend fun fetchInitTx(walletAddress: String): Result<InitTxResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = pollicoreUrl() + "/sdk/intents/init-tx?wallet=$walletAddress"
+                Result.success(json.decodeFromString<InitTxResponse>(polliCoreGet(url)))
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
+    /**
+     * Submit the user-signed init transaction to pollicore, which forwards it to Solana
+     * to create the intent state PDA. Call this once per wallet before [submitIntent].
+     *
+     * @param signedTxBase64 Base64-encoded transaction after the user has signed it.
+     * @param walletAddress  The user's base58 wallet address.
+     */
+    suspend fun initializeIntentState(
+        signedTxBase64: String,
+        walletAddress: String,
+    ): Result<InitializeResponse> = withContext(Dispatchers.IO) {
+        try {
+            val body = json.encodeToString(
+                InitializeRequest(tx = signedTxBase64, wallet = walletAddress)
+            )
+            val url = pollicoreUrl() + "/sdk/intents/initialize"
+            Result.success(json.decodeFromString<InitializeResponse>(polliCorePostPublic(url, body)))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // Legacy overload kept for any callers that still pass a JWT
+    @Deprecated("JWT no longer required; use getIntentState(walletAddress) instead")
+    suspend fun getIntentState(
+        polliCoreBaseUrl: String,
+        authToken: String,
+    ): Result<IntentStateResponse> = withContext(Dispatchers.IO) {
+        try {
+            val response = polliCoreGet("$polliCoreBaseUrl/sdk/intents/state", authToken)
+            Result.success(json.decodeFromString<IntentStateResponse>(response))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ─── HTTP helpers ─────────────────────────────────────────────────────────
+
+    private fun pollicoreUrl(): String = PolliNetFFI.getPolliCoreUrl()
+
+    private fun polliCoreGet(url: String): String {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 30_000
+        return readPolliCoreResponse(conn)
+    }
+
+    private fun polliCoreGet(url: String, authToken: String): String {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.setRequestProperty("Authorization", "Bearer $authToken")
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 30_000
+        return readPolliCoreResponse(conn)
+    }
+
+    private fun polliCorePostPublic(url: String, body: String): String {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.doOutput = true
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 30_000
+        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        return readPolliCoreResponse(conn)
+    }
+
+    private fun readPolliCoreResponse(conn: java.net.HttpURLConnection): String {
+        val statusCode = conn.responseCode
+        val stream = if (statusCode in 200..299) conn.inputStream else conn.errorStream
+        val body = stream?.bufferedReader(Charsets.UTF_8)?.readText() ?: ""
+        if (statusCode !in 200..299) {
+            throw PolliNetException("HTTP_$statusCode", "pollicore error $statusCode: $body")
+        }
+        return body
     }
 
     // =========================================================================
@@ -1300,7 +1492,16 @@ data class SdkConfig(
     val rpcUrl: String? = null,
     val enableLogging: Boolean = true,
     val logLevel: String? = "info",
-    val storageDirectory: String? = null
+    val storageDirectory: String? = null,
+    /** AES-256-GCM encryption key for nonce bundle storage. Required when [storageDirectory] is set. */
+    val encryptionKey: String? = null,
+    /**
+     * Base58-encoded Solana wallet address that owns this node session.
+     * When provided it is stored on the Rust transport and used to attribute
+     * uptime, relay and submission rewards to the correct wallet.
+     */
+    @SerialName("walletAddress")
+    val walletAddress: String? = null,
 )
 
 @Serializable
@@ -1314,29 +1515,6 @@ private data class FfiResultError(
     val ok: Boolean,
     val code: String,
     val message: String
-)
-
-@Serializable
-data class CreateUnsignedTransactionRequest(
-    val version: Int = 1,
-    val sender: String,
-    val recipient: String,
-    val feePayer: String,
-    val amount: Long,
-    val nonceAccount: String? = null,
-    val nonceData: CachedNonceData? = null
-)
-
-@Serializable
-data class CreateUnsignedSplTransactionRequest(
-    val version: Int = 1,
-    val senderWallet: String,
-    val recipientWallet: String,
-    val feePayer: String,
-    val mintAddress: String,
-    val amount: Long,
-    val nonceAccount: String? = null,
-    val nonceData: CachedNonceData? = null
 )
 
 @Serializable
@@ -1377,139 +1555,6 @@ data class FragmentReassemblyInfo(
 @Serializable
 data class FragmentReassemblyInfoList(
     val transactions: List<FragmentReassemblyInfo>
-)
-
-// ============================================================================
-// Offline Bundle Management - Core PolliNet Features
-// ============================================================================
-
-@Serializable
-data class PrepareOfflineBundleRequest(
-    val version: Int = 1,
-    val count: Int,
-    val bundleFile: String? = null
-)
-
-@Serializable
-data class CachedNonceData(
-    val version: Int = 1,
-    val nonceAccount: String,
-    val authority: String,
-    val blockhash: String,
-    val lamportsPerSignature: Long,
-    val cachedAt: Long,
-    val used: Boolean
-)
-
-@Serializable
-data class OfflineTransactionBundle(
-    val version: Int = 1,
-    val nonceCaches: List<CachedNonceData>,
-    val maxTransactions: Int,
-    val createdAt: Long
-) {
-    fun availableNonces(): Int = nonceCaches.count { !it.used }
-    fun usedNonces(): Int = nonceCaches.count { it.used }
-    fun totalNonces(): Int = nonceCaches.size
-}
-
-@Serializable
-data class CreateOfflineTransactionRequest(
-    val version: Int = 1,
-    val recipient: String,
-    val amount: Long
-    // NOTE: Nonce is automatically picked from stored bundle - no need to send it
-)
-
-@Serializable
-data class SubmitOfflineTransactionRequest(
-    val version: Int = 1,
-    val transactionBase64: String,
-    val verifyNonce: Boolean = true
-)
-
-// ============================================================================
-// MWA (Mobile Wallet Adapter) Support - Unsigned Transaction Flow
-// ============================================================================
-
-@Serializable
-data class CreateUnsignedOfflineTransactionRequest(
-    val version: Int = 1,
-    val senderPubkey: String,
-    val nonceAuthorityPubkey: String,
-    val recipient: String,
-    val amount: Long,
-    val nonceData: CachedNonceData? = null
-    // NOTE: If nonceData is not provided, nonce is picked automatically from stored bundle
-)
-
-@Serializable
-data class CreateUnsignedOfflineSplTransactionRequest(
-    val version: Int = 1,
-    val senderWallet: String,
-    val recipientWallet: String,
-    val mintAddress: String,
-    val amount: Long,
-    val feePayer: String,
-    val nonceData: CachedNonceData? = null
-    // NOTE: If nonceData is not provided, nonce is picked automatically from stored bundle
-)
-
-@Serializable
-data class GetMessageToSignRequest(
-    val version: Int = 1,
-    val unsignedTransactionBase64: String
-)
-
-@Serializable
-data class GetRequiredSignersRequest(
-    val version: Int = 1,
-    val unsignedTransactionBase64: String
-)
-
-// ============================================================================
-// Nonce Account Creation for MWA
-// ============================================================================
-
-@Serializable
-data class CreateUnsignedNonceTransactionsRequest(
-    val version: Int = 1,
-    val count: Int,
-    val payerPubkey: String
-)
-
-@Serializable
-data class UnsignedNonceTransaction(
-    val unsignedTransactionBase64: String,
-    val noncePubkey: List<String>  // Multiple pubkeys for batched transactions; nonce signatures already embedded
-)
-
-@Serializable
-data class CacheNonceAccountsRequest(
-    val version: Int = 1,
-    val nonceAccounts: List<String>
-)
-
-@Serializable
-data class CacheNonceAccountsResponse(
-    val cachedCount: Int
-)
-
-@Serializable
-data class RefreshOfflineBundleResponse(
-    val refreshedCount: Int
-)
-
-@Serializable
-data class CastUnsignedVoteRequest(
-    val version: Int = 1,
-    val voter: String,
-    @SerialName("proposal_id") val proposalId: String,
-    @SerialName("vote_account") val voteAccount: String,
-    val choice: UByte,
-    @SerialName("fee_payer") val feePayer: String,
-    @SerialName("nonceAccount") val nonceAccount: String? = null,
-    @SerialName("nonceData") val nonceData: CachedNonceData? = null
 )
 
 // =============================================================================
@@ -1573,6 +1618,11 @@ data class QueueSizeResponse(
 @Serializable
 data class SuccessResponse(
     val success: Boolean
+)
+
+@Serializable
+data class WalletAddressResponse(
+    val address: String
 )
 
 @Serializable
@@ -1711,5 +1761,283 @@ internal data class QueueConfirmationRequest(
     val version: Int = 1,
     @SerialName("txId") val txId: String,
     val signature: String
+)
+
+// =============================================================================
+// Peer / mesh health monitoring data types
+// =============================================================================
+
+/** Current connection state of a BLE mesh peer (mirrors Rust PeerState). */
+@Serializable
+enum class PeerState { Connected, Stale, Dead }
+
+/** Per-peer health metrics returned by [PolliNetSDK.getHealthSnapshot]. */
+@Serializable
+data class PeerHealth(
+    @SerialName("peer_id") val peerId: String,
+    val state: PeerState,
+    @SerialName("seconds_since_last_seen") val secondsSinceLastSeen: Long,
+    @SerialName("latency_samples") val latencySamples: List<Int> = emptyList(),
+    @SerialName("avg_latency_ms") val avgLatencyMs: Int = 0,
+    val rssi: Int? = null,
+    @SerialName("quality_score") val qualityScore: Int = 0,
+    @SerialName("packets_sent") val packetsSent: Long = 0,
+    @SerialName("packets_received") val packetsReceived: Long = 0,
+    @SerialName("tx_failures") val txFailures: Long = 0,
+    @SerialName("packet_loss_rate") val packetLossRate: Float = 0f
+)
+
+/** Network topology from the health monitor. */
+@Serializable
+data class NetworkTopology(
+    @SerialName("direct_connections") val directConnections: List<String> = emptyList(),
+    @SerialName("all_peers") val allPeers: List<String> = emptyList(),
+    val connections: Map<String, List<String>> = emptyMap(),
+    @SerialName("hop_counts") val hopCounts: Map<String, Int> = emptyMap()
+)
+
+/** Aggregate health metrics for the whole mesh. */
+@Serializable
+data class HealthMetrics(
+    @SerialName("total_peers") val totalPeers: Int = 0,
+    @SerialName("connected_peers") val connectedPeers: Int = 0,
+    @SerialName("stale_peers") val stalePeers: Int = 0,
+    @SerialName("dead_peers") val deadPeers: Int = 0,
+    @SerialName("avg_latency_ms") val avgLatencyMs: Int = 0,
+    @SerialName("max_latency_ms") val maxLatencyMs: Int = 0,
+    @SerialName("min_latency_ms") val minLatencyMs: Int = 0,
+    @SerialName("avg_packet_loss") val avgPacketLoss: Float = 0f,
+    @SerialName("health_score") val healthScore: Int = 100,
+    @SerialName("max_hops") val maxHops: Int = 0,
+    val timestamp: String = ""
+)
+
+/** Full snapshot returned by [PolliNetSDK.getHealthSnapshot]. */
+@Serializable
+data class HealthSnapshot(
+    val peers: List<PeerHealth> = emptyList(),
+    val topology: NetworkTopology = NetworkTopology(),
+    val metrics: HealthMetrics = HealthMetrics()
+) {
+    /** Peers currently in the Connected state. */
+    val connectedPeers: List<PeerHealth> get() = peers.filter { it.state == PeerState.Connected }
+    /** All peer addresses (connected + stale). */
+    val knownPeerIds: List<String> get() = peers.map { it.peerId }
+}
+
+// =============================================================================
+// Intent protocol data types
+// =============================================================================
+
+/** One token account to grant delegate authority in [PolliNetSDK.createApproveTransaction]. */
+@Serializable
+data class TokenApprovalEntry(
+    @SerialName("mint_address")  val mintAddress: String,
+    val amount: Long,
+    val decimals: Int = 6,
+    /** Owner's token account for this mint (ATA or custom). */
+    @SerialName("token_account") val tokenAccount: String,
+    /** "spl-token" (default) or "token-2022". */
+    @SerialName("token_program") val tokenProgram: String = "spl-token",
+)
+
+/** Response from [PolliNetSDK.createApproveTransaction]. */
+@Serializable
+data class ApproveTransactionResponse(
+    /** Base64-encoded unsigned transaction; sign with owner_wallet before submitting. */
+    val transaction: String,
+    /** The executor PDA that was granted delegate authority. */
+    @SerialName("executor_pda") val executorPda: String,
+)
+
+/** Response from [PolliNetSDK.getExecutorPda]. */
+@Serializable
+data class ExecutorPdaResponse(
+    val pda: String,
+    val bump: Int,
+)
+
+/**
+ * Snapshot of a single SPL token account owned by a wallet, with its delegation status
+ * resolved against the Pollinet executor PDA. Returned by [PolliNetSDK.listTokenAccounts].
+ *
+ * @property pubkey Token account address (NOT the wallet — this is the SPL account holding the balance).
+ * @property mint Token mint address.
+ * @property owner Wallet that owns this token account.
+ * @property decimals Number of decimal places for display formatting.
+ * @property rawBalance Raw token balance in smallest units (multiply by 10^decimals to display).
+ * @property delegate Current delegate authority (null if none, base58 string otherwise).
+ * @property delegatedRawAmount Amount the current delegate may spend, in smallest units.
+ * @property isExecutorDelegated `true` iff [delegate] is the Pollinet executor PDA AND
+ *           [delegatedRawAmount] > 0 — i.e. the token is ready for offline Pollinet transfers.
+ */
+data class DelegatedTokenAccount(
+    val pubkey: String,
+    val mint: String,
+    val owner: String,
+    val decimals: Int,
+    val rawBalance: Long,
+    val delegate: String?,
+    val delegatedRawAmount: Long,
+    val isExecutorDelegated: Boolean,
+)
+
+/** Parameters for [PolliNetSDK.createIntentBytes]. */
+@Serializable
+internal data class CreateIntentBytesRequest(
+    val from: String,
+    val to: String,
+    @SerialName("token_mint")      val tokenMint: String,
+    val amount: Long,
+    @SerialName("expires_at")      val expiresAt: Long,
+    @SerialName("gas_fee_amount")  val gasFeeAmount: Long,
+    @SerialName("gas_fee_payee")   val gasFeepayee: String,
+    @SerialName("nonce_hex")       val nonceHex: String? = null,
+)
+
+/** Response from [PolliNetSDK.createIntentBytes]. */
+@Serializable
+data class IntentBytesResponse(
+    /** Base64-encoded 169-byte intent — sign this with Ed25519 before submitting. */
+    @SerialName("intent_bytes") val intentBytes: String,
+    /** The 16-byte nonce used (32 lowercase hex chars). */
+    @SerialName("nonce_hex")    val nonceHex: String,
+)
+
+/** Parameters for [PolliNetSDK.createApproveTransaction]. */
+@Serializable
+internal data class CreateApproveTransactionRequest(
+    @SerialName("owner_wallet")      val ownerWallet: String,
+    @SerialName("fee_payer")         val feePayer: String,
+    @SerialName("recent_blockhash")  val recentBlockhash: String,
+    val tokens: List<TokenApprovalEntry>,
+)
+
+/** Response from [PolliNetSDK.getIntentState]. */
+@Serializable
+data class IntentStateResponse(
+    val initialized: Boolean,
+    val user: String,
+    val pda: String,
+    @SerialName("total_executed") val totalExecuted: String? = null,
+)
+
+/** Response from [PolliNetSDK.fetchInitTx]. */
+@Serializable
+data class InitTxResponse(
+    /** Base64-encoded partially-signed transaction. Sign this with the user's wallet. */
+    val tx: String,
+    val user: String,
+)
+
+/** Response from [PolliNetSDK.initializeIntentState]. */
+@Serializable
+data class InitializeResponse(
+    val ok: Boolean,
+    @SerialName("tx_signature") val txSignature: String,
+)
+
+// Internal pollicore API shapes (used via Rust FFI)
+
+@Serializable
+private data class FfiSubmitIntentRequest(
+    @SerialName("intent_bytes")       val intentBytes: String,
+    val signature: String,
+    @SerialName("from_token_account") val fromTokenAccount: String,
+    @SerialName("token_program")      val tokenProgram: String = "spl-token",
+)
+
+@Serializable
+private data class FfiSubmitIntentResponse(
+    val ok: Boolean,
+    @SerialName("tx_signature") val txSignature: String,
+)
+
+@Serializable
+internal data class PolliCoreSubmitIntentRequest(
+    @SerialName("intent_bytes")        val intentBytes: String,
+    val signature: String,
+    @SerialName("from_token_account")  val fromTokenAccount: String,
+    @SerialName("token_program")       val tokenProgram: String = "spl-token",
+)
+
+@Serializable
+internal data class CreateRevokeTransactionRequest(
+    @SerialName("owner_wallet")     val ownerWallet: String,
+    @SerialName("fee_payer")        val feePayer: String,
+    @SerialName("recent_blockhash") val recentBlockhash: String,
+    @SerialName("token_accounts")   val tokenAccounts: List<String>,
+    @SerialName("token_program")    val tokenProgram: String = "spl-token",
+)
+
+@Serializable
+internal data class RevokeTransactionResponse(val transaction: String)
+
+@Serializable
+internal data class InitializeRequest(val tx: String, val wallet: String)
+
+@Serializable
+internal data class GatewayResponse(val wallet: String)
+
+/** Result from [PolliNetSDK.loadForSending]. */
+@Serializable
+data class LoadForSendingResult(
+    @SerialName("tx_id")         val txId: String,
+    val relevance: Int,
+    @SerialName("fragment_count") val fragmentCount: Int,
+)
+
+@Serializable
+internal data class PolliCoreSubmitIntentResponse(
+    val ok: Boolean,
+    @SerialName("tx_signature") val txSignature: String,
+)
+
+// =========================================================================
+// Subsystem 1 — Density-adaptive rotation data classes
+// =========================================================================
+
+/** Adaptive BLE session and cooldown parameters from the Rust density estimator. */
+@Serializable
+data class AdaptiveParams(
+    /** Estimated unique peers observed in the last 2 minutes. */
+    val density: Int,
+    /** Target session duration in ms. Clamped [20_000, 120_000]. */
+    @SerialName("session_target_ms") val sessionTargetMs: Long,
+    /** Peer cooldown duration in ms. Clamped [15_000, 600_000]. */
+    @SerialName("cooldown_ms") val cooldownMs: Long,
+    /** Minimum session duration (constant). */
+    @SerialName("session_min_ms") val sessionMinMs: Long,
+    /** Maximum session duration (= sessionTargetMs × 1.5). */
+    @SerialName("session_max_ms") val sessionMaxMs: Long,
+)
+
+/** Session telemetry record logged after each BLE session. */
+@Serializable
+data class SessionTelemetryRecord(
+    @SerialName("local_device_id")        val localDeviceId: String,
+    @SerialName("peer_id")                val peerId: String,
+    @SerialName("connect_time_ms")        val connectTimeMs: Long,
+    @SerialName("disconnect_time_ms")     val disconnectTimeMs: Long,
+    @SerialName("bytes_out")              val bytesOut: Long,
+    @SerialName("bytes_in")              val bytesIn: Long,
+    @SerialName("fragments_out")          val fragmentsOut: Int,
+    @SerialName("fragments_in")           val fragmentsIn: Int,
+    @SerialName("data_complete")          val dataComplete: Boolean,
+    @SerialName("confirmation_complete")  val confirmationComplete: Boolean,
+    @SerialName("close_reason")           val closeReason: String,
+)
+
+// =========================================================================
+// Subsystem 3 — Confirmation-driven purge data classes
+// =========================================================================
+
+/** Result of [PolliNetSDK.ingestConfirmation]. */
+@Serializable
+data class IngestConfirmationResult(
+    /** True if a matching carrier entry was found and removed. */
+    val purged: Boolean,
+    /** True if the confirmation was added to the carrier set for re-propagation. */
+    @SerialName("added_to_carrier") val addedToCarrier: Boolean,
 )
 

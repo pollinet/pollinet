@@ -19,6 +19,12 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
 
+    <!-- Wi-Fi Direct (Wi-Fi P2P) transport -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
     <!-- Foreground Service (if needed) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
@@ -55,6 +61,13 @@
         <!-- BLE Service -->
         <service
             android:name="xyz.pollinet.sdk.BleService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Wi-Fi Direct Service -->
+        <service
+            android:name="xyz.pollinet.sdk.WifiDirectService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />

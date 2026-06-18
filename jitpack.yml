@@ -1,0 +1,11 @@
+jdk:
+  - openjdk17
+
+before_install:
+  # JitPack has no Rust toolchain — the precompiled .so files are committed to the repo.
+  # Override the preBuild → buildRustLib dependency so Gradle doesn't try to run cargo-ndk.
+  - sed -i 's/dependsOn("buildRustLib")//' pollinet-sdk/pollinet-sdk/build.gradle.kts
+
+install:
+  - cd pollinet-sdk && ./gradlew :pollinet-sdk:assembleRelease publishToMavenLocal
+

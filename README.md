@@ -42,6 +42,19 @@ Pollinet is an open-source SDK and runtime enabling **offline Solana transaction
 - **Android (Production)** – Foreground BLE service, GATT bridge, and diagnostics UI. This is the path we ship and support for real-world mesh relays.
 - **Desktop Simulation (Linux/macOS)** – The Rust examples and Linux BLE adapter are kept for local debugging, CI smoke tests, and mesh simulations only. They are not hardened for production deployments.
 
+### Transports
+
+PolliNet's radios sit behind one host-driven `HostTransport` abstraction, so routing,
+the store-and-forward queue, fragmentation, dedup, and crypto are shared across all of
+them — adding a transport is an *adapter*, not a rewrite.
+
+- **Bluetooth LE** – the shipping transport (GATT, ~468 B fragments).
+- **Wi-Fi Direct** – an adapter over the same engine with a larger MTU (length-prefixed
+  TCP frames inside a Wi-Fi P2P group). Can share a BLE handle's engine for
+  cross-transport deduplication. See **[Wi-Fi Direct Protocol](./docs/WIFI_DIRECT_PROTOCOL.md)**
+  and the **[Transport Plan](./docs/WIFI_DIRECT_TRANSPORT_PLAN.md)**.
+- **LoRa / satellite / internet** – future adapters against the same trait.
+
 ---
 
 ## 📚 Documentation
