@@ -60,7 +60,12 @@ android {
     publishing {
         singleVariant("release") {
             withSourcesJar()
-            withJavadocJar()
+            // Dokka javadoc-jar generation only when explicitly requested (Maven Central
+            // requires it). Skipped by default so JitPack — where javaDocReleaseGeneration
+            // fails — publishes the AAR + sources cleanly. Enable with: -PwithJavadoc=true
+            if (project.findProperty("withJavadoc") == "true") {
+                withJavadocJar()
+            }
         }
     }
 }

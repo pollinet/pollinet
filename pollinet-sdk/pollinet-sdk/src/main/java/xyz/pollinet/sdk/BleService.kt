@@ -4838,8 +4838,8 @@ class BleService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("PolliNet Active")
-            .setContentText("Managing BLE mesh connections")
+            .setContentTitle("Pollinet active")
+            .setContentText("Managing mesh connections")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)  // Persistent notification - cannot be dismissed
             .setPriority(NotificationCompat.PRIORITY_HIGH)  // High priority
