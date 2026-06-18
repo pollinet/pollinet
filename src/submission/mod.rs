@@ -71,24 +71,34 @@ impl std::fmt::Display for SubmissionError {
 /// Direct HTTPS transport to a pollicore endpoint.
 pub struct HttpTransport {
     /// Base URL, e.g. `"https://pollicore-production.up.railway.app"`.
+    /// Read by the HTTP-backed `submit` impl; unused by the no-network stub impl that
+    /// is active without the HTTP feature, so allow dead_code for the default build.
+    #[allow(dead_code)]
     pollicore_url: String,
 }
 
 impl HttpTransport {
     pub fn new(pollicore_url: impl Into<String>) -> Self {
-        Self { pollicore_url: pollicore_url.into() }
+        Self {
+            pollicore_url: pollicore_url.into(),
+        }
     }
 }
 
 #[cfg(feature = "reqwest")]
 impl SubmissionTransport for HttpTransport {
     fn submit(&self, req: &SubmitIntentRequest) -> Result<SubmitIntentResponse, SubmissionError> {
-        let url = format!("{}/sdk/intents/submit", self.pollicore_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/sdk/intents/submit",
+            self.pollicore_url.trim_end_matches('/')
+        );
 
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| SubmissionError::Transport(format!("failed to build HTTP client: {}", e)))?;
+            .map_err(|e| {
+                SubmissionError::Transport(format!("failed to build HTTP client: {}", e))
+            })?;
 
         let resp = client
             .post(&url)
@@ -98,18 +108,20 @@ impl SubmissionTransport for HttpTransport {
             .map_err(|e| SubmissionError::Transport(format!("HTTP request failed: {}", e)))?;
 
         let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| SubmissionError::Transport(format!("failed to read response body: {}", e)))?;
+        let body = resp.text().map_err(|e| {
+            SubmissionError::Transport(format!("failed to read response body: {}", e))
+        })?;
 
         if !(200..300).contains(&status) {
             return Err(SubmissionError::Http { status, body });
         }
 
-        serde_json::from_str::<SubmitIntentResponse>(&body)
-            .map_err(|e| SubmissionError::Transport(
-                format!("failed to parse pollicore response: {} — body: {}", e, body)
+        serde_json::from_str::<SubmitIntentResponse>(&body).map_err(|e| {
+            SubmissionError::Transport(format!(
+                "failed to parse pollicore response: {} — body: {}",
+                e, body
             ))
+        })
     }
 }
 
@@ -132,25 +144,41 @@ pub fn submit_intent(
     pollicore_url: &str,
     req: &SubmitIntentRequest,
 ) -> Result<SubmitIntentResponse, SubmissionError> {
-    log::info!("📤 submission::submit_intent → {}/sdk/intents/submit", pollicore_url.trim_end_matches('/'));
-    log::info!("   intent_bytes (base64 len={}): {}…",
+    log::info!(
+        "📤 submission::submit_intent → {}/sdk/intents/submit",
+        pollicore_url.trim_end_matches('/')
+    );
+    log::info!(
+        "   intent_bytes (base64 len={}): {}…",
         req.intent_bytes.len(),
-        &req.intent_bytes[..20.min(req.intent_bytes.len())]);
-    log::info!("   signature   (base64 len={}): {}…",
+        &req.intent_bytes[..20.min(req.intent_bytes.len())]
+    );
+    log::info!(
+        "   signature   (base64 len={}): {}…",
         req.signature.len(),
-        &req.signature[..20.min(req.signature.len())]);
+        &req.signature[..20.min(req.signature.len())]
+    );
     log::info!("   from_token_account={}", req.from_token_account);
     log::info!("   token_program={}", req.token_program);
 
     let transport = HttpTransport::new(pollicore_url);
     match transport.submit(req) {
         Ok(resp) => {
-            log::info!("✅ submission succeeded — tx_signature={}", resp.tx_signature);
+            log::info!(
+                "✅ submission succeeded — tx_signature={}",
+                resp.tx_signature
+            );
             Ok(resp)
         }
-        Err(SubmissionError::Http { ref status, ref body }) => {
+        Err(SubmissionError::Http {
+            ref status,
+            ref body,
+        }) => {
             log::error!("❌ submission HTTP {}: {}", status, body);
-            Err(SubmissionError::Http { status: *status, body: body.clone() })
+            Err(SubmissionError::Http {
+                status: *status,
+                body: body.clone(),
+            })
         }
         Err(SubmissionError::Transport(ref msg)) => {
             log::error!("❌ submission transport error: {}", msg);

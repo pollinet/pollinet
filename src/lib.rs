@@ -116,9 +116,9 @@ impl PolliNetSDK {
         tracing::info!("📥 Accepting external pre-signed transaction for relay");
 
         // Decode from base64
-        let tx_bytes = BASE64.decode(base64_signed_tx).map_err(|e| {
-            PolliNetError::Serialization(format!("Failed to decode base64: {}", e))
-        })?;
+        let tx_bytes = BASE64
+            .decode(base64_signed_tx)
+            .map_err(|e| PolliNetError::Serialization(format!("Failed to decode base64: {}", e)))?;
 
         tracing::info!("Decoded transaction: {} bytes", tx_bytes.len());
 
@@ -171,7 +171,8 @@ impl PolliNetSDK {
             // Create a temporary compressor to compress
             let compressor = crate::util::lz::Lz4Compressor::new()
                 .map_err(|e| PolliNetError::Serialization(e.to_string()))?;
-            let compressed = compressor.compress_with_size(&tx_bytes)
+            let compressed = compressor
+                .compress_with_size(&tx_bytes)
                 .map_err(|e| PolliNetError::Serialization(e.to_string()))?;
             tracing::info!(
                 "Compressed: {} bytes -> {} bytes",

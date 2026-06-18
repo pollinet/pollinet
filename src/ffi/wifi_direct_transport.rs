@@ -59,7 +59,9 @@ impl HostWifiDirectTransport {
 
     /// Create a standalone Wi-Fi Direct transport (own engine) without an RPC client.
     pub async fn new() -> Result<Self, String> {
-        tracing::info!("🚀 HostWifiDirectTransport::new() — Wi-Fi Direct adapter over shared engine");
+        tracing::info!(
+            "🚀 HostWifiDirectTransport::new() — Wi-Fi Direct adapter over shared engine"
+        );
         Ok(Self::from_engine(Arc::new(HostBleTransport::new().await?)))
     }
 
@@ -199,7 +201,11 @@ mod tests {
             rx.push_inbound(frame).unwrap();
             moved += 1;
         }
-        assert_eq!(moved, frags.len(), "all fragments should be drained & delivered");
+        assert_eq!(
+            moved,
+            frags.len(),
+            "all fragments should be drained & delivered"
+        );
 
         // The receiver reassembled exactly one transaction, byte-identical.
         let (_id, bytes) = rx.pop_completed().expect("reassembled transaction");
@@ -213,10 +219,14 @@ mod tests {
         let tx = HostWifiDirectTransport::new().await.unwrap();
         let payload = vec![7u8; 4096];
         let frags = tx.queue_transaction(payload, None).unwrap();
-        let max_data = frags.iter().map(|f| {
-            use base64::{engine::general_purpose::STANDARD, Engine as _};
-            STANDARD.decode(&f.data).map(|d| d.len()).unwrap_or(0)
-        }).max().unwrap();
+        let max_data = frags
+            .iter()
+            .map(|f| {
+                use base64::{engine::general_purpose::STANDARD, Engine as _};
+                STANDARD.decode(&f.data).map(|d| d.len()).unwrap_or(0)
+            })
+            .max()
+            .unwrap();
         assert!(
             max_data > crate::ble::mesh::MAX_FRAGMENT_DATA,
             "Wi-Fi fragment data ({max_data}B) should exceed BLE's {}B cap",

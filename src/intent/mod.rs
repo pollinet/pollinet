@@ -9,10 +9,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
-    hash::Hash,
-    instruction::Instruction,
-    message::Message,
-    pubkey::Pubkey,
+    hash::Hash, instruction::Instruction, message::Message, pubkey::Pubkey,
     transaction::Transaction,
 };
 use spl_token::instruction::approve_checked;
@@ -37,6 +34,8 @@ pub fn executor_pda() -> (Pubkey, u8) {
 /// Serializes intent fields into the canonical 169-byte borsh layout:
 /// version(1) | from(32) | to(32) | token_mint(32) | amount(8) |
 /// nonce(16)  | expires_at(8) | gas_fee_amount(8) | gas_fee_payee(32)
+// Low-level fixed-layout serializer; the 9 fields map 1:1 to the wire format.
+#[allow(clippy::too_many_arguments)]
 pub fn serialize_intent(
     version: u8,
     from: &[u8; 32],
@@ -107,8 +106,8 @@ pub fn build_revoke_transaction(
 
     let message = Message::new_with_blockhash(&ixs, Some(fee_payer), &recent_blockhash);
     let tx = Transaction::new_unsigned(message);
-    let raw = bincode1::serialize(&tx)
-        .map_err(|e| format!("Transaction serialization failed: {}", e))?;
+    let raw =
+        bincode1::serialize(&tx).map_err(|e| format!("Transaction serialization failed: {}", e))?;
     Ok(STANDARD.encode(raw))
 }
 
@@ -176,8 +175,8 @@ pub fn build_approve_transaction(
     let message = Message::new_with_blockhash(&ixs, Some(fee_payer), &recent_blockhash);
     let tx = Transaction::new_unsigned(message);
 
-    let raw = bincode1::serialize(&tx)
-        .map_err(|e| format!("Transaction serialization failed: {}", e))?;
+    let raw =
+        bincode1::serialize(&tx).map_err(|e| format!("Transaction serialization failed: {}", e))?;
 
     Ok(STANDARD.encode(raw))
 }

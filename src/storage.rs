@@ -2,6 +2,11 @@
 //!
 //! Provides encrypted persistence for sensitive data using AES-256-GCM
 
+// The AES-256-GCM helpers here are a ready storage capability that the current
+// intent-based flow does not yet call. Retain the subsystem (rather than delete it)
+// and allow dead_code so the strict CI clippy (`-D warnings`) passes.
+#![allow(dead_code)]
+
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
@@ -26,7 +31,10 @@ impl SecureStorage {
     /// Create a new secure storage instance.
     /// `encryption_key` is the raw key string (hashed with SHA-256 internally to produce 32 bytes).
     /// Falls back to the `POLLINET_ENCRYPTION_KEY` environment variable when `encryption_key` is `None`.
-    pub fn new(storage_dir: impl AsRef<Path>, encryption_key: Option<String>) -> Result<Self, StorageError> {
+    pub fn new(
+        storage_dir: impl AsRef<Path>,
+        encryption_key: Option<String>,
+    ) -> Result<Self, StorageError> {
         let storage_dir = storage_dir.as_ref().to_path_buf();
 
         let key = encryption_key
@@ -50,7 +58,10 @@ impl SecureStorage {
             storage_dir.display()
         );
 
-        Ok(Self { storage_dir, encryption_key: key })
+        Ok(Self {
+            storage_dir,
+            encryption_key: key,
+        })
     }
 
     /// Derive AES-256-GCM key from the stored encryption key string via SHA-256.
@@ -117,7 +128,6 @@ impl SecureStorage {
 
         Ok(plaintext)
     }
-
 }
 
 /// Storage errors

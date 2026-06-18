@@ -21,7 +21,9 @@ pub enum Priority {
 }
 
 /// Default TTL for origin transactions: 5 minutes
-pub fn default_ttl_secs() -> u64 { 300 }
+pub fn default_ttl_secs() -> u64 {
+    300
+}
 
 /// Outbound transaction awaiting BLE transmission
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +61,9 @@ pub struct OutboundTransaction {
     pub is_confirmation: bool,
 }
 
-pub fn default_relevance() -> u8 { 10 }
+pub fn default_relevance() -> u8 {
+    10
+}
 
 impl OutboundTransaction {
     /// Create new outbound transaction
@@ -326,7 +330,11 @@ impl OutboundQueue {
     /// Priority lanes are respected as tiers (HIGH > NORMAL > LOW); within each tier
     /// the item with the greatest relevance score is selected.
     pub fn peek_highest_relevance(&self) -> Option<&OutboundTransaction> {
-        for lane in [&self.high_priority, &self.normal_priority, &self.low_priority] {
+        for lane in [
+            &self.high_priority,
+            &self.normal_priority,
+            &self.low_priority,
+        ] {
             if let Some(tx) = lane.iter().max_by_key(|t| t.relevance) {
                 return Some(tx);
             }
@@ -441,7 +449,10 @@ impl OutboundQueue {
     /// Expire cooldown for all peers not in the given delivered_to set.
     /// Called when a new high-priority entry arrives (Subsystem 1/2 integration).
     /// Returns the list of peer IDs whose cooldowns were cleared.
-    pub fn get_delivered_to_peers(tx_id: &str, lane: &VecDeque<OutboundTransaction>) -> Vec<[u8; 4]> {
+    pub fn get_delivered_to_peers(
+        tx_id: &str,
+        lane: &VecDeque<OutboundTransaction>,
+    ) -> Vec<[u8; 4]> {
         lane.iter()
             .find(|tx| tx.tx_id == tx_id)
             .map(|tx| {

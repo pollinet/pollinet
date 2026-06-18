@@ -120,7 +120,7 @@ impl MeshConfirmation {
     /// Verify the Ed25519 signature against `pollicore_pubkey` (32-byte verifying key).
     /// Returns true if valid. Silently returns false on any error.
     pub fn verify(&self, pollicore_pubkey: &[u8; 32]) -> bool {
-        use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
         let Ok(vk) = VerifyingKey::from_bytes(pollicore_pubkey) else {
             return false;
         };
@@ -188,10 +188,22 @@ mod tests {
 
     #[test]
     fn test_control_frame_type_roundtrip() {
-        assert_eq!(ControlFrameType::from_u8(0x08), Some(ControlFrameType::Confirmation));
-        assert_eq!(ControlFrameType::from_u8(0x09), Some(ControlFrameType::TxAbort));
-        assert_eq!(ControlFrameType::from_u8(0x0A), Some(ControlFrameType::DrainReady));
-        assert_eq!(ControlFrameType::from_u8(0x0B), Some(ControlFrameType::CloseAck));
+        assert_eq!(
+            ControlFrameType::from_u8(0x08),
+            Some(ControlFrameType::Confirmation)
+        );
+        assert_eq!(
+            ControlFrameType::from_u8(0x09),
+            Some(ControlFrameType::TxAbort)
+        );
+        assert_eq!(
+            ControlFrameType::from_u8(0x0A),
+            Some(ControlFrameType::DrainReady)
+        );
+        assert_eq!(
+            ControlFrameType::from_u8(0x0B),
+            Some(ControlFrameType::CloseAck)
+        );
         assert_eq!(ControlFrameType::from_u8(0x01), None);
     }
 
@@ -201,7 +213,10 @@ mod tests {
         let tomb = Tombstone::new(hash, 300); // valid for 600 s
         assert!(tomb.is_valid());
 
-        let expired = Tombstone { tx_id_hash: hash, until: 0 };
+        let expired = Tombstone {
+            tx_id_hash: hash,
+            until: 0,
+        };
         assert!(!expired.is_valid());
     }
 

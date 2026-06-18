@@ -148,7 +148,9 @@ impl Sim {
             if let Some((_id, _bytes)) = self.nodes[dst].pop_completed() {
                 received.insert(dst);
                 if relayed.insert(dst) && hop < MAX_HOPS {
-                    self.nodes[dst].queue_transaction(tx.to_vec(), None).unwrap();
+                    self.nodes[dst]
+                        .queue_transaction(tx.to_vec(), None)
+                        .unwrap();
                     for f in self.drain(dst) {
                         for &nb in &self.neighbors[dst] {
                             if nb != dst {
@@ -179,7 +181,11 @@ async fn sim_full_delivery_scales_10_50_100() {
         let tx: Vec<u8> = (0..1500).map(|i| (i % 251) as u8).collect();
 
         let received = sim.flood(0, &tx, 0.0, &all_active(n), &mut rng);
-        assert_eq!(received.len(), n, "{n}-node mesh: every node should receive");
+        assert_eq!(
+            received.len(),
+            n,
+            "{n}-node mesh: every node should receive"
+        );
 
         for (i, node) in sim.nodes.iter().enumerate() {
             assert_eq!(
@@ -210,7 +216,10 @@ async fn sim_packet_loss_still_converges_and_dedups() {
         received.len()
     );
     for node in &sim.nodes {
-        assert!(node.received_queue_size() <= 1, "dedup must hold under loss");
+        assert!(
+            node.received_queue_size() <= 1,
+            "dedup must hold under loss"
+        );
     }
 }
 
@@ -230,7 +239,10 @@ async fn sim_ttl_bounds_propagation_on_long_line() {
         "TTL must bound a line longer than MAX_HOPS (reached {} of {n})",
         received.len()
     );
-    assert!(received.contains(&1), "immediate neighbor should be reached");
+    assert!(
+        received.contains(&1),
+        "immediate neighbor should be reached"
+    );
     assert!(
         !received.contains(&(n - 1)),
         "the far end (beyond MAX_HOPS) must not be reached in one flood"
@@ -262,7 +274,10 @@ async fn sim_partition_then_heal_store_and_forward() {
         received_a.iter().all(|&x| x < 10),
         "during partition, only component A may receive"
     );
-    assert!(received_a.contains(&9), "boundary node 9 should hold the tx");
+    assert!(
+        received_a.contains(&9),
+        "boundary node 9 should hold the tx"
+    );
 
     // Phase 2: heal — bridge the components and re-broadcast from boundary node 9, which
     // already holds the tx (store-and-forward). Component B must now converge.
@@ -299,6 +314,9 @@ async fn sim_node_churn_survivors_converge() {
         );
     }
     for &node in &active {
-        assert!(sim.nodes[node].received_queue_size() <= 1, "dedup under churn");
+        assert!(
+            sim.nodes[node].received_queue_size() <= 1,
+            "dedup under churn"
+        );
     }
 }

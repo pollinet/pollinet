@@ -318,7 +318,10 @@ impl FragmentSet {
     }
 
     pub fn received_count(&self) -> usize {
-        self.received_fragments.iter().filter(|f| f.is_some()).count()
+        self.received_fragments
+            .iter()
+            .filter(|f| f.is_some())
+            .count()
     }
 
     pub fn is_stale(&self, timeout_secs: u64) -> bool {
@@ -335,17 +338,22 @@ pub struct TransactionCache {
 }
 
 impl Default for TransactionCache {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TransactionCache {
     pub fn new() -> Self {
-        Self { reassembly_buffers: HashMap::new() }
+        Self {
+            reassembly_buffers: HashMap::new(),
+        }
     }
 
     pub fn add_ble_fragment(&mut self, fragment: TransactionFragment) -> Result<(), String> {
         let tx_id_hex = hex::encode(fragment.transaction_id);
-        let set = self.reassembly_buffers
+        let set = self
+            .reassembly_buffers
             .entry(tx_id_hex.clone())
             .or_insert_with(|| FragmentSet::new(fragment.transaction_id, fragment.total_fragments));
 
@@ -356,29 +364,42 @@ impl TransactionCache {
             return Err(format!("Total fragments mismatch for {}", tx_id_hex));
         }
         if fragment.fragment_index >= fragment.total_fragments {
-            return Err(format!("Invalid fragment index {} (total: {})", fragment.fragment_index, fragment.total_fragments));
+            return Err(format!(
+                "Invalid fragment index {} (total: {})",
+                fragment.fragment_index, fragment.total_fragments
+            ));
         }
 
         set.received_fragments[fragment.fragment_index as usize] = Some(fragment.data);
         set.last_updated = Instant::now();
         tracing::debug!(
             "Added fragment {}/{} for tx {} ({}/{})",
-            fragment.fragment_index + 1, fragment.total_fragments,
-            &tx_id_hex[..8], set.received_count(), set.total_fragments,
+            fragment.fragment_index + 1,
+            fragment.total_fragments,
+            &tx_id_hex[..8],
+            set.received_count(),
+            set.total_fragments,
         );
         Ok(())
     }
 
     pub fn cleanup_stale_fragments(&mut self, timeout_secs: u64) -> usize {
-        let stale: Vec<String> = self.reassembly_buffers.iter()
+        let stale: Vec<String> = self
+            .reassembly_buffers
+            .iter()
             .filter(|(_, s)| s.is_stale(timeout_secs))
             .map(|(k, _)| k.clone())
             .collect();
         let count = stale.len();
         for key in stale {
             if let Some(s) = self.reassembly_buffers.remove(&key) {
-                tracing::info!("Cleaned stale tx {} (age: {}s, {}/{})",
-                    &key[..8], s.age_seconds(), s.received_count(), s.total_fragments);
+                tracing::info!(
+                    "Cleaned stale tx {} (age: {}s, {}/{})",
+                    &key[..8],
+                    s.age_seconds(),
+                    s.received_count(),
+                    s.total_fragments
+                );
             }
         }
         count

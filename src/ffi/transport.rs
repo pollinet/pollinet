@@ -137,7 +137,6 @@ pub struct HostBleTransport {
     pub pollicore_url: Mutex<Option<String>>,
 
     // ---- Subsystem 1: Density-adaptive rotation ----
-
     /// Sliding-window density estimator. Updated on every scan result.
     pub density_estimator: Mutex<crate::ble::DensityEstimator>,
 
@@ -145,7 +144,6 @@ pub struct HostBleTransport {
     pub cooldown_list: Mutex<crate::ble::CooldownList>,
 
     // ---- Subsystem 3: Confirmation-driven purge ----
-
     /// Tombstones keyed by tx_id_hash (16-byte key as hex). Prevents re-introduction
     /// of transactions whose confirmations have already been received.
     pub tombstones: Mutex<HashMap<String, crate::ble::Tombstone>>,
@@ -240,7 +238,11 @@ impl HostBleTransport {
     /// `encryption_key` is forwarded to `SecureStorage`; falls back to the
     /// `POLLINET_ENCRYPTION_KEY` env var when `None`.
     /// Also loads the received queue from disk if storage is available
-    pub fn set_secure_storage(&mut self, storage_dir: &str, encryption_key: Option<String>) -> Result<(), String> {
+    pub fn set_secure_storage(
+        &mut self,
+        storage_dir: &str,
+        encryption_key: Option<String>,
+    ) -> Result<(), String> {
         let storage = SecureStorage::new(storage_dir, encryption_key)
             .map_err(|e| format!("Failed to create secure storage: {}", e))?;
         self.secure_storage = Some(Arc::new(storage));
@@ -1064,7 +1066,9 @@ impl HostBleTransport {
             use sha2::{Digest, Sha256};
             let mut h = Sha256::new();
             h.update(tx_bytes);
-            self.received_tx_hash_set.lock().remove(&h.finalize().to_vec());
+            self.received_tx_hash_set
+                .lock()
+                .remove(&h.finalize().to_vec());
 
             t_info!(
                 "✅ Retrieved transaction {} from received queue ({} bytes, timestamp: {})",
