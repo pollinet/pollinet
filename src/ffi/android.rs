@@ -342,13 +342,16 @@ pub extern "C" fn Java_xyz_pollinet_sdk_PolliNetFFI_initWifiDirectSharing(
 ) -> jlong {
     let result: Result<jlong, String> = (|| {
         let engine = get_transport(ble_handle)?; // Arc<HostBleTransport>, shared
-        let transport = Arc::new(HostWifiDirectTransport::from_engine(engine));
+        let transport = Arc::new(HostWifiDirectTransport::from_engine(engine.clone()));
         let core: Arc<dyn HostTransport> = transport;
         let mut transports = TRANSPORTS.lock();
         transports.push(Some(TransportEntry {
             kind: TransportKind::WifiDirect,
             core,
-            ble: None,
+            // Expose the SHARED engine via the BLE surface too, so BLE-gated FFI
+            // (confirmations: popConfirmation / relayConfirmation / confirmDelivered)
+            // work on this Wi-Fi handle — enabling the Wi-Fi confirmation reverse-channel.
+            ble: Some(engine),
         }));
         let handle = (transports.len() - 1) as jlong;
         info!(

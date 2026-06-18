@@ -27,9 +27,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlin.random.Random
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -57,6 +62,7 @@ class WifiDirectService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1002
+        private const val CONFIRMATION_NOTIFICATION_ID = 1003
         private const val CHANNEL_ID = "pollinet_wifi_direct_service"
 
         const val ACTION_START = "xyz.pollinet.sdk.action.WIFI_START"
@@ -122,9 +128,39 @@ class WifiDirectService : Service() {
         private val _connectedPeers = MutableStateFlow(0)
         /** Observable count of peers with an open socket. */
         val connectedPeers: StateFlow<Int> = _connectedPeers.asStateFlow()
+
+        // ── Wire frame types (1-byte tag prefixed to every socket payload) ──────
+        /** Forward path: a bincode TransactionFragment → engine `pushInbound`. */
+        const val FRAME_TYPE_FRAGMENT: Byte = 0x00
+        /** Reverse path: a JSON Confirmation → engine confirmation handling. */
+        const val FRAME_TYPE_CONFIRMATION: Byte = 0x01
+
+        /** Stop relaying a confirmation once it has hopped this many times. */
+        private const val MAX_CONFIRMATION_RELAY_HOPS = 3
+
+        /** A confirmation surfaced from the Wi-Fi reverse-channel (for the UI). */
+        data class ConfirmationInfo(val txIdShort: String, val success: Boolean, val detail: String)
+
+        private val _confirmations = MutableSharedFlow<ConfirmationInfo>(extraBufferCapacity = 8)
+        /** Observable stream of confirmations received over Wi-Fi Direct. */
+        val confirmations: SharedFlow<ConfirmationInfo> = _confirmations.asSharedFlow()
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** JSON codec for the confirmation reverse-channel (matches the SDK's Confirmation shape). */
+    private val cjson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    /** Echo-loop guard: confirmations bounce between paired devices; first receive of a txId
+     *  wins, later echoes are dropped. Bounded LRU so it can't grow unbounded. */
+    private val seenConfirmationTxIds = java.util.Collections.synchronizedSet(
+        object : LinkedHashSet<String>() {
+            override fun add(element: String): Boolean {
+                if (size >= 256) iterator().let { if (it.hasNext()) { it.next(); it.remove() } }
+                return super.add(element)
+            }
+        }
+    )
 
     private lateinit var manager: WifiP2pManager
     private lateinit var channel: WifiP2pManager.Channel
@@ -232,21 +268,98 @@ class WifiDirectService : Service() {
                     idle = (idle * 2).coerceAtMost(WRITER_IDLE_BACKOFF_MAX_MS)
                     continue
                 }
-                val frame = PolliNetFFI.nextOutbound(handle, MAX_PAYLOAD.toLong())
-                if (frame == null) {
-                    delay(idle)
-                    idle = (idle * 2).coerceAtMost(WRITER_IDLE_BACKOFF_MAX_MS)
+                // Forward path: a tx fragment, if any.
+                val fragment = PolliNetFFI.nextOutbound(handle, MAX_PAYLOAD.toLong())
+                if (fragment != null) {
+                    idle = WRITER_IDLE_BACKOFF_MS
+                    fanOut(FRAME_TYPE_FRAGMENT, fragment)
+                    log("tx fragment ${fragment.size}B → ${peers.size} peer(s)")
                     continue
                 }
-                idle = WRITER_IDLE_BACKOFF_MS
-                // Fan out to every peer; DROP_OLDEST means a full channel drops its own
-                // oldest frame, never blocking this loop or another peer.
-                log("tx frame ${frame.size}B → ${peers.size} peer(s)")
-                for (p in peers) {
-                    p.outbound.trySend(frame)
+                // Reverse path: a confirmation, if any (the engine's confirmation queue).
+                val confirmation = popConfirmationFrame()
+                if (confirmation != null) {
+                    idle = WRITER_IDLE_BACKOFF_MS
+                    fanOut(FRAME_TYPE_CONFIRMATION, confirmation)
+                    log("tx confirmation ${confirmation.size}B → ${peers.size} peer(s)")
+                    continue
                 }
+                // Nothing to send — back off (no busy-spin).
+                delay(idle)
+                idle = (idle * 2).coerceAtMost(WRITER_IDLE_BACKOFF_MAX_MS)
             }
         }
+    }
+
+    // ── Confirmation reverse-channel ───────────────────────────────────────────
+
+    /** Prefix [payload] with the 1-byte frame [type] and fan it to every connected peer. */
+    private fun fanOut(type: Byte, payload: ByteArray) {
+        val framed = ByteArray(payload.size + 1)
+        framed[0] = type
+        System.arraycopy(payload, 0, framed, 1, payload.size)
+        for (p in peers) p.outbound.trySend(framed)
+    }
+
+    /** Pop one confirmation from the shared engine queue and return its JSON bytes, or null.
+     *  Works on the Wi-Fi handle because the shared handle now exposes the BLE engine surface. */
+    private fun popConfirmationFrame(): ByteArray? {
+        if (handle < 0) return null
+        val resultJson = runCatching { PolliNetFFI.popConfirmation(handle) }.getOrNull() ?: return null
+        val conf = runCatching {
+            cjson.decodeFromString(PopConfirmationResult.serializer(), resultJson)
+        }.getOrNull()?.takeIf { it.ok }?.data ?: return null
+        return runCatching {
+            cjson.encodeToString(Confirmation.serializer(), conf).toByteArray(Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    /** Handle a confirmation received over Wi-Fi: purge the origin's tx, surface UI, relay on. */
+    private fun handleWifiConfirmation(payload: ByteArray) {
+        val conf = runCatching {
+            cjson.decodeFromString(Confirmation.serializer(), String(payload, Charsets.UTF_8))
+        }.getOrNull() ?: run { log("confirmation parse failed (${payload.size}B)"); return }
+
+        // Echo guard — confirmations ping-pong between paired peers; first receive wins.
+        if (!seenConfirmationTxIds.add(conf.txId)) {
+            log("confirmation ${conf.txId.take(8)}… already seen — skipping echo")
+            return
+        }
+        val txShort = conf.txId.take(8)
+
+        // Purge: stop the origin re-broadcasting this now-confirmed tx (store-and-forward off).
+        if (handle >= 0) runCatching { PolliNetFFI.confirmDelivered(handle, conf.txId) }
+
+        // Surface to the UI (observable event + system notification).
+        val (success, detail) = when (val s = conf.status) {
+            is ConfirmationStatus.Success -> true to s.signature.take(16)
+            is ConfirmationStatus.Failed -> false to s.error
+        }
+        _confirmations.tryEmit(ConfirmationInfo(txShort, success, detail))
+        postConfirmationNotification(
+            if (success) "Transaction Confirmed ✓" else "Transaction Failed",
+            if (success) "Tx $txShort… confirmed on Solana" else "Tx $txShort… failed: $detail",
+        )
+        log("confirmation $txShort success=$success — purged + surfaced")
+
+        // Relay onward through the mesh until the hop cap is reached.
+        if (conf.relayCount < MAX_CONFIRMATION_RELAY_HOPS && handle >= 0) {
+            runCatching {
+                PolliNetFFI.relayConfirmation(handle, cjson.encodeToString(Confirmation.serializer(), conf))
+            }
+        }
+    }
+
+    private fun postConfirmationNotification(title: String, text: String) {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        val n = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        nm.notify(CONFIRMATION_NOTIFICATION_ID, n)
     }
 
     // ── Discovery (battery-aware: windowed, not continuous) ──────────────────
@@ -496,16 +609,25 @@ class WifiDirectService : Service() {
         ioJobs += scope.launch {
             try {
                 while (isActive && !socket.isClosed) {
-                    val len = input.readInt() // 4-byte big-endian length prefix
-                    if (len <= 0 || len > MAX_FRAME) {
+                    val len = input.readInt() // 4-byte BE length prefix (covers 1B type + payload)
+                    if (len < 1 || len > MAX_FRAME) {
                         log("bad frame length $len → dropping peer")
                         break
                     }
-                    val payload = ByteArray(len)
+                    val type = input.readByte()
+                    val payload = ByteArray(len - 1)
                     input.readFully(payload)
-                    log("rx frame ${payload.size}B")
-                    if (handle >= 0) {
-                        PolliNetFFI.pushInbound(handle, payload)
+                    if (handle < 0) continue
+                    when (type) {
+                        FRAME_TYPE_FRAGMENT -> {
+                            log("rx fragment ${payload.size}B")
+                            PolliNetFFI.pushInbound(handle, payload)
+                        }
+                        FRAME_TYPE_CONFIRMATION -> {
+                            log("rx confirmation ${payload.size}B")
+                            handleWifiConfirmation(payload)
+                        }
+                        else -> log("rx unknown frame type $type (${payload.size}B) — ignored")
                     }
                 }
             } catch (e: Exception) {
@@ -653,3 +775,11 @@ class WifiDirectService : Service() {
 
     private fun log(msg: String) = android.util.Log.d("PolliNet-WifiDirect", msg)
 }
+
+/** Parses the FfiResult returned by [PolliNetFFI.popConfirmation] — `{ ok, data }` where
+ *  data is the [Confirmation] (or null when the queue is empty / on error). */
+@Serializable
+private class PopConfirmationResult(
+    val ok: Boolean = false,
+    val data: Confirmation? = null,
+)
