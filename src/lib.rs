@@ -10,7 +10,7 @@ pub mod storage;
 pub mod submission;
 pub mod util;
 
-#[cfg(feature = "android")]
+#[cfg(any(feature = "android", feature = "ios"))]
 pub mod ffi;
 
 use std::sync::Arc;

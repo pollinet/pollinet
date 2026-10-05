@@ -1,0 +1,827 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.xctest/Contents/MacOS/PolliNetSDKPackageTests",
+      "packagePath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios",
+      "productName" : "PolliNetSDKPackageTests"
+    }
+  ],
+  "copyCommands" : {
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/libpollinet.a" : {
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/libpollinet.a"
+        }
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/libpollinet.a"
+        }
+      ]
+    }
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.PolliNetSDK-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/sources",
+      "importPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BackgroundMaintenance.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BleController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/KeystoreManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/Models.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/MultipeerController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetFFI.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetSDK.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/libpollinet.a"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PolliNetSDK",
+      "moduleOutputPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDK.swiftmodule",
+      "objects" : [
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/BackgroundMaintenance.swift.o",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/BleController.swift.o",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/KeystoreManager.swift.o",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/Models.swift.o",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/MultipeerController.swift.o",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/PolliNetFFI.swift.o",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/PolliNetSDK.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j11",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-I",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+        "-module-cache-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-F",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/include/PolliNetSDK-Swift.h",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "pollinet_sdk_ios"
+      ],
+      "outputFileMapPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/BackgroundMaintenance.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/BleController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/KeystoreManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/Models.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/MultipeerController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/PolliNetFFI.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/PolliNetSDK.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDK.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BackgroundMaintenance.swift",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BleController.swift",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/KeystoreManager.swift",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/Models.swift",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/MultipeerController.swift",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetFFI.swift",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetSDK.swift"
+      ],
+      "tempsPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.PolliNetSDKPackageTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/sources",
+      "importPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDKTests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/libpollinet.a"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PolliNetSDKPackageTests",
+      "moduleOutputPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDKPackageTests.swiftmodule",
+      "objects" : [
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j11",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-I",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+        "-module-cache-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-F",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/include/PolliNetSDKPackageTests-Swift.h",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "pollinet_sdk_ios"
+      ],
+      "outputFileMapPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDKPackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.PolliNetSDKTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/sources",
+      "importPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Tests/PolliNetSDKTests/PolliNetSDKTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDK.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/libpollinet.a"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PolliNetSDKTests",
+      "moduleOutputPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDKTests.swiftmodule",
+      "objects" : [
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/PolliNetSDKTests.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j11",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-I",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+        "-module-cache-path",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-F",
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "pollinet_sdk_ios"
+      ],
+      "outputFileMapPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/PolliNetSDKTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules/PolliNetSDKTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Tests/PolliNetSDKTests/PolliNetSDKTests.swift"
+      ],
+      "tempsPath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "PolliNetSDK" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PolliNetSDK",
+      "-package-name",
+      "pollinet_sdk_ios",
+      "-c",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BackgroundMaintenance.swift",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BleController.swift",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/KeystoreManager.swift",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/Models.swift",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/MultipeerController.swift",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetFFI.swift",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetSDK.swift",
+      "-I",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j11",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-I",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+      "-module-cache-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-F",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/include/PolliNetSDK-Swift.h",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "pollinet_sdk_ios",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "PolliNetSDKPackageTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PolliNetSDKPackageTests",
+      "-package-name",
+      "pollinet_sdk_ios",
+      "-c",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift",
+      "-I",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j11",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-I",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+      "-module-cache-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-F",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/include/PolliNetSDKPackageTests-Swift.h",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "pollinet_sdk_ios",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "PolliNetSDKTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PolliNetSDKTests",
+      "-package-name",
+      "pollinet_sdk_ios",
+      "-c",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Tests/PolliNetSDKTests/PolliNetSDKTests.swift",
+      "-I",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j11",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-I",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework/macos-arm64/Headers",
+      "-module-cache-path",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-F",
+      "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "pollinet_sdk_ios",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "PolliNetSDK" : [
+      "PolliNetRust"
+    ],
+    "PolliNetSDKPackageTests" : [
+      "PolliNetSDKTests",
+      "PolliNetSDK",
+      "PolliNetRust"
+    ],
+    "PolliNetSDKTests" : [
+      "PolliNetSDK",
+      "PolliNetRust"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift" : {
+      "inputs" : [
+
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift"
+        }
+      ]
+    }
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BackgroundMaintenance.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/BleController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/KeystoreManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/Models.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/MultipeerController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetFFI.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Sources/PolliNetSDK/PolliNetSDK.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/sources"
+    },
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/sources"
+    },
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/BackgroundMaintenance.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/BleController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/KeystoreManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/Models.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/MultipeerController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/PolliNetFFI.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/PolliNetSDK.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/PolliNetSDKTests.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.product/Objects.LinkFileList"
+    },
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/Tests/PolliNetSDKTests/PolliNetSDKTests.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKTests.build/sources"
+    },
+    "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

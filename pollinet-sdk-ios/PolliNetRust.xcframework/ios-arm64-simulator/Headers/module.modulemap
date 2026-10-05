@@ -1,0 +1,4 @@
+module PolliNetRust {
+    header "pollinet.h"
+    export *
+}

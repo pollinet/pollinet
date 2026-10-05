@@ -1,0 +1,3 @@
+module PolliNetSDK {
+    header "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDK.build/include/PolliNetSDK-Swift.h"
+}

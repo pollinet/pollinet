@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/master.swiftdeps"
+  },
+  "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.d",
+    "object": "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/.build/arm64-apple-macosx/debug/PolliNetSDKPackageTests.build/runner.dia"
+  }
+}

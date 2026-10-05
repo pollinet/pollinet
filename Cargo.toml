@@ -57,6 +57,10 @@ ed25519-dalek = { version = "2", features = ["serde"] }
 [features]
 default = []
 android = ["jni", "openssl", "android_logger", "reqwest"]
+# openssl (vendored) is required on iOS for the same reason as Android:
+# solana-sdk → solana-secp256r1-program links OpenSSL unconditionally, and the
+# vendored build is the only way to get an iOS-target libcrypto/libssl.
+ios = ["reqwest", "openssl"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Android-specific dependencies are already in main dependencies with jni feature flag

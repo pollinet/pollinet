@@ -1,0 +1,46 @@
+# XcodeGen spec for the PolliNet reference iOS app.
+# Generate the .xcodeproj with:  xcodegen generate   (brew install xcodegen)
+name: PolliNetExample
+options:
+  bundleIdPrefix: xyz.pollinet
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+packages:
+  PolliNetSDK:
+    path: ../../pollinet-sdk-ios
+targets:
+  PolliNetExample:
+    type: application
+    platform: iOS
+    sources:
+      - PolliNetExample
+    dependencies:
+      - package: PolliNetSDK
+    settings:
+      base:
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        # PolliNetRust.xcframework ships an arm64-only simulator slice
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    info:
+      path: PolliNetExample/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSBluetoothAlwaysUsageDescription: >-
+          PolliNet relays Solana transactions through nearby devices over
+          Bluetooth when the sender is offline.
+        NSLocalNetworkUsageDescription: >-
+          PolliNet exchanges transaction data with nearby devices over the
+          local network for faster relay.
+        NSBonjourServices:
+          - _pollinet-mesh._tcp
+        UIBackgroundModes:
+          - bluetooth-central
+          - bluetooth-peripheral
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - xyz.pollinet.retry
+          - xyz.pollinet.cleanup

@@ -1,0 +1,31 @@
+{
+  "object" : {
+    "artifacts" : [
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "pollinet-sdk-ios",
+          "kind" : "root",
+          "location" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios",
+          "name" : "pollinet-sdk-ios"
+        },
+        "path" : "/Users/oghenekparoboreminokanju/Pollinet Project/pollinet/pollinet-sdk-ios/PolliNetRust.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "PolliNetRust"
+      }
+    ],
+    "dependencies" : [
+
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}
